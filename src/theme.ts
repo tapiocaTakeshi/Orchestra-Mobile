@@ -1,4 +1,4 @@
-/** アプリ全体の色とスペーシング。Orchestra IDE のダークテーマに寄せている。 */
+/** アプリ全体の色とスペーシング。Orchestra IDE のダークテーマに、ブランドの Orchestra Red アクセントを合わせている。 */
 
 export const colors = {
 	bg: '#0d1117',
@@ -11,8 +11,9 @@ export const colors = {
 	fgMuted: '#9aa7b4',
 	fgFaint: '#6b7885',
 
-	accent: '#3b82f6',
-	accentPressed: '#2563eb',
+	// Orchestra ブランドロゴのクリムゾンレッド（brand-500 / brand-600）
+	accent: '#e02431',
+	accentPressed: '#c4182a',
 	success: '#10b981',
 	warning: '#f59e0b',
 	danger: '#ef4444',

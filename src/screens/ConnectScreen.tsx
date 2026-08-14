@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, PROTOCOL_VERSION } from '../api/types';
@@ -77,7 +77,7 @@ export const ConnectScreen = () => {
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
 
 					<View style={styles.hero}>
-						<Text style={styles.heroMark}>🎵</Text>
+						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
 						<Title>Orchestra に接続</Title>
 						<Muted>IDE の 設定 → リモートコントロール で「リモートコントロールを有効にする」をオンにしてください。</Muted>
 					</View>
@@ -179,7 +179,8 @@ const styles = StyleSheet.create({
 		paddingTop: spacing.xl,
 	},
 	heroMark: {
-		fontSize: 44,
+		width: 64,
+		height: 64,
 	},
 	status: {
 		color: colors.warning,
