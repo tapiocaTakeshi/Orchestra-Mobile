@@ -7,7 +7,9 @@
 		"scheme": "orchestra",
 		"userInterfaceStyle": "dark",
 		"newArchEnabled": false,
+		"icon": "./assets/icon.png",
 		"splash": {
+			"image": "./assets/splash-icon.png",
 			"resizeMode": "contain",
 			"backgroundColor": "#0d1117"
 		},
@@ -25,11 +27,13 @@
 			"package": "jp.hero.orchestra.mobile",
 			"usesCleartextTraffic": true,
 			"adaptiveIcon": {
-				"backgroundColor": "#0d1117"
+				"foregroundImage": "./assets/adaptive-icon.png",
+				"backgroundColor": "#ffffff"
 			}
 		},
 		"web": {
-			"bundler": "metro"
+			"bundler": "metro",
+			"favicon": "./assets/favicon.png"
 		}
 	}
 }
