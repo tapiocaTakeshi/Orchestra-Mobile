@@ -12,11 +12,14 @@ import { StatusBar } from 'expo-status-bar';
 
 import { Loading } from './src/components/ui';
 import { ConnectScreen } from './src/screens/ConnectScreen';
+import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { RemoteScreen } from './src/screens/RemoteScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { AppProvider, useApp } from './src/state/AppContext';
+import { DivisionAuthProvider, useDivisionAuth } from './src/state/DivisionAuthContext';
 import { colors, fontSize, spacing } from './src/theme';
 
 type TabKey = 'remote' | 'kanban' | 'projects' | 'settings';
@@ -51,9 +54,12 @@ const TabBar = ({ active, onChange, busy }: { active: TabKey; onChange: (t: TabK
 
 const Shell = () => {
 	const { connection, isRestoring, snapshot } = useApp();
+	const { session, isRestoring: isRestoringAuth } = useDivisionAuth();
 	const [tab, setTab] = useState<TabKey>('remote');
+	// ログイン中でも、手動ペアリング画面へ抜けたい場合があるので明示的に切り替える。
+	const [showManualConnect, setShowManualConnect] = useState(false);
 
-	if (isRestoring) {
+	if (isRestoring || isRestoringAuth) {
 		return (
 			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 				<Loading label='起動しています…' />
@@ -64,7 +70,13 @@ const Shell = () => {
 	if (!connection) {
 		return (
 			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-				<ConnectScreen />
+				{showManualConnect ? (
+					<ConnectScreen />
+				) : session ? (
+					<DiscoverScreen onManualConnect={() => setShowManualConnect(true)} />
+				) : (
+					<LoginScreen onSkip={() => setShowManualConnect(true)} />
+				)}
 			</SafeAreaView>
 		);
 	}
@@ -88,9 +100,11 @@ export default function App() {
 	return (
 		<SafeAreaProvider>
 			<StatusBar style='light' />
-			<AppProvider>
-				<Shell />
-			</AppProvider>
+			<DivisionAuthProvider>
+				<AppProvider>
+					<Shell />
+				</AppProvider>
+			</DivisionAuthProvider>
 		</SafeAreaProvider>
 	);
 }
