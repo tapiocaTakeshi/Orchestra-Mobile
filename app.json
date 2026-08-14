@@ -1,0 +1,35 @@
+{
+	"expo": {
+		"name": "Orchestra Mobile",
+		"slug": "orchestra-mobile",
+		"version": "0.1.0",
+		"orientation": "portrait",
+		"scheme": "orchestra",
+		"userInterfaceStyle": "dark",
+		"newArchEnabled": false,
+		"splash": {
+			"resizeMode": "contain",
+			"backgroundColor": "#0d1117"
+		},
+		"assetBundlePatterns": ["**/*"],
+		"ios": {
+			"supportsTablet": true,
+			"bundleIdentifier": "jp.he-ro.orchestra.mobile",
+			"infoPlist": {
+				"NSAppTransportSecurity": {
+					"NSAllowsLocalNetworking": true
+				}
+			}
+		},
+		"android": {
+			"package": "jp.hero.orchestra.mobile",
+			"usesCleartextTraffic": true,
+			"adaptiveIcon": {
+				"backgroundColor": "#0d1117"
+			}
+		},
+		"web": {
+			"bundler": "metro"
+		}
+	}
+}
