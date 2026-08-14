@@ -8,9 +8,9 @@
 import React, { useCallback, useState } from 'react';
 import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { OrchestraApiError, OrchestraClient } from '../api/client';
-import { Connection, PROTOCOL_VERSION } from '../api/types';
+import { Connection } from '../api/types';
 import { Body, Button, Card, Input, Muted, Row, Screen, SectionTitle, Title } from '../components/ui';
+import { verifyAndConnect } from '../lib/connect';
 import { buildConnection, parsePairingInput } from '../lib/pairing';
 import { useApp } from '../state/AppContext';
 import { colors, fontSize, spacing } from '../theme';
@@ -31,26 +31,9 @@ export const ConnectScreen = () => {
 	const tryConnect = useCallback(async (candidate: Connection) => {
 		setBusy(true);
 		setStatus(null);
-		try {
-			const client = new OrchestraClient(candidate);
-
-			const pong = await client.ping();
-			if (!pong.ok) throw new OrchestraApiError(0, 'not_orchestra');
-			if (pong.protocolVersion !== PROTOCOL_VERSION) {
-				setStatus(`注意: IDE のプロトコル v${pong.protocolVersion} とアプリの v${PROTOCOL_VERSION} が違います。動かない機能があるかもしれません。`);
-			}
-
-			// ここでトークンが検証される (間違っていれば 401)。
-			const snapshot = await client.getSnapshot();
-			await connect({
-				...candidate,
-				label: candidate.label || snapshot.ide.workspaceName || candidate.url,
-			});
-		} catch (e) {
-			setStatus(e instanceof OrchestraApiError ? e.userMessage : `接続に失敗しました: ${String(e)}`);
-		} finally {
-			setBusy(false);
-		}
+		const result = await verifyAndConnect(candidate, connect);
+		setStatus(result.ok ? (result.warning ?? null) : result.message);
+		setBusy(false);
 	}, [connect]);
 
 	const onSubmitLink = useCallback(() => {
