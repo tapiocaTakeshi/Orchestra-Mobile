@@ -17,7 +17,7 @@ import { colors, fontSize, spacing } from '../theme';
 
 type Mode = 'link' | 'manual';
 
-export const ConnectScreen = () => {
+export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 	const { connect, connections, forget } = useApp();
 
 	const [mode, setMode] = useState<Mode>('link');
@@ -58,6 +58,8 @@ export const ConnectScreen = () => {
 		<Screen>
 			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+
+					{onBack ? <Button title='戻る' variant='ghost' onPress={onBack} style={{ alignSelf: 'flex-start' }} /> : null}
 
 					<View style={styles.hero}>
 						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
@@ -174,3 +176,4 @@ const styles = StyleSheet.create({
 		marginBottom: spacing.sm,
 	},
 });
+

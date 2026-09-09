@@ -10,7 +10,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { Loading } from './src/components/ui';
+import { Icon, Loading } from './src/components/ui';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
@@ -24,11 +24,11 @@ import { colors, fontSize, spacing } from './src/theme';
 
 type TabKey = 'remote' | 'kanban' | 'projects' | 'settings';
 
-const TABS: { key: TabKey; label: string; icon: string }[] = [
-	{ key: 'remote', label: 'リモート', icon: '🎛' },
-	{ key: 'kanban', label: 'カンバン', icon: '🗂' },
-	{ key: 'projects', label: 'Division', icon: '🎭' },
-	{ key: 'settings', label: '接続', icon: '⚙️' },
+const TABS: { key: TabKey; label: string; icon: React.ComponentProps<typeof Icon>['name'] }[] = [
+	{ key: 'remote', label: 'リモート', icon: 'message-square' },
+	{ key: 'kanban', label: 'カンバン', icon: 'columns' },
+	{ key: 'projects', label: 'Division', icon: 'layers' },
+	{ key: 'settings', label: '接続', icon: 'sliders' },
 ];
 
 const TabBar = ({ active, onChange, busy }: { active: TabKey; onChange: (t: TabKey) => void; busy: boolean }) => (
@@ -41,9 +41,12 @@ const TabBar = ({ active, onChange, busy }: { active: TabKey; onChange: (t: TabK
 					accessibilityRole='tab'
 					accessibilityState={{ selected }}
 					onPress={() => onChange(tab.key)}
-					style={styles.tab}
+					accessibilityLabel={tab.key === 'remote' && busy ? `${tab.label}、エージェント稼働中または承認待ち` : tab.label}
+					style={({ pressed }) => [styles.tab, pressed && { opacity: 0.7 }]}
 				>
-					<Text style={styles.tabIcon}>{tab.icon}</Text>
+					<View style={[styles.tabIcon, selected && styles.tabIconActive]}>
+						<Icon name={tab.icon} size={21} color={selected ? colors.accentText : colors.fgFaint} />
+					</View>
 					<Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{tab.label}</Text>
 					{tab.key === 'remote' && busy ? <View style={styles.busyDot} /> : null}
 				</Pressable>
@@ -71,7 +74,7 @@ const Shell = () => {
 		return (
 			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 				{showManualConnect ? (
-					<ConnectScreen />
+					<ConnectScreen onBack={() => setShowManualConnect(false)} />
 				) : session ? (
 					<DiscoverScreen onManualConnect={() => setShowManualConnect(true)} />
 				) : (
@@ -127,18 +130,18 @@ const styles = StyleSheet.create({
 		flex: 1,
 		alignItems: 'center',
 		paddingVertical: spacing.sm,
-		gap: 2,
+		minHeight: 68,
+		gap: 4,
 	},
-	tabIcon: {
-		fontSize: 18,
-	},
+	tabIcon: { width: 52, height: 30, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+	tabIconActive: { backgroundColor: colors.accentSoft },
 	tabLabel: {
 		color: colors.fgFaint,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
 	tabLabelActive: {
-		color: colors.accent,
+		color: colors.accentText,
 	},
 	busyDot: {
 		position: 'absolute',
@@ -150,3 +153,4 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.running,
 	},
 });
+

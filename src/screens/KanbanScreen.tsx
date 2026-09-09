@@ -387,6 +387,10 @@ export const KanbanScreen = () => {
 			<ScrollView
 				horizontal
 				pagingEnabled={false}
+				snapToInterval={columnWidth + spacing.md}
+				snapToAlignment='start'
+				decelerationRate='fast'
+				disableIntervalMomentum
 				showsHorizontalScrollIndicator={false}
 				contentContainerStyle={styles.boardScroll}
 				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
@@ -407,7 +411,7 @@ export const KanbanScreen = () => {
 
 						<Divider />
 
-						<ScrollView contentContainerStyle={styles.columnScroll} showsVerticalScrollIndicator={false}>
+						<ScrollView nestedScrollEnabled contentContainerStyle={styles.columnScroll} showsVerticalScrollIndicator={false}>
 							{view.tasks.length === 0
 								? <EmptyState title='タスクなし' />
 								: view.tasks.map(task => (
@@ -493,8 +497,8 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: radius.sm,
-		padding: spacing.sm,
-		gap: spacing.xs,
+		padding: spacing.md,
+		gap: spacing.sm,
 	},
 	taskCardRunning: {
 		borderColor: colors.running,
@@ -508,6 +512,7 @@ const styles = StyleSheet.create({
 	taskTitle: {
 		color: colors.fg,
 		fontSize: fontSize.sm,
+		lineHeight: 23,
 		fontWeight: '600',
 	},
 	taskMetaRow: {
@@ -548,7 +553,7 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.xs,
 	},
 	checkBox: {
-		color: colors.accent,
+		color: colors.accentText,
 		fontSize: fontSize.md,
 	},
 	checkText: {
@@ -573,7 +578,7 @@ const styles = StyleSheet.create({
 		paddingTop: spacing.sm,
 	},
 	link: {
-		color: colors.accent,
+		color: colors.accentText,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
@@ -591,3 +596,4 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 	},
 });
+

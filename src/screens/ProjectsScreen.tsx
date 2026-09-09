@@ -32,6 +32,7 @@ import {
 	Muted,
 	Row,
 	Screen,
+	ScreenHeader,
 	SectionTitle,
 	Title,
 } from '../components/ui';
@@ -220,6 +221,7 @@ export const ProjectsScreen = () => {
 
 	return (
 		<Screen>
+			<ScreenHeader title='Division' subtitle='プロジェクトとエージェントの役割を管理' />
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView
@@ -231,7 +233,7 @@ export const ProjectsScreen = () => {
 					<Muted numberOfLines={1}>{division.configPath ?? 'ワークスペースが開かれていません'}</Muted>
 					<Row>
 						<Button
-							title='Supabase から取得'
+							title='クラウドから取得'
 							variant='secondary'
 							loading={syncing}
 							onPress={() => {
@@ -241,7 +243,7 @@ export const ProjectsScreen = () => {
 							style={styles.flex}
 						/>
 						<Button
-							title='Supabase へ送信'
+							title='クラウドへ保存'
 							variant='secondary'
 							loading={syncing}
 							onPress={() => {
@@ -349,8 +351,8 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		padding: spacing.lg,
+		gap: spacing.lg,
 		paddingBottom: spacing.xl,
 	},
 	modalHeader: {
@@ -392,6 +394,8 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	modelChip: {
+		minHeight: 44,
+		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: 999,
@@ -400,14 +404,14 @@ const styles = StyleSheet.create({
 	},
 	modelChipSelected: {
 		borderColor: colors.accent,
-		backgroundColor: '#12203a',
+		backgroundColor: colors.accentSoft,
 	},
 	modelChipText: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs,
 	},
 	link: {
-		color: colors.accent,
+		color: colors.accentText,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
@@ -417,3 +421,4 @@ const styles = StyleSheet.create({
 		textAlign: 'center',
 	},
 });
+
