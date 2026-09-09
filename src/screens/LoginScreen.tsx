@@ -7,11 +7,11 @@
  */
 
 import React, { useCallback, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Body, Button, Card, Input, Muted, Title } from '../components/ui';
+import { Button, Card, ErrorBanner, Input, Muted, SectionTitle } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { spacing } from '../theme';
+import { colors, fontSize, spacing } from '../theme';
 
 export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 	const { login } = useDivisionAuth();
@@ -44,12 +44,17 @@ export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 
 					<View style={styles.hero}>
 						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-						<Title>Orchestra にログイン</Title>
-						<Muted>デスクトップと同じ Division アカウントでサインインすると、接続先を自動的に見つけます。</Muted>
+						<Text style={styles.eyebrow}>ORCHESTRA MOBILE</Text>
+						<Text accessibilityRole='header' style={styles.headline}>創る時間を、{ '\n' }どこからでも。</Text>
+						<Muted style={styles.heroDetail}>エージェントへの指示も、タスクの確認も。{ '\n' }手元から Orchestra につながります。</Muted>
 					</View>
 
 					<Card>
+						<SectionTitle>ログイン</SectionTitle>
+						<Muted>デスクトップと同じ Division アカウントを使います。</Muted>
+						<Muted>メールアドレス</Muted>
 						<Input
+							accessibilityLabel='メールアドレス'
 							value={email}
 							onChangeText={setEmail}
 							placeholder='you@example.com'
@@ -58,7 +63,9 @@ export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 							keyboardType='email-address'
 							autoComplete='email'
 						/>
+						<Muted>パスワード</Muted>
 						<Input
+							accessibilityLabel='パスワード'
 							value={password}
 							onChangeText={setPassword}
 							placeholder='パスワード'
@@ -68,12 +75,10 @@ export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 							autoComplete='password'
 						/>
 						<Button title='ログイン' onPress={() => { void onSubmit(); }} loading={busy} />
-						{status ? <Body>{status}</Body> : null}
+						{status ? <ErrorBanner message={status} /> : null}
 					</Card>
 
-					<Card>
-						<Muted>アカウントの新規作成はデスクトップの Orchestra から行ってください。</Muted>
-					</Card>
+					<Muted style={{ textAlign: 'center' }}>アカウントの作成はデスクトップの Orchestra から。</Muted>
 
 					<Button title='ペアリングリンクで接続する' variant='ghost' onPress={onSkip} />
 
@@ -86,16 +91,26 @@ export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: {
+		flexGrow: 1,
+		justifyContent: 'center',
+		width: '100%',
+		maxWidth: 480,
+		alignSelf: 'center',
 		padding: spacing.lg,
 		gap: spacing.lg,
 	},
 	hero: {
 		alignItems: 'center',
-		gap: spacing.xs,
+		gap: spacing.md,
+		paddingBottom: spacing.lg,
 		paddingTop: spacing.xl,
 	},
+	eyebrow: { color: colors.accentText, fontSize: fontSize.xs, fontWeight: '700', letterSpacing: 2 },
+	headline: { color: colors.fg, fontSize: 32, fontWeight: '700', lineHeight: 44, textAlign: 'center' },
+	heroDetail: { textAlign: 'center', lineHeight: 22 },
 	heroMark: {
 		width: 64,
 		height: 64,
 	},
 });
+

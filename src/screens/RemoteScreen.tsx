@@ -8,7 +8,7 @@
  *   - よく使うエディタ操作 (保存・ウィンドウ再読み込みなど) をワンタップで実行
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	KeyboardAvoidingView,
 	Platform,
@@ -19,6 +19,8 @@ import {
 	Text,
 	View,
 } from 'react-native';
+
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { OrchestraApiError } from '../api/client';
 import { ChatMessage } from '../api/types';
@@ -31,6 +33,7 @@ import {
 	EmptyState,
 	ErrorBanner,
 	Input,
+	Icon,
 	Loading,
 	Muted,
 	Row,
@@ -52,7 +55,7 @@ const QUICK_COMMANDS: { id: string; label: string }[] = [
 
 const roleStyle = (role: ChatMessage['role']) => {
 	switch (role) {
-		case 'user': return { backgroundColor: '#1b2735', align: 'flex-end' as const, label: 'あなた' };
+		case 'user': return { backgroundColor: colors.accentSoft, align: 'flex-end' as const, label: 'あなた' };
 		case 'assistant': return { backgroundColor: colors.bgElevated, align: 'flex-start' as const, label: 'エージェント' };
 		case 'tool': return { backgroundColor: '#161d18', align: 'flex-start' as const, label: 'ツール' };
 		case 'interrupted': return { backgroundColor: '#2a1e14', align: 'flex-start' as const, label: '中断' };
@@ -68,7 +71,7 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
 				<Text style={styles.bubbleRole}>
 					{style.label}{message.toolName ? ` · ${message.toolName}` : ''}
 				</Text>
-				<Text style={styles.bubbleText}>{message.text || '(内容なし)'}</Text>
+				<Text selectable style={styles.bubbleText}>{message.text || '(内容なし)'}</Text>
 			</View>
 		</View>
 	);
@@ -81,10 +84,17 @@ export const RemoteScreen = () => {
 	const [sending, setSending] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [showThreads, setShowThreads] = useState(false);
+	const [showQuickActions, setShowQuickActions] = useState(false);
+	const insets = useSafeAreaInsets();
+	const followMessages = useRef(true);
+	const lastContent = useRef('');
 	const scrollRef = useRef<ScrollView | null>(null);
 
 	const chat = snapshot?.chat ?? null;
 	const ide = snapshot?.ide ?? null;
+	const lastMessage = chat?.messages[chat.messages.length - 1];
+	const contentKey = JSON.stringify([chat?.threadId, chat?.messages.length, lastMessage?.text]);
+	useEffect(() => { followMessages.current = true; }, [chat?.threadId]);
 
 	const runningLabel = useMemo(() => {
 		if (!chat) return '';
@@ -106,11 +116,12 @@ export const RemoteScreen = () => {
 
 	const send = useCallback(async (newThread: boolean) => {
 		const message = draft.trim();
-		if (!message || !client) return;
+		if (!message || !client || sending) return;
 		setSending(true);
 		try {
 			await client.sendPrompt(message, { newThread });
 			setDraft('');
+			followMessages.current = true;
 			setNotice(null);
 			invalidate();
 		} catch (e) {
@@ -118,7 +129,7 @@ export const RemoteScreen = () => {
 		} finally {
 			setSending(false);
 		}
-	}, [draft, client, invalidate]);
+	}, [draft, client, invalidate, sending]);
 
 	if (!snapshot || !client) {
 		return (
@@ -134,75 +145,83 @@ export const RemoteScreen = () => {
 			<KeyboardAvoidingView
 				style={styles.flex}
 				behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-				keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
+				keyboardVerticalOffset={insets.top}
 			>
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
+				<Card style={styles.workspaceCard}>
+					<Row style={styles.spread}>
+						<View style={styles.flex}>
+							<Body numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Body>
+							<Muted>{ide?.appName} {ide?.version}</Muted>
+						</View>
+						<Badge
+							label={runningLabel}
+							color={chat?.awaitingApproval ? colors.warning : chat?.isRunning ? colors.running : colors.fgFaint}
+						/>
+					</Row>
+
+					{chat?.awaitingApproval ? (
+						<Row>
+							<Button title='承認して続行' onPress={() => void act(() => client.approveTool(), '承認しました')} style={styles.flex} />
+							<Button title='却下' variant='secondary' onPress={() => void act(() => client.rejectTool(), '却下しました')} />
+						</Row>
+					) : null}
+
+					{chat?.error ? <Text style={styles.errorText}>{chat.error}</Text> : null}
+				</Card>
+
+				<View style={styles.toolbar}>
+					<Pressable accessibilityRole='button' accessibilityState={{ expanded: showThreads }} onPress={() => { setShowThreads(v => !v); setShowQuickActions(false); scrollRef.current?.scrollTo({ y: 0, animated: false }); }} style={styles.toolbarButton}>
+						<Icon name='message-square' size={17} />
+						<Text style={styles.link}>スレッド ({snapshot.threads.length})</Text>
+						<Icon name={showThreads ? 'chevron-up' : 'chevron-down'} size={16} />
+					</Pressable>
+					<Pressable accessibilityRole='button' accessibilityState={{ expanded: showQuickActions }} onPress={() => { setShowQuickActions(v => !v); setShowThreads(false); scrollRef.current?.scrollTo({ y: 0, animated: false }); }} style={styles.toolbarButton}>
+						<Icon name='zap' size={17} />
+						<Text style={styles.link}>操作</Text>
+						<Icon name={showQuickActions ? 'chevron-up' : 'chevron-down'} size={16} />
+					</Pressable>
+				</View>
 				<ScrollView
 					ref={scrollRef}
 					contentContainerStyle={styles.content}
+					keyboardShouldPersistTaps='handled'
+					keyboardDismissMode='on-drag'
 					refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
-					onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
+					scrollEventThrottle={16}
+					onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
+						followMessages.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
+					}}
+					onContentSizeChange={() => {
+						if (lastContent.current === contentKey) return;
+						lastContent.current = contentKey;
+						if (followMessages.current && !showThreads && !showQuickActions) scrollRef.current?.scrollToEnd({ animated: false });
+					}}
 				>
-					<Card>
-						<Row style={styles.spread}>
-							<View style={styles.flex}>
-								<Body numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Body>
-								<Muted>{ide?.appName} {ide?.version}</Muted>
-							</View>
-							<Badge
-								label={runningLabel}
-								color={chat?.awaitingApproval ? colors.warning : chat?.isRunning ? colors.running : colors.fgFaint}
-							/>
-						</Row>
+					{showThreads ? (
+						<View style={styles.threadList}>
+							{snapshot.threads.length === 0
+								? <Muted>スレッドがありません。</Muted>
+								: snapshot.threads.map(t => (
+									<Pressable
+										key={t.threadId}
+										accessibilityRole='button'
+										onPress={() => void act(() => client.switchThread(t.threadId), 'スレッドを切り替えました')}
+										accessibilityState={{ selected: t.threadId === chat?.threadId }}
+										style={[styles.threadRow, t.threadId === chat?.threadId && styles.threadRowActive]}
+									>
+										<Body numberOfLines={1}>{oneLine(t.title)}</Body>
+										<Muted>{relativeTimeFromIso(t.lastModified)} · {t.messageCount} 件</Muted>
+									</Pressable>
+								))}
+							<Button title='新しいスレッド' variant='secondary' onPress={() => void act(() => client.newThread(), '新しいスレッドを開きました')} />
+							<Divider />
+						</View>
+					) : null}
 
-						{chat?.awaitingApproval ? (
-							<Row>
-								<Button title='承認して続行' onPress={() => void act(() => client.approveTool(), '承認しました')} style={styles.flex} />
-								<Button title='却下' variant='secondary' onPress={() => void act(() => client.rejectTool(), '却下しました')} />
-							</Row>
-						) : null}
-
-						{chat?.error ? <Text style={styles.errorText}>{chat.error}</Text> : null}
-					</Card>
-
-					<Card>
-						<SectionTitle
-							right={
-								<Pressable onPress={() => setShowThreads(v => !v)} accessibilityRole='button'>
-									<Text style={styles.link}>{showThreads ? '閉じる' : `スレッド (${snapshot.threads.length})`}</Text>
-								</Pressable>
-							}
-						>
-							会話
-						</SectionTitle>
-
-						{showThreads ? (
-							<View style={styles.threadList}>
-								{snapshot.threads.length === 0
-									? <Muted>スレッドがありません。</Muted>
-									: snapshot.threads.map(t => (
-										<Pressable
-											key={t.threadId}
-											accessibilityRole='button'
-											onPress={() => void act(() => client.switchThread(t.threadId), 'スレッドを切り替えました')}
-											style={[styles.threadRow, t.threadId === chat?.threadId && styles.threadRowActive]}
-										>
-											<Body numberOfLines={1}>{oneLine(t.title)}</Body>
-											<Muted>{relativeTimeFromIso(t.lastModified)} · {t.messageCount} 件</Muted>
-										</Pressable>
-									))}
-								<Button title='新しいスレッド' variant='secondary' onPress={() => void act(() => client.newThread(), '新しいスレッドを開きました')} />
-								<Divider />
-							</View>
-						) : null}
-
-						{chat && chat.messages.length > 0
-							? chat.messages.map((m, i) => <MessageBubble key={`${i}-${m.role}`} message={m} />)
-							: <EmptyState title='まだ会話がありません' detail='下の入力欄から指示を送ると、この IDE のエージェントが動き出します。' />}
-					</Card>
-
-					<Card>
+					{showQuickActions ? (
+						<Card>
 						<SectionTitle>クイック操作</SectionTitle>
 						<View style={styles.quickGrid}>
 							{QUICK_COMMANDS.map(cmd => (
@@ -216,11 +235,16 @@ export const RemoteScreen = () => {
 							))}
 						</View>
 					</Card>
-
-					{notice ? <Text style={styles.notice}>{notice}</Text> : null}
+					) : null}
+					<View style={styles.conversation}>
+						{chat && chat.messages.length > 0
+							? chat.messages.map((m, i) => <MessageBubble key={`${i}-${m.role}`} message={m} />)
+							: <EmptyState title='まだ会話がありません' detail='下の入力欄から指示を送ると、この IDE のエージェントが動き出します。' />}
+					</View>
 				</ScrollView>
 
 				<View style={styles.composer}>
+					{notice ? <Text accessibilityLiveRegion='polite' style={styles.notice}>{notice}</Text> : null}
 					<Input
 						value={draft}
 						onChangeText={setDraft}
@@ -230,10 +254,11 @@ export const RemoteScreen = () => {
 					/>
 					<Row>
 						<Button
-							title={chat?.isRunning ? '中断' : '新規スレッドで送信'}
+							title={chat?.isRunning ? '中断' : '新規で送信'}
 							variant='secondary'
 							onPress={() => chat?.isRunning ? void act(() => client.abortAgent(), '中断しました') : void send(true)}
-							disabled={!chat?.isRunning && !draft.trim()}
+							disabled={sending || (!chat?.isRunning && !draft.trim())}
+							style={styles.flex}
 						/>
 						<Button
 							title='送信'
@@ -250,11 +275,16 @@ export const RemoteScreen = () => {
 };
 
 const styles = StyleSheet.create({
+	workspaceCard: { marginHorizontal: spacing.lg, marginTop: spacing.lg, borderRadius: radius.md },
+	toolbar: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingHorizontal: spacing.lg },
+	toolbarButton: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 48, paddingHorizontal: spacing.sm },
+	conversation: { gap: spacing.md, flexGrow: 1 },
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		flexGrow: 1,
+		padding: spacing.lg,
+		gap: spacing.lg,
 		paddingBottom: spacing.xl,
 	},
 	bubbleWrap: {
@@ -264,7 +294,7 @@ const styles = StyleSheet.create({
 	bubble: {
 		maxWidth: '92%',
 		borderRadius: radius.md,
-		padding: spacing.sm + 2,
+		padding: spacing.md,
 		borderWidth: 1,
 		borderColor: colors.border,
 		gap: 2,
@@ -277,7 +307,7 @@ const styles = StyleSheet.create({
 	bubbleText: {
 		color: colors.fg,
 		fontSize: fontSize.sm,
-		lineHeight: 19,
+		lineHeight: 24,
 	},
 	threadList: {
 		gap: spacing.xs,
@@ -291,7 +321,7 @@ const styles = StyleSheet.create({
 	},
 	threadRowActive: {
 		borderColor: colors.accent,
-		backgroundColor: '#12203a',
+		backgroundColor: colors.accentSoft,
 	},
 	quickGrid: {
 		gap: spacing.xs,
@@ -307,10 +337,11 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bg,
 	},
 	composerInput: {
+		minHeight: 56,
 		maxHeight: 120,
 	},
 	link: {
-		color: colors.accent,
+		color: colors.accentText,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
@@ -324,3 +355,4 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 	},
 });
+

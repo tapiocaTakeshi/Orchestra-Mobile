@@ -21,6 +21,7 @@ import {
 	Muted,
 	Row,
 	Screen,
+	ScreenHeader,
 	SectionTitle,
 } from '../components/ui';
 import { relativeTime } from '../lib/format';
@@ -67,6 +68,7 @@ export const SettingsScreen = () => {
 
 	return (
 		<Screen>
+			<ScreenHeader title='接続とワークスペース' subtitle='デバイスとファイルを手元から管理' />
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView
@@ -160,11 +162,12 @@ export const SettingsScreen = () => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		padding: spacing.lg,
+		gap: spacing.lg,
 		paddingBottom: spacing.xl,
 	},
 	fileRow: {
+		minHeight: 48,
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.sm,
@@ -189,3 +192,4 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 	},
 });
+

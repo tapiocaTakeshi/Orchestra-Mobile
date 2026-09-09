@@ -1,6 +1,7 @@
 /** 画面全体で使い回す小さな UI 部品。ここ以外でスタイルを書かないようにする。 */
 
-import React from 'react';
+import React, { useState } from 'react';
+import Feather from '@expo/vector-icons/Feather';
 import {
 	ActivityIndicator,
 	Pressable,
@@ -13,6 +14,17 @@ import {
 } from 'react-native';
 
 import { colors, fontSize, radius, spacing } from '../theme';
+
+export const Icon = ({ name, color = colors.fgMuted, size = 20 }: { name: React.ComponentProps<typeof Feather>['name']; color?: string; size?: number }) => (
+	<Feather name={name} color={color} size={size} accessible={false} />
+);
+
+export const ScreenHeader = ({ title, subtitle }: { title: string; subtitle?: string }) => (
+	<View style={styles.screenHeader}>
+		<Text accessibilityRole='header' style={styles.title}>{title}</Text>
+		{subtitle ? <Muted>{subtitle}</Muted> : null}
+	</View>
+);
 
 export const Screen = ({ children, style }: { children: React.ReactNode; style?: ViewStyle }) => (
 	<View style={[styles.screen, style]}>{children}</View>
@@ -34,7 +46,7 @@ export const Muted = ({ children, style, numberOfLines }: { children: React.Reac
 );
 
 export const Title = ({ children }: { children: React.ReactNode }) => (
-	<Text style={styles.title}>{children}</Text>
+	<Text accessibilityRole='header' style={styles.title}>{children}</Text>
 );
 
 export const Body = ({ children, numberOfLines }: { children: React.ReactNode; numberOfLines?: number }) => (
@@ -55,7 +67,9 @@ export const Button = ({ title, onPress, variant = 'primary', disabled, loading,
 	return (
 		<Pressable
 			accessibilityRole='button'
-			accessibilityState={{ disabled: !!isDisabled }}
+			accessibilityLabel={title}
+			disabled={!!isDisabled}
+			accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
 			onPress={isDisabled ? undefined : onPress}
 			style={({ pressed }) => [
 				styles.button,
@@ -64,6 +78,7 @@ export const Button = ({ title, onPress, variant = 'primary', disabled, loading,
 				variant === 'danger' && styles.buttonDanger,
 				variant === 'ghost' && styles.buttonGhost,
 				pressed && !isDisabled && styles.buttonPressed,
+				pressed && !isDisabled && variant === 'primary' && { backgroundColor: colors.accentPressed },
 				isDisabled && styles.buttonDisabled,
 				style,
 			]}
@@ -75,13 +90,20 @@ export const Button = ({ title, onPress, variant = 'primary', disabled, loading,
 	);
 };
 
-export const Input = (props: TextInputProps) => (
-	<TextInput
-		placeholderTextColor={colors.fgFaint}
-		{...props}
-		style={[styles.input, props.multiline && styles.inputMultiline, props.style]}
-	/>
-);
+export const Input = (props: TextInputProps) => {
+	const [focused, setFocused] = useState(false);
+	return (
+		<TextInput
+			placeholderTextColor={colors.fgFaint}
+			selectionColor={colors.accentText}
+			accessibilityLabel={props.accessibilityLabel ?? props.placeholder}
+			{...props}
+			onFocus={event => { setFocused(true); props.onFocus?.(event); }}
+			onBlur={event => { setFocused(false); props.onBlur?.(event); }}
+			style={[styles.input, props.multiline && styles.inputMultiline, props.style, focused && styles.inputFocused]}
+		/>
+	);
+};
 
 export const Badge = ({ label, color = colors.fgFaint }: { label: string; color?: string }) => (
 	<View style={[styles.badge, { borderColor: color }]}>
@@ -101,13 +123,14 @@ export const Divider = () => <View style={styles.divider} />;
 
 export const EmptyState = ({ title, detail }: { title: string; detail?: string }) => (
 	<View style={styles.empty}>
+		<View style={styles.emptyIcon}><Icon name='inbox' size={24} /></View>
 		<Text style={styles.emptyTitle}>{title}</Text>
 		{detail ? <Text style={styles.emptyDetail}>{detail}</Text> : null}
 	</View>
 );
 
 export const ErrorBanner = ({ message, onRetry }: { message: string; onRetry?: () => void }) => (
-	<View style={styles.errorBanner}>
+	<View accessibilityRole='alert' accessibilityLiveRegion='polite' style={styles.errorBanner}>
 		<Text style={styles.errorText}>{message}</Text>
 		{onRetry ? <Button title='再試行' variant='ghost' onPress={onRetry} /> : null}
 	</View>
@@ -148,6 +171,9 @@ export const Loading = ({ label }: { label?: string }) => (
 );
 
 const styles = StyleSheet.create({
+	screenHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.md, gap: spacing.xs },
+	inputFocused: { borderColor: colors.accentText },
+	emptyIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: colors.bgElevated, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
 	screen: {
 		flex: 1,
 		backgroundColor: colors.bg,
@@ -157,8 +183,8 @@ const styles = StyleSheet.create({
 		borderColor: colors.border,
 		borderWidth: 1,
 		borderRadius: radius.md,
-		padding: spacing.md,
-		gap: spacing.sm,
+		padding: spacing.lg,
+		gap: spacing.md,
 	},
 	sectionTitleRow: {
 		flexDirection: 'row',
@@ -179,11 +205,12 @@ const styles = StyleSheet.create({
 	body: {
 		color: colors.fg,
 		fontSize: fontSize.sm,
-		lineHeight: 19,
+		lineHeight: 23,
 	},
 	muted: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs,
+		lineHeight: 19,
 	},
 	button: {
 		paddingHorizontal: spacing.md,
@@ -193,7 +220,8 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: 'transparent',
-		minHeight: 40,
+		minHeight: 48,
+		flexShrink: 1,
 	},
 	buttonPrimary: { backgroundColor: colors.accent },
 	buttonSecondary: { backgroundColor: colors.bgElevated, borderColor: colors.borderStrong },
@@ -205,8 +233,11 @@ const styles = StyleSheet.create({
 		color: '#ffffff',
 		fontSize: fontSize.sm,
 		fontWeight: '600',
+		textAlign: 'center',
 	},
 	input: {
+		minHeight: 48,
+		minWidth: 0,
 		backgroundColor: colors.bgInput,
 		borderColor: colors.border,
 		borderWidth: 1,
@@ -224,7 +255,9 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderRadius: 999,
 		paddingHorizontal: spacing.sm,
-		paddingVertical: 2,
+		paddingVertical: 4,
+		alignSelf: 'flex-start',
+		flexShrink: 1,
 	},
 	badgeText: {
 		fontSize: fontSize.xs,
@@ -256,8 +289,9 @@ const styles = StyleSheet.create({
 		fontWeight: '600',
 	},
 	emptyDetail: {
-		color: colors.fgFaint,
-		fontSize: fontSize.xs,
+		color: colors.fgMuted,
+		fontSize: fontSize.sm,
+		lineHeight: 23,
 		textAlign: 'center',
 	},
 	errorBanner: {
@@ -284,6 +318,8 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	chip: {
+		minHeight: 44,
+		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: 999,
@@ -305,3 +341,4 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 	},
 });
+
