@@ -42,12 +42,13 @@ const TabBar = ({ active, onChange, busy }: { active: TabKey; onChange: (t: TabK
 					accessibilityState={{ selected }}
 					onPress={() => onChange(tab.key)}
 					accessibilityLabel={tab.key === 'remote' && busy ? `${tab.label}、エージェント稼働中または承認待ち` : tab.label}
-					style={({ pressed }) => [styles.tab, pressed && { opacity: 0.7 }]}
+					style={({ pressed }) => [styles.tab, selected && styles.tabActive, pressed && { opacity: 0.7 }]}
 				>
 					<View style={[styles.tabIcon, selected && styles.tabIconActive]}>
 						<Icon name={tab.icon} size={21} color={selected ? colors.accentText : colors.fgFaint} />
 					</View>
 					<Text style={[styles.tabLabel, selected && styles.tabLabelActive]}>{tab.label}</Text>
+					{selected ? <View style={styles.tabIndicator} /> : null}
 					{tab.key === 'remote' && busy ? <View style={styles.busyDot} /> : null}
 				</Pressable>
 			);
@@ -125,16 +126,20 @@ const styles = StyleSheet.create({
 		borderTopWidth: 1,
 		borderTopColor: colors.border,
 		backgroundColor: colors.bgElevated,
+		paddingHorizontal: spacing.xs,
 	},
 	tab: {
 		flex: 1,
 		alignItems: 'center',
 		paddingVertical: spacing.sm,
-		minHeight: 68,
-		gap: 4,
+		minHeight: 62,
+		gap: 3,
+		borderTopWidth: 2,
+		borderTopColor: 'transparent',
 	},
-	tabIcon: { width: 52, height: 30, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-	tabIconActive: { backgroundColor: colors.accentSoft },
+	tabActive: { borderTopColor: colors.accent },
+	tabIcon: { width: 48, height: 26, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+	tabIconActive: { backgroundColor: 'transparent' },
 	tabLabel: {
 		color: colors.fgFaint,
 		fontSize: fontSize.xs,
@@ -143,6 +148,7 @@ const styles = StyleSheet.create({
 	tabLabelActive: {
 		color: colors.accentText,
 	},
+	tabIndicator: { position: 'absolute', top: -2, width: 28, height: 2, borderRadius: 2, backgroundColor: colors.accent },
 	busyDot: {
 		position: 'absolute',
 		top: spacing.xs,
