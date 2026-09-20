@@ -24,7 +24,6 @@
 		"@react-native-async-storage/async-storage": "1.23.1",
 		"@supabase/supabase-js": "^2.45.4",
 		"expo": "~51.0.39",
-		"expo-notifications": "~0.28.19",
 		"expo-secure-store": "~13.0.2",
 		"expo-status-bar": "~1.12.1",
 		"react": "18.2.0",
@@ -45,9 +44,6 @@
 		"testEnvironment": "node",
 		"testMatch": [
 			"<rootDir>/src/**/__tests__/**/*.test.ts"
-		],
-		"moduleNameMapper": {
-			"^expo-notifications$": "<rootDir>/src/__mocks__/expo-notifications.ts"
-		}
+		]
 	}
 }

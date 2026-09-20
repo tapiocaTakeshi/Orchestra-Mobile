@@ -2,16 +2,13 @@
  * Division アカウントのログイン状態を保持する Provider。
  *
  * ログイン中は RemoteSession テーブルへの新規 INSERT を購読し、新しいデバイスが
- * 追加されたらローカル通知を出す (Phase 1: アプリがフォアグラウンド/起動中のみ。
- * アプリを完全に閉じていても届く本物の push 通知は将来のフェーズで扱う)。
+ * 追加されたら DiscoverScreen に「新着」バッジを出す。
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import * as Notifications from 'expo-notifications';
 
 import {
 	DivisionSession,
-	RemoteSessionRow,
 	restoreDivisionSession,
 	signInWithDivision,
 	signOutDivision,
@@ -35,33 +32,6 @@ export const useDivisionAuth = (): DivisionAuthContextValue => {
 	const ctx = useContext(DivisionAuthContext);
 	if (!ctx) throw new Error('useDivisionAuth must be used inside <DivisionAuthProvider>');
 	return ctx;
-};
-
-Notifications.setNotificationHandler({
-	handleNotification: async () => ({
-		shouldShowAlert: true,
-		shouldPlaySound: false,
-		shouldSetBadge: false,
-	}),
-});
-
-const notifyNewSession = async (row: RemoteSessionRow): Promise<void> => {
-	try {
-		const { status } = await Notifications.getPermissionsAsync();
-		if (status !== 'granted') {
-			const req = await Notifications.requestPermissionsAsync();
-			if (req.status !== 'granted') return;
-		}
-		await Notifications.scheduleNotificationAsync({
-			content: {
-				title: 'Orchestra',
-				body: `新しいデバイスが接続可能になりました: ${row.deviceLabel || row.lanUrl}`,
-			},
-			trigger: null, // 即時発火
-		});
-	} catch {
-		// 通知が出せなくても致命的ではない
-	}
 };
 
 export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -99,7 +69,6 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 
 		unsubscribeRef.current = subscribeToNewRemoteSessions(session, (row) => {
 			setNewSessionIds(ids => (ids.includes(row.id) ? ids : [...ids, row.id]));
-			void notifyNewSession(row);
 		});
 		return () => { unsubscribeRef.current?.(); unsubscribeRef.current = null; };
 	}, [session]);

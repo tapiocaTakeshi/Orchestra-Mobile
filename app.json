@@ -39,12 +39,6 @@
 			"favicon": "./assets/favicon.png",
 			"output": "static"
 		},
-		"plugins": [
-			[
-				"expo-notifications",
-				{}
-			]
-		],
 		"extra": {
 			"appVariant": "production",
 			"eas": {
