@@ -116,6 +116,42 @@ npm run eas:check           # 解決された projectId を表示。未設定な
 `eas build` に進むと、警告のあと対話的に別プロジェクトを作ってしまうことがあるためです。
 ID が UUID の形をしていないときは、`app.config.ts` もビルド前にエラーで止めます。
 
+### EAS ビルドの設定 (iOS 証明書)
+
+プロジェクト ID が揃っていても、iOS ビルドを非対話 (CI やスクリプトからの `eas build`) で
+叩くと次のエラーで落ちることがあります。
+
+```
+Distribution Certificate is not validated for non-interactive builds.
+Failed to set up credentials.
+Credentials are not set up. Run this command again in interactive mode.
+```
+
+EAS のリモート証明書はサーバー側に保存されますが、**Apple 側の検証は誰かが一度対話モードで
+通す必要があり**、これはリポジトリの設定では代替できません。ローカルの対話端末から一度だけ
+実行してください。
+
+```bash
+npx eas-cli login
+npm run eas:credentials      # -> iOS を選び、Distribution Certificate を確認/作成
+```
+
+対話中に既存の証明書を選ぶか、無ければ新規作成 (Apple Developer アカウントへのログインが
+必要) すれば、以後は非対話の `eas build --non-interactive` でもその証明書が使えるように
+なります。CI で実行する場合は、この検証を済ませたアカウントの `EXPO_TOKEN` を使ってください。
+
+証明書を検証したあとも、`production` プロファイルが自動で TestFlight に提出しようとする
+場合は次のエラーで止まることがあります。
+
+```
+Set ascAppId in the submit profile (eas.json) or re-run this command in interactive mode.
+```
+
+`ascAppId` は App Store Connect が発行する数値 ID (App Store Connect →
+アプリ情報 → Apple ID) で、秘密情報ではないのでリポジトリにそのまま書けます。
+`eas.json` の `submit.production.ios.ascAppId` に設定済みです。別アプリに使い回す場合は
+この値を書き換えてください。
+
 ### ディレクトリ構成
 
 ```
