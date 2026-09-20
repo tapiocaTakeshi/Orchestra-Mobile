@@ -171,7 +171,7 @@ export const Loading = ({ label }: { label?: string }) => (
 );
 
 const styles = StyleSheet.create({
-	screenHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.md, gap: spacing.xs },
+	screenHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.md, gap: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border },
 	inputFocused: { borderColor: colors.accentText },
 	emptyIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: colors.bgElevated, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
 	screen: {
@@ -182,9 +182,14 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgElevated,
 		borderColor: colors.border,
 		borderWidth: 1,
-		borderRadius: radius.md,
+		borderRadius: radius.lg,
 		padding: spacing.lg,
 		gap: spacing.md,
+		shadowColor: '#000000',
+		shadowOpacity: 0.22,
+		shadowRadius: 12,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 3,
 	},
 	sectionTitleRow: {
 		flexDirection: 'row',
@@ -201,6 +206,7 @@ const styles = StyleSheet.create({
 		color: colors.fg,
 		fontSize: fontSize.lg,
 		fontWeight: '700',
+		letterSpacing: -0.3,
 	},
 	body: {
 		color: colors.fg,
@@ -224,9 +230,9 @@ const styles = StyleSheet.create({
 		flexShrink: 1,
 	},
 	buttonPrimary: { backgroundColor: colors.accent },
-	buttonSecondary: { backgroundColor: colors.bgElevated, borderColor: colors.borderStrong },
+	buttonSecondary: { backgroundColor: colors.bgInput, borderColor: colors.borderStrong },
 	buttonDanger: { backgroundColor: colors.danger },
-	buttonGhost: { backgroundColor: 'transparent' },
+	buttonGhost: { backgroundColor: 'transparent', borderColor: 'transparent' },
 	buttonPressed: { opacity: 0.75 },
 	buttonDisabled: { opacity: 0.4 },
 	buttonText: {
@@ -241,7 +247,7 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgInput,
 		borderColor: colors.border,
 		borderWidth: 1,
-		borderRadius: radius.sm,
+		borderRadius: radius.md,
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.sm + 2,
 		color: colors.fg,
@@ -253,7 +259,7 @@ const styles = StyleSheet.create({
 	},
 	badge: {
 		borderWidth: 1,
-		borderRadius: 999,
+		borderRadius: radius.lg,
 		paddingHorizontal: spacing.sm,
 		paddingVertical: 4,
 		alignSelf: 'flex-start',
@@ -322,7 +328,7 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
-		borderRadius: 999,
+		borderRadius: radius.lg,
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.xs + 2,
 	},
