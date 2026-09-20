@@ -24,20 +24,28 @@ const ensurePermission = async (): Promise<boolean> => {
 
 export const notifyRemoteConnected = async (label: string): Promise<void> => {
 	if (!await ensurePermission()) return;
-	await Notifications.scheduleNotificationAsync({
-		content: {
-			title: 'Orchestra Mobile',
-			body: `\${label || 'Orchestra'} に接続しました。`,
-			data: { kind: 'remote-connected' },
-		},
-		trigger: null,
-	});
+	try {
+		await Notifications.scheduleNotificationAsync({
+			content: {
+				title: 'Orchestra Mobile',
+				body: `${label || 'Orchestra'} に接続しました。`,
+				data: { kind: 'remote-connected' },
+			},
+			trigger: null,
+		});
+	} catch {
+		// A notification failure must not break the remote connection.
+	}
 };
 
 export const notifyRemoteEvent = async (title: string, body: string, kind: string): Promise<void> => {
 	if (!await ensurePermission()) return;
-	await Notifications.scheduleNotificationAsync({
-		content: { title, body, data: { kind } },
-		trigger: null,
-	});
+	try {
+		await Notifications.scheduleNotificationAsync({
+			content: { title, body, data: { kind } },
+			trigger: null,
+		});
+	} catch {
+		// A notification failure must not break the remote session.
+	}
 };
