@@ -46,7 +46,11 @@
 			]
 		],
 		"extra": {
-			"appVariant": "production"
-		}
+			"appVariant": "production",
+			"eas": {
+				"projectId": "9fcf7fc6-456d-44d3-b873-1a7a006b9bc4"
+			}
+		},
+		"owner": "he-ro1112"
 	}
 }
