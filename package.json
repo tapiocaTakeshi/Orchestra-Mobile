@@ -42,6 +42,9 @@
 		"testEnvironment": "node",
 		"testMatch": [
 			"<rootDir>/src/**/__tests__/**/*.test.ts"
-		]
+		],
+		"moduleNameMapper": {
+			"^expo-notifications$": "<rootDir>/src/__mocks__/expo-notifications.ts"
+		}
 	}
 }

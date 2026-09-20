@@ -19,7 +19,14 @@ import { colors, spacing } from '../theme';
 
 const POLL_INTERVAL_MS = 5_000;
 
-export const DiscoverScreen = ({ onManualConnect }: { onManualConnect: () => void }) => {
+export const DiscoverScreen = ({
+	onManualConnect,
+	onBrowseOffline,
+}: {
+	onManualConnect: () => void;
+	/** PC に繋がずに、ソーシャル / チューニングだけ見たいときの導線。 */
+	onBrowseOffline?: () => void;
+}) => {
 	const { connect } = useApp();
 	const { session, logout, newSessionIds, dismissNewSession } = useDivisionAuth();
 
@@ -49,13 +56,14 @@ export const DiscoverScreen = ({ onManualConnect }: { onManualConnect: () => voi
 	}, [refresh]);
 
 	const onConnect = useCallback(async (row: RemoteSessionRow) => {
+		if (!session) return;
 		setConnectingId(row.id);
 		setStatus(null);
 		const result = await verifyAndConnect({ url: row.lanUrl, token: row.token, label: row.deviceLabel }, connect, session.accessToken);
 		if (!result.ok) setStatus(result.message);
 		else dismissNewSession(row.id);
 		setConnectingId(null);
-	}, [connect, dismissNewSession]);
+	}, [connect, dismissNewSession, session]);
 
 	if (!session) return null;
 
@@ -111,6 +119,9 @@ export const DiscoverScreen = ({ onManualConnect }: { onManualConnect: () => voi
 				<Row>
 					<Button title='手入力・ペアリングリンクで接続' variant='ghost' onPress={onManualConnect} style={styles.flex} />
 				</Row>
+				{onBrowseOffline ? (
+					<Button title='接続せずにソーシャル / チューニングを見る' variant='ghost' onPress={onBrowseOffline} />
+				) : null}
 				<Button title='ログアウト' variant='ghost' onPress={() => { void logout(); }} />
 			</ScrollView>
 		</Screen>
