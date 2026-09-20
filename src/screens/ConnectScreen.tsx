@@ -13,12 +13,14 @@ import { Body, Button, Card, Input, Muted, Row, Screen, SectionTitle, Title } fr
 import { verifyAndConnect } from '../lib/connect';
 import { buildConnection, parsePairingInput } from '../lib/pairing';
 import { useApp } from '../state/AppContext';
+import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, spacing } from '../theme';
 
 type Mode = 'link' | 'manual';
 
 export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 	const { connect, connections, forget } = useApp();
+	const { session } = useDivisionAuth();
 
 	const [mode, setMode] = useState<Mode>('link');
 	const [link, setLink] = useState('');
@@ -29,12 +31,16 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 
 	/** 繋ぐ前に /api/ping と /api/state を叩いて、相手と権限を確かめる。 */
 	const tryConnect = useCallback(async (candidate: Connection) => {
+		if (!session) {
+			setStatus('リモートコントロールには、デスクトップと同じ Division アカウントでのログインが必要です。');
+			return;
+		}
 		setBusy(true);
 		setStatus(null);
-		const result = await verifyAndConnect(candidate, connect);
+		const result = await verifyAndConnect(candidate, connect, session.accessToken);
 		setStatus(result.ok ? (result.warning ?? null) : result.message);
 		setBusy(false);
-	}, [connect]);
+	}, [connect, session]);
 
 	const onSubmitLink = useCallback(() => {
 		const parsed = parsePairingInput(link);

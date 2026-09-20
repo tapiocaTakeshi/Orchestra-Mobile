@@ -79,7 +79,7 @@ const Shell = () => {
 				) : session ? (
 					<DiscoverScreen onManualConnect={() => setShowManualConnect(true)} />
 				) : (
-					<LoginScreen onSkip={() => setShowManualConnect(true)} />
+					<LoginScreen />
 				)}
 			</SafeAreaView>
 		);
