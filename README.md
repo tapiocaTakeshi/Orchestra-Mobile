@@ -140,6 +140,18 @@ npm run eas:credentials      # -> iOS を選び、Distribution Certificate を�
 必要) すれば、以後は非対話の `eas build --non-interactive` でもその証明書が使えるように
 なります。CI で実行する場合は、この検証を済ませたアカウントの `EXPO_TOKEN` を使ってください。
 
+証明書を検証したあとも、`production` プロファイルが自動で TestFlight に提出しようとする
+場合は次のエラーで止まることがあります。
+
+```
+Set ascAppId in the submit profile (eas.json) or re-run this command in interactive mode.
+```
+
+`ascAppId` は App Store Connect が発行する数値 ID (App Store Connect →
+アプリ情報 → Apple ID) で、秘密情報ではないのでリポジトリにそのまま書けます。
+`eas.json` の `submit.production.ios.ascAppId` に設定済みです。別アプリに使い回す場合は
+この値を書き換えてください。
+
 ### ディレクトリ構成
 
 ```
