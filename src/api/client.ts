@@ -67,6 +67,7 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 
 export class OrchestraClient {
 	private _connection: Connection;
+	private _divisionAccessToken: string | null = null;
 
 	constructor(connection: Connection) {
 		this._connection = { ...connection, url: normalizeBaseUrl(connection.url) };
@@ -76,6 +77,11 @@ export class OrchestraClient {
 
 	setConnection(connection: Connection): void {
 		this._connection = { ...connection, url: normalizeBaseUrl(connection.url) };
+	}
+
+	/** Division のログインセッションは SecureStore 側で管理し、接続情報には保存しない。 */
+	setDivisionAccessToken(accessToken: string | null | undefined): void {
+		this._divisionAccessToken = accessToken || null;
 	}
 
 	// -----------------------------------------------------------------------
@@ -106,6 +112,7 @@ export class OrchestraClient {
 				headers: {
 					'Content-Type': 'application/json',
 					'X-Orchestra-Token': this._connection.token,
+					...(this._divisionAccessToken ? { 'X-Division-Access-Token': this._divisionAccessToken } : {}),
 				},
 				body: body === undefined ? undefined : JSON.stringify(body),
 				signal: controller.signal,

@@ -16,9 +16,11 @@ export type ConnectOutcome =
 export const verifyAndConnect = async (
 	candidate: Connection,
 	connect: (c: Connection) => Promise<void>,
+	divisionAccessToken?: string | null,
 ): Promise<ConnectOutcome> => {
 	try {
 		const client = new OrchestraClient(candidate);
+		client.setDivisionAccessToken(divisionAccessToken);
 
 		const pong = await client.ping();
 		if (!pong.ok) throw new OrchestraApiError(0, 'not_orchestra');

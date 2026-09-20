@@ -19,6 +19,7 @@ import { AppState, AppStateStatus } from 'react-native';
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, Snapshot } from '../api/types';
+import { useDivisionAuth } from './DivisionAuthContext';
 import {
 	loadActiveUrl,
 	loadConnections,
@@ -72,6 +73,7 @@ export const useClient = (): OrchestraClient => {
 };
 
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
+	const { session } = useDivisionAuth();
 	const [connections, setConnections] = useState<Connection[]>([]);
 	const [connection, setConnection] = useState<Connection | null>(null);
 	const [isRestoring, setIsRestoring] = useState(true);
@@ -93,8 +95,9 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		}
 		if (clientRef.current) clientRef.current.setConnection(connection);
 		else clientRef.current = new OrchestraClient(connection);
+		clientRef.current.setDivisionAccessToken(session?.accessToken);
 		return clientRef.current;
-	}, [connection]);
+	}, [connection, session?.accessToken]);
 
 	// --- 保存済みの接続を復元 ---
 	useEffect(() => {

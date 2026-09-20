@@ -51,7 +51,7 @@ export const DiscoverScreen = ({ onManualConnect }: { onManualConnect: () => voi
 	const onConnect = useCallback(async (row: RemoteSessionRow) => {
 		setConnectingId(row.id);
 		setStatus(null);
-		const result = await verifyAndConnect({ url: row.lanUrl, token: row.token, label: row.deviceLabel }, connect);
+		const result = await verifyAndConnect({ url: row.lanUrl, token: row.token, label: row.deviceLabel }, connect, session.accessToken);
 		if (!result.ok) setStatus(result.message);
 		else dismissNewSession(row.id);
 		setConnectingId(null);
