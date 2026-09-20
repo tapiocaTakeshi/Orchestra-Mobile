@@ -65,19 +65,35 @@ const PROVIDER_TITLES: Record<string, string> = {
 export const providerTitle = (provider: string): string =>
 	PROVIDER_TITLES[provider] ?? provider;
 
-/** Division のロール表示名。IDE 側の AgentRole に対応する。 */
+/**
+ * Division のロール表示名。IDE 側の AgentRole と、Division API 側で使われている
+ * 綴り (reviewer / file-searcher など) の両方を引けるようにしてある。
+ */
 const ROLE_TITLES: Record<string, string> = {
 	leader: 'リーダー',
 	coder: 'コーダー',
 	planner: 'プランナー',
 	search: '検索',
+	searcher: '検索',
 	research: 'リサーチ',
+	researcher: 'リサーチ',
 	design: 'デザイン',
+	designer: 'デザイン',
 	writing: 'ライティング',
+	writer: 'ライティング',
 	ideaman: 'アイデア',
 	filesearch: 'ファイル検索',
+	'file-searcher': 'ファイル検索',
 	image: '画像',
+	imager: '画像',
 	review: 'レビュー',
+	reviewer: 'レビュー',
+	generate: '生成',
 };
 
 export const roleTitle = (role: string): string => ROLE_TITLES[role] ?? role;
+
+/** 役割を追加するときの候補。表示名が分かっているものだけ出す。 */
+export const KNOWN_ROLES: string[] = [
+	'leader', 'planner', 'coder', 'review', 'search', 'research', 'design', 'writing', 'ideaman', 'filesearch', 'image',
+];

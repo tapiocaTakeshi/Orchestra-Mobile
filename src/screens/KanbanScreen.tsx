@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 
 import { OrchestraApiError } from '../api/client';
-import { KANBAN_PRIORITIES, KanbanPriority, KanbanTask } from '../api/types';
+import { KANBAN_PRIORITIES, KanbanColumn, KanbanColumnRole, KanbanPriority, KanbanTask } from '../api/types';
 import {
 	Badge,
 	Body,
@@ -32,6 +32,7 @@ import {
 	Divider,
 	EmptyState,
 	ErrorBanner,
+	Icon,
 	Input,
 	Loading,
 	Muted,
@@ -42,6 +43,7 @@ import {
 } from '../components/ui';
 import { oneLine, relativeTime } from '../lib/format';
 import {
+	allLabels,
 	boardSummary,
 	buildColumnViews,
 	checklistProgress,
@@ -51,9 +53,18 @@ import {
 	moveTargets,
 	priorityColor,
 	priorityLabel,
+	todayString,
 } from '../lib/kanban';
 import { useApp } from '../state/AppContext';
 import { colors, fontSize, radius, spacing } from '../theme';
+
+const COLUMN_ROLES: { value: KanbanColumnRole; label: string }[] = [
+	{ value: 'none', label: '指定なし' },
+	{ value: 'todo', label: 'To Do' },
+	{ value: 'in-progress', label: '進行中' },
+	{ value: 'done', label: '完了' },
+	{ value: 'error', label: 'エラー' },
+];
 
 const runStatusColor = (status: string): string => {
 	switch (status) {
@@ -108,6 +119,10 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 	const [checklistText, setChecklistText] = useState('');
 	const [notice, setNotice] = useState<string | null>(null);
 	const [titleDraft, setTitleDraft] = useState<string | null>(null);
+	const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
+	const [labelsDraft, setLabelsDraft] = useState<string | null>(null);
+	const [dueDraft, setDueDraft] = useState<string | null>(null);
+	const [assigneeDraft, setAssigneeDraft] = useState<string | null>(null);
 
 	const board = snapshot?.kanban.board;
 	const task = board?.tasks.find(t => t.id === taskId) ?? null;
@@ -168,7 +183,18 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 							/>
 
 							<SectionTitle>説明</SectionTitle>
-							<Body>{task.description || '(説明なし)'}</Body>
+							<Input
+								value={descriptionDraft ?? task.description}
+								onChangeText={setDescriptionDraft}
+								onBlur={() => {
+									if (descriptionDraft !== null && descriptionDraft !== task.description) {
+										void act(() => client.updateTask(task.id, { description: descriptionDraft }), '保存しました');
+									}
+									setDescriptionDraft(null);
+								}}
+								placeholder='このタスクで何をするか'
+								multiline
+							/>
 
 							<SectionTitle>優先度</SectionTitle>
 							<ChipGroup<KanbanPriority>
@@ -186,7 +212,70 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 								/>
 							</Row>
 
-							<Muted>期限: {task.dueDate || '未設定'} · 担当: {task.assignee || '未割り当て'}</Muted>
+							<SectionTitle>ラベル</SectionTitle>
+							<Input
+								value={labelsDraft ?? task.labels.join(', ')}
+								onChangeText={setLabelsDraft}
+								onBlur={() => {
+									if (labelsDraft !== null) {
+										const labels = labelsDraft.split(',').map(l => l.trim()).filter(Boolean);
+										if (labels.join('\u0000') !== task.labels.join('\u0000')) {
+											void act(() => client.updateTask(task.id, { labels }), '保存しました');
+										}
+									}
+									setLabelsDraft(null);
+								}}
+								placeholder='カンマ区切り (例: bug, ui)'
+								autoCapitalize='none'
+							/>
+
+							<Row>
+								<View style={styles.flex}>
+									<Muted>期限 (YYYY-MM-DD)</Muted>
+									<Input
+										value={dueDraft ?? task.dueDate}
+										onChangeText={setDueDraft}
+										onBlur={() => {
+											if (dueDraft !== null && dueDraft.trim() !== task.dueDate) {
+												void act(() => client.updateTask(task.id, { dueDate: dueDraft.trim() }), '保存しました');
+											}
+											setDueDraft(null);
+										}}
+										placeholder='未設定'
+										autoCapitalize='none'
+									/>
+								</View>
+								<View style={styles.flex}>
+									<Muted>担当</Muted>
+									<Input
+										value={assigneeDraft ?? task.assignee}
+										onChangeText={setAssigneeDraft}
+										onBlur={() => {
+											if (assigneeDraft !== null && assigneeDraft.trim() !== task.assignee) {
+												void act(() => client.updateTask(task.id, { assignee: assigneeDraft.trim() }), '保存しました');
+											}
+											setAssigneeDraft(null);
+										}}
+										placeholder='未割り当て'
+										autoCapitalize='none'
+									/>
+								</View>
+							</Row>
+							<Row>
+								<Button
+									title='今日を期限にする'
+									variant='ghost'
+									onPress={() => void act(() => client.updateTask(task.id, { dueDate: todayString() }), '期限を今日にしました')}
+								/>
+								{task.dueDate ? (
+									<Button
+										title='期限を外す'
+										variant='ghost'
+										onPress={() => void act(() => client.updateTask(task.id, { dueDate: '' }), '期限を外しました')}
+									/>
+								) : null}
+							</Row>
+
 							<Muted>更新: {relativeTime(task.updatedAt)}</Muted>
 						</Card>
 
@@ -301,6 +390,191 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 	);
 };
 
+const ColumnRow = ({
+	column,
+	taskCount,
+	otherColumns,
+	onPatch,
+	onDelete,
+}: {
+	column: KanbanColumn;
+	taskCount: number;
+	otherColumns: KanbanColumn[];
+	onPatch: (patch: Partial<KanbanColumn>) => void;
+	onDelete: (moveTasksTo?: string) => void;
+}) => {
+	const [title, setTitle] = useState<string | null>(null);
+	const [wip, setWip] = useState<string | null>(null);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+
+	return (
+		<View style={styles.columnEditor}>
+			<Row>
+				<View style={[styles.columnDot, { backgroundColor: column.color || colors.fgFaint }]} />
+				<Input
+					value={title ?? column.title}
+					onChangeText={setTitle}
+					onBlur={() => {
+						if (title !== null && title.trim() && title !== column.title) onPatch({ title: title.trim() });
+						setTitle(null);
+					}}
+					placeholder='カラム名'
+					style={styles.flex}
+				/>
+			</Row>
+
+			<Muted>役割 (自動実行がどの列を見るかを決めます)</Muted>
+			<ChipGroup<KanbanColumnRole>
+				options={COLUMN_ROLES}
+				value={column.role}
+				onChange={role => onPatch({ role })}
+			/>
+
+			<Row>
+				<View style={styles.flex}>
+					<Muted>WIP 上限 (0 で無制限)</Muted>
+					<Input
+						value={wip ?? String(column.wipLimit)}
+						onChangeText={setWip}
+						onBlur={() => {
+							if (wip !== null) {
+								const next = Number(wip);
+								if (Number.isInteger(next) && next >= 0 && next !== column.wipLimit) onPatch({ wipLimit: next });
+							}
+							setWip(null);
+						}}
+						keyboardType='numeric'
+						accessibilityLabel={`${column.title} の WIP 上限`}
+					/>
+				</View>
+				<View style={styles.flex}>
+					<Muted>タスク数</Muted>
+					<Body>{taskCount} 件</Body>
+				</View>
+			</Row>
+
+			{confirmDelete ? (
+				<View style={styles.deleteBox}>
+					<Muted>
+						{taskCount > 0
+							? 'このカラムのタスクをどこへ移しますか？'
+							: 'このカラムを削除します。'}
+					</Muted>
+					{taskCount > 0 ? (
+						<View style={styles.chipWrap}>
+							{otherColumns.map(c => (
+								<Button key={c.id} title={`${c.title} へ移す`} variant='secondary' onPress={() => onDelete(c.id)} />
+							))}
+						</View>
+					) : (
+						<Button title='削除する' variant='danger' onPress={() => onDelete()} />
+					)}
+					<Button title='やめる' variant='ghost' onPress={() => setConfirmDelete(false)} />
+				</View>
+			) : (
+				<Button title='このカラムを削除' variant='ghost' onPress={() => setConfirmDelete(true)} />
+			)}
+		</View>
+	);
+};
+
+/** ボードそのものの設定 (タイトル・カラム構成)。カードではなく列を触りたいとき用。 */
+const BoardSettings = ({ onClose }: { onClose: () => void }) => {
+	const { snapshot, client, invalidate } = useApp();
+	const [notice, setNotice] = useState<string | null>(null);
+	const [boardTitle, setBoardTitle] = useState<string | null>(null);
+	const [newColumn, setNewColumn] = useState('');
+
+	const board = snapshot?.kanban.board;
+	const runtime = snapshot?.kanban.runtime;
+
+	const act = useCallback(async (fn: () => Promise<unknown>, note?: string) => {
+		setNotice(null);
+		try {
+			await fn();
+			if (note) setNotice(note);
+			invalidate();
+		} catch (e) {
+			setNotice(e instanceof OrchestraApiError ? e.userMessage : String(e));
+		}
+	}, [invalidate]);
+
+	if (!board || !client) return null;
+
+	return (
+		<Modal animationType='slide' presentationStyle='pageSheet' onRequestClose={onClose}>
+			<Screen>
+				<View style={styles.modalHeader}>
+					<Title>ボードの設定</Title>
+					<Pressable accessibilityRole='button' onPress={onClose}><Text style={styles.link}>閉じる</Text></Pressable>
+				</View>
+
+				<ScrollView contentContainerStyle={styles.content}>
+					<Card>
+						<SectionTitle>ボード名</SectionTitle>
+						<Input
+							value={boardTitle ?? board.title}
+							onChangeText={setBoardTitle}
+							onBlur={() => {
+								if (boardTitle !== null && boardTitle.trim() && boardTitle !== board.title) {
+									void act(() => client.setBoardTitle(boardTitle.trim()), '保存しました');
+								}
+								setBoardTitle(null);
+							}}
+							placeholder='ボード名'
+						/>
+						<Muted>
+							{runtime?.source.kind === 'file' ? `保存先: ${runtime.source.path}` : '保存先: IDE 内のストレージ'}
+						</Muted>
+						<Button
+							title='ファイルから読み直す'
+							variant='secondary'
+							onPress={() => void act(() => client.reloadKanban(), '読み直しました')}
+						/>
+					</Card>
+
+					<Card>
+						<SectionTitle right={<Badge label={`${board.columns.length} 列`} />}>カラム</SectionTitle>
+						{board.columns.map(column => (
+							<ColumnRow
+								key={column.id}
+								column={column}
+								taskCount={board.tasks.filter(t => t.columnId === column.id).length}
+								otherColumns={board.columns.filter(c => c.id !== column.id)}
+								onPatch={patch => void act(() => client.updateColumn(column.id, patch), '保存しました')}
+								onDelete={moveTasksTo => void act(() => client.deleteColumn(column.id, moveTasksTo), '削除しました')}
+							/>
+						))}
+					</Card>
+
+					<Card>
+						<SectionTitle>カラムを追加</SectionTitle>
+						<Row>
+							<Input
+								value={newColumn}
+								onChangeText={setNewColumn}
+								placeholder='カラム名'
+								style={styles.flex}
+							/>
+							<Button
+								title='追加'
+								disabled={!newColumn.trim()}
+								onPress={() => {
+									const title = newColumn.trim();
+									setNewColumn('');
+									void act(() => client.addColumn(title), '追加しました');
+								}}
+							/>
+						</Row>
+					</Card>
+
+					{notice ? <Text style={styles.notice}>{notice}</Text> : null}
+				</ScrollView>
+			</Screen>
+		</Modal>
+	);
+};
+
 export const KanbanScreen = () => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 	const { width } = useWindowDimensions();
@@ -309,15 +583,33 @@ export const KanbanScreen = () => {
 	const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 	const [newTaskTitle, setNewTaskTitle] = useState('');
 	const [notice, setNotice] = useState<string | null>(null);
+	const [showFilters, setShowFilters] = useState(false);
+	const [showSettings, setShowSettings] = useState(false);
+	const [priorityFilter, setPriorityFilter] = useState<KanbanPriority[]>([]);
+	const [labelFilter, setLabelFilter] = useState<string[]>([]);
+	const [overdueOnly, setOverdueOnly] = useState(false);
 
 	const board = snapshot?.kanban.board ?? null;
 	const runtime = snapshot?.kanban.runtime ?? null;
 
 	const views = useMemo(
-		() => (board ? buildColumnViews(board, { text: filterText }) : []),
-		[board, filterText],
+		() => (board
+			? buildColumnViews(board, {
+				text: filterText,
+				priorities: priorityFilter.length ? priorityFilter : undefined,
+				labels: labelFilter.length ? labelFilter : undefined,
+				overdueOnly,
+			})
+			: []),
+		[board, filterText, priorityFilter, labelFilter, overdueOnly],
 	);
 	const summary = useMemo(() => (board ? boardSummary(board) : null), [board]);
+	const labels = useMemo(() => (board ? allLabels(board) : []), [board]);
+	const filterCount = priorityFilter.length + labelFilter.length + (overdueOnly ? 1 : 0);
+
+	/** チップは複数選べるようにしたいので、ChipGroup ではなく自前で ON/OFF する。 */
+	const toggleIn = <T,>(list: T[], value: T): T[] =>
+		list.includes(value) ? list.filter(v => v !== value) : [...list, value];
 
 	const act = useCallback(async (fn: () => Promise<unknown>, note?: string) => {
 		setNotice(null);
@@ -355,14 +647,24 @@ export const KanbanScreen = () => {
 							{summary.total} 件 · 完了 {summary.done} · 停滞 {summary.blocked} · 期限超過 {summary.overdue}
 						</Muted>
 					</View>
-					<View style={styles.autoRun}>
-						<Muted>自動実行</Muted>
-						<Switch
-							value={runtime.autoRunEnabled}
-							onValueChange={v => void act(() => client.setAutoRun(v), v ? '自動実行を開始しました' : '自動実行を停止しました')}
-							trackColor={{ true: colors.accent, false: colors.border }}
-						/>
-					</View>
+					<Row>
+						<View style={styles.autoRun}>
+							<Muted>自動実行</Muted>
+							<Switch
+								value={runtime.autoRunEnabled}
+								onValueChange={v => void act(() => client.setAutoRun(v), v ? '自動実行を開始しました' : '自動実行を停止しました')}
+								trackColor={{ true: colors.accent, false: colors.border }}
+							/>
+						</View>
+						<Pressable
+							accessibilityRole='button'
+							accessibilityLabel='ボードの設定'
+							onPress={() => setShowSettings(true)}
+							style={styles.headerIcon}
+						>
+							<Icon name='settings' size={20} />
+						</Pressable>
+					</Row>
 				</Row>
 
 				<Row>
@@ -373,10 +675,75 @@ export const KanbanScreen = () => {
 						style={styles.flex}
 						autoCapitalize='none'
 					/>
+					<Button
+						title={filterCount > 0 ? `絞り込み ${filterCount}` : '絞り込み'}
+						variant={filterCount > 0 ? 'primary' : 'secondary'}
+						onPress={() => setShowFilters(v => !v)}
+					/>
 					{runtime.isRunning
 						? <Button title='中断' variant='danger' onPress={() => void act(() => client.cancelKanbanRun(), '中断しました')} />
 						: <Button title='今すぐ実行' variant='secondary' onPress={() => void act(() => client.runPendingTasks(), '実行を開始しました')} />}
 				</Row>
+
+				{showFilters ? (
+					<View style={styles.filterPanel}>
+						<Muted>優先度</Muted>
+						<View style={styles.chipWrap}>
+							{KANBAN_PRIORITIES.map(p => {
+								const selected = priorityFilter.includes(p);
+								return (
+									<Pressable
+										key={p}
+										accessibilityRole='button'
+										accessibilityState={{ selected }}
+										onPress={() => setPriorityFilter(prev => toggleIn(prev, p))}
+										style={[styles.filterChip, selected && { borderColor: priorityColor(p), backgroundColor: `${priorityColor(p)}22` }]}
+									>
+										<Text style={[styles.filterChipText, selected && { color: colors.fg }]}>{priorityLabel(p)}</Text>
+									</Pressable>
+								);
+							})}
+						</View>
+
+						{labels.length > 0 ? (
+							<>
+								<Muted>ラベル</Muted>
+								<View style={styles.chipWrap}>
+									{labels.map(label => {
+										const selected = labelFilter.includes(label);
+										return (
+											<Pressable
+												key={label}
+												accessibilityRole='button'
+												accessibilityState={{ selected }}
+												onPress={() => setLabelFilter(prev => toggleIn(prev, label))}
+												style={[styles.filterChip, selected && styles.filterChipOn]}
+											>
+												<Text style={[styles.filterChipText, selected && { color: colors.fg }]}>{label}</Text>
+											</Pressable>
+										);
+									})}
+								</View>
+							</>
+						) : null}
+
+						<Row style={styles.spread}>
+							<Muted>期限超過だけ表示</Muted>
+							<Switch
+								value={overdueOnly}
+								onValueChange={setOverdueOnly}
+								trackColor={{ true: colors.accent, false: colors.border }}
+							/>
+						</Row>
+						{filterCount > 0 ? (
+							<Button
+								title='絞り込みを解除'
+								variant='ghost'
+								onPress={() => { setPriorityFilter([]); setLabelFilter([]); setOverdueOnly(false); }}
+							/>
+						) : null}
+					</View>
+				) : null}
 
 				{runtime.awaitingApproval ? (
 					<Text style={styles.warnText}>エージェントがツールの承認待ちです。「リモート」タブから承認してください。</Text>
@@ -449,6 +816,7 @@ export const KanbanScreen = () => {
 			</View>
 
 			{openTaskId ? <TaskDetail taskId={openTaskId} onClose={() => setOpenTaskId(null)} /> : null}
+			{showSettings ? <BoardSettings onClose={() => setShowSettings(false)} /> : null}
 		</Screen>
 	);
 };
@@ -594,6 +962,51 @@ const styles = StyleSheet.create({
 	errorText: {
 		color: colors.danger,
 		fontSize: fontSize.xs,
+	},
+	headerIcon: {
+		width: 44,
+		height: 44,
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	filterPanel: {
+		gap: spacing.xs,
+		borderWidth: 1,
+		borderColor: colors.border,
+		borderRadius: radius.sm,
+		padding: spacing.md,
+		backgroundColor: colors.bgElevated,
+	},
+	filterChip: {
+		minHeight: 40,
+		justifyContent: 'center',
+		borderWidth: 1,
+		borderColor: colors.border,
+		borderRadius: radius.lg,
+		paddingHorizontal: spacing.md,
+	},
+	filterChipOn: {
+		borderColor: colors.accent,
+		backgroundColor: colors.accentSoft,
+	},
+	filterChipText: {
+		color: colors.fgMuted,
+		fontSize: fontSize.xs,
+		fontWeight: '600',
+	},
+	columnEditor: {
+		gap: spacing.xs,
+		borderWidth: 1,
+		borderColor: colors.border,
+		borderRadius: radius.sm,
+		padding: spacing.md,
+	},
+	deleteBox: {
+		gap: spacing.xs,
+		borderWidth: 1,
+		borderColor: colors.danger,
+		borderRadius: radius.sm,
+		padding: spacing.sm,
 	},
 });
 

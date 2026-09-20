@@ -7,13 +7,19 @@
 | タブ | できること |
 | --- | --- |
 | 🎛 リモート | エージェントへの指示・中断、ツール実行の承認/却下、スレッド切替、エディタ操作のワンタップ実行 |
-| 🗂 カンバン | `.orchestra/kanban.json` のボード閲覧・編集、カード移動、チェックリスト、コメント、タスクのエージェント実行、自動実行の ON/OFF |
-| 🎭 Division | `.division/projects.json` のプロジェクト管理、役割ごとのモデル割り当て、有効化、Supabase 同期 |
+| 🗂 カンバン | `.orchestra/kanban.json` のボード閲覧・編集、カード移動、カラムの追加/編集/削除、絞り込み、チェックリスト、コメント、タスクのエージェント実行、自動実行の ON/OFF |
+| 🎭 Division | `.division/projects.json` のプロジェクト管理、役割の追加/削除とモデル割り当て、有効化、Supabase 同期、割り当ての共有 |
+| 🤝 共有 | 役割とモデルの組み合わせを公開・閲覧・いいね・自分のプロジェクトへ取り込み |
+| 📊 コスト | ルーティング方針 (性能/上限コスト/出力トークン) の調整、Jev による見積もり、実測の利用履歴と集計、クレジット残高・自動チャージ・プランの管理 |
 | ⚙️ 接続 | 接続先の切替・解除、ワークスペースのファイルを IDE で開く |
 
 IDE との通信 (カンバン閲覧・エージェント操作など) は **同じ LAN 内の IDE と直接** 行い、外部サーバーは
 経由しません。一方、**アカウントでのログイン / 接続先の自動検出だけは Supabase (Division) を経由**します
 (接続先候補の一覧を得るためだけで、操作そのものは引き続き LAN 直結です)。
+
+**共有タブとコストタブは Division (Supabase / Division API) 直結**なので、PC に接続していなくても使えます。
+ログイン後の「接続先を選ぶ」画面から *接続せずにソーシャル / チューニングを見る* を選ぶと、
+未接続のままこの 2 つのタブを開けます (プロジェクトへの取り込みと共有だけは接続が要ります)。
 
 ---
 
@@ -81,14 +87,20 @@ src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
 src/lib/pairing.ts             ペアリングリンク / 手入力の解釈
 src/lib/connect.ts             接続候補の検証 (ping→state→connect) の共通ロジック
-src/lib/divisionAuthConfig.ts  Division (Supabase) の公開設定
+src/lib/divisionAuthConfig.ts  Division (Supabase / Division API) の公開設定
 src/lib/divisionAuth.ts        Division ログイン・RemoteSession 一覧取得・購読
 src/lib/divisionSession.ts     Division セッションの secure-store 永続化
+src/lib/divisionSocial.ts      共有投稿 (AssignmentPost) の取得・公開・いいね・取り込み
+src/lib/divisionBilling.ts     プラン・クレジット残高・自動チャージ・Stripe 導線
+src/lib/divisionRouting.ts     Division API のルーティング見積もり / 利用履歴
+src/lib/social.ts              投稿の変換・絞り込み・要約 (UI 非依存)
+src/lib/tuning.ts              方針の検証とコスト集計 (UI 非依存)
 src/lib/kanban.ts              ボードの絞り込み・集計 (UI 非依存)
 src/lib/format.ts              相対時刻や表示名の整形
 src/state/AppContext.tsx       接続情報の保持と /api/state のポーリング
 src/state/DivisionAuthContext.tsx  Division ログイン状態 + 新規セッション通知
 src/state/storage.ts           AsyncStorage への保存 (接続情報のみ)
+src/state/tuningStorage.ts     ルーティング方針の保存
 src/components/ui.tsx          共通の UI 部品
 src/screens/                   各画面 (ログイン / 検出 / 手動接続 / 各タブ)
 ```
@@ -105,6 +117,44 @@ state を差し替えないため、無駄な再描画は起きません。ア�
 `src/api` と `src/lib` は React Native に依存しない書き方をしてあり、jest (node 環境) で
 そのままテストできます。`src/api/__tests__/integration.test.ts` は Node の HTTP サーバで
 IDE の API を模して、URL の組み立てからレスポンスの取り出しまでを通しで確認します。
+
+---
+
+---
+
+## 共有 (ソーシャル)
+
+Division の「どの役割をどのモデルに振るか」という組み合わせを、他のユーザーと共有できます。
+
+- **閲覧**: 新着 / 人気 / 取り込み数で並べ替え、タイトルやモデル名で検索
+- **いいね**: タップで ON/OFF (いいね数は DB 側のトリガで集計するので、数を直接書き換えることはできません)
+- **取り込み**: 既存プロジェクトに重ねる / 置き換える / 新しいプロジェクトとして作る の 3 通り
+- **公開**: 共有タブ、または Division タブの各プロジェクトの「この割り当てを共有する」から
+
+共有されるのは **役割とモデルの組み合わせ・タイトル・説明・表示名だけ** です。API キー、コード、
+ワークスペースの中身は一切含まれません。投稿を編集・削除できるのは投稿者本人だけです
+(Supabase の RLS で強制)。
+
+> テーブル (`AssignmentPost` / `AssignmentPostLike`) のポリシーは Orchestra リポジトリの
+> `supabase/migrations/20260920000000_assignment_post_social.sql` にあります。未適用の環境では
+> 共有タブが「マイグレーションを適用してください」と表示します。
+
+## チューニング (コスト・管理)
+
+チャットでどのモデルが選ばれるかを、コストと性能の条件で調整します。
+
+| セクション | 内容 |
+| --- | --- |
+| 方針 | 最低性能スコア (0〜100) / 1 回のモデル呼び出しの上限 (USD) / 割り当て可能な最大出力トークン。検証の条件は IDE 側の `AutoRouting.tsx` と同じ |
+| 見積もり | 依頼文を Jev に判定させ、リーダー・コーダー・レビューの想定コストを表示 (**判定のたびに料金が発生します**)。入力トークン数は依頼文から自動で概算 |
+| 利用履歴 | モデル実行ごとの実測トークン数と料金。日別 / 役割別 / モデル別の集計、見積もりとの差、リクエスト単位の合計 |
+| 管理 | クレジット残高 (購入分・プラン付与分)、これまでの利用額、自動チャージ設定、プラン変更と支払い (Stripe) |
+
+方針はこの端末に保存され、見積もりの条件として使われます。IDE 側の
+「設定 → Division」の `divisionAutoRouting` とは別管理です。
+
+見積もりと利用履歴は `profiles.division_api_key` を Bearer トークンとして Division API
+(`/api/routing/quote`, `/api/routing/history`) に投げます。キーが未発行のときはその旨を表示します。
 
 ---
 
@@ -125,3 +175,7 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
   Android Keystore) に保存され、接続情報 (`Connection`) とは別に管理されます。
 - 自動検出はアカウントに紐づく `RemoteSession` テーブルの行 (LAN アドレスとトークン) を読むだけで、
   操作そのものは引き続き LAN 直結です。ログアウトすると、その端末の行は IDE 側で削除されます。
+- 共有タブに出す投稿はログイン済みユーザー全員が読めます。公開するのは役割とモデルの組み合わせだけで、
+  API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
+- Division API キーは端末に保存せず、必要なときだけ `profiles` から読み出して使います。
+- 支払いはアプリ内では行わず、Stripe の画面をブラウザで開きます。

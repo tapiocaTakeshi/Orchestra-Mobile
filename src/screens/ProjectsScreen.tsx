@@ -27,6 +27,7 @@ import {
 	Divider,
 	EmptyState,
 	ErrorBanner,
+	Icon,
 	Input,
 	Loading,
 	Muted,
@@ -36,8 +37,11 @@ import {
 	SectionTitle,
 	Title,
 } from '../components/ui';
-import { providerTitle, roleTitle } from '../lib/format';
+import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
+import { publishAssignmentPost } from '../lib/divisionSocial';
+import { defaultPostTitle, toPostAssignments } from '../lib/social';
 import { useApp } from '../state/AppContext';
+import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 /** 役割ごとの編集行。モデル一覧はプロバイダーごとに畳んで出す。 */
@@ -45,10 +49,12 @@ const AgentRow = ({
 	assignment,
 	providers,
 	onChange,
+	onRemove,
 }: {
 	assignment: RoleAssignment;
 	providers: ProviderModels[];
 	onChange: (next: RoleAssignment) => void;
+	onRemove: () => void;
 }) => {
 	const [open, setOpen] = useState(false);
 
@@ -60,6 +66,14 @@ const AgentRow = ({
 					<Muted>{providerTitle(assignment.provider)} · {assignment.model || '(未設定)'}</Muted>
 				</View>
 				<Text style={styles.link}>{open ? '閉じる' : '変更'}</Text>
+				<Pressable
+					accessibilityRole='button'
+					accessibilityLabel={`${roleTitle(assignment.role)} の役割を外す`}
+					onPress={onRemove}
+					style={styles.removeButton}
+				>
+					<Icon name='x' size={18} color={colors.fgFaint} />
+				</Pressable>
 			</Pressable>
 
 			{open ? (
@@ -110,6 +124,7 @@ const ProjectEditor = ({
 }) => {
 	const [name, setName] = useState(project.name);
 	const [agents, setAgents] = useState<RoleAssignment[]>(project.agents);
+	const [customRole, setCustomRole] = useState('');
 	const [saving, setSaving] = useState(false);
 
 	useEffect(() => {
@@ -146,7 +161,7 @@ const ProjectEditor = ({
 					</Card>
 
 					<Card>
-						<SectionTitle>役割ごとのモデル</SectionTitle>
+						<SectionTitle right={<Badge label={`${agents.length} 役割`} />}>役割ごとのモデル</SectionTitle>
 						<Muted>ここで割り当てたモデルが、Division API のオーケストレーションで使われます。</Muted>
 						{agents.length === 0 ? <Muted>役割が登録されていません。</Muted> : null}
 						{agents.map((a, idx) => (
@@ -155,12 +170,136 @@ const ProjectEditor = ({
 								assignment={a}
 								providers={providers}
 								onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
+								onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
 							/>
 						))}
 					</Card>
 
+					<Card>
+						<SectionTitle>役割を追加</SectionTitle>
+						<Muted>まだ割り当てていない役割を足せます。モデルは追加したあとに選んでください。</Muted>
+						<View style={styles.roleChips}>
+							{KNOWN_ROLES.filter(role => !agents.some(a => a.role === role)).map(role => (
+								<Pressable
+									key={role}
+									accessibilityRole='button'
+									onPress={() => setAgents(prev => [...prev, {
+										role,
+										provider: providers[0]?.provider ?? '',
+										model: providers[0]?.models[0] ?? '',
+									}])}
+									style={styles.roleChip}
+								>
+									<Text style={styles.roleChipText}>+ {roleTitle(role)}</Text>
+								</Pressable>
+							))}
+						</View>
+						<Row>
+							<Input
+								value={customRole}
+								onChangeText={setCustomRole}
+								placeholder='その他の役割 (英小文字)'
+								autoCapitalize='none'
+								style={styles.flex}
+							/>
+							<Button
+								title='追加'
+								variant='secondary'
+								disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
+								onPress={() => {
+									const role = customRole.trim();
+									setCustomRole('');
+									setAgents(prev => [...prev, {
+										role,
+										provider: providers[0]?.provider ?? '',
+										model: providers[0]?.models[0] ?? '',
+									}]);
+								}}
+							/>
+						</Row>
+					</Card>
+
 					<Button title='保存' onPress={() => void save()} loading={saving} />
 					<Button title='このプロジェクトを削除' variant='danger' onPress={() => void onDelete()} />
+				</ScrollView>
+			</Screen>
+		</Modal>
+	);
+};
+
+/** プロジェクトの役割割り当てをソーシャルに公開する。共有タブからも同じことができる。 */
+const ShareSheet = ({
+	project,
+	onClose,
+	onDone,
+}: {
+	project: DivisionProject;
+	onClose: () => void;
+	onDone: (message: string) => void;
+}) => {
+	const { session } = useDivisionAuth();
+	const [title, setTitle] = useState(defaultPostTitle(project));
+	const [description, setDescription] = useState('');
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	const run = useCallback(async () => {
+		if (!session) return;
+		setBusy(true);
+		setError(null);
+		try {
+			await publishAssignmentPost(session, {
+				title,
+				description,
+				assignments: toPostAssignments(project.agents),
+				sourceProjectId: project.projectId,
+			});
+			onDone('共有しました。共有タブから確認できます。');
+			onClose();
+		} catch (e) {
+			setError(e instanceof Error ? e.message : String(e));
+		} finally {
+			setBusy(false);
+		}
+	}, [session, project, title, description, onClose, onDone]);
+
+	return (
+		<Modal animationType='slide' presentationStyle='pageSheet' onRequestClose={onClose}>
+			<Screen>
+				<View style={styles.modalHeader}>
+					<Title>役割の割り当てを共有</Title>
+					<Pressable accessibilityRole='button' onPress={onClose}><Text style={styles.link}>閉じる</Text></Pressable>
+				</View>
+				<ScrollView contentContainerStyle={styles.content}>
+					{!session ? (
+						<Card><Muted>共有するには Division アカウントでログインしてください。</Muted></Card>
+					) : (
+						<>
+							<Card>
+								<Muted>タイトル</Muted>
+								<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
+								<Muted>説明 (任意)</Muted>
+								<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
+							</Card>
+							<Card>
+								<SectionTitle>共有される内容</SectionTitle>
+								{project.agents.map((a, i) => (
+									<Row key={`${a.role}-${i}`} style={styles.spread}>
+										<Muted>{roleTitle(a.role)}</Muted>
+										<Body>{a.model || '(未設定)'}</Body>
+									</Row>
+								))}
+								<Muted>API キーやコードは共有されません。</Muted>
+							</Card>
+							{error ? <ErrorBanner message={error} /> : null}
+							<Button
+								title='共有する'
+								loading={busy}
+								disabled={!title.trim() || project.agents.length === 0}
+								onPress={() => void run()}
+							/>
+						</>
+					)}
 				</ScrollView>
 			</Screen>
 		</Modal>
@@ -172,6 +311,7 @@ export const ProjectsScreen = () => {
 
 	const [providers, setProviders] = useState<ProviderModels[]>([]);
 	const [editingId, setEditingId] = useState<string | null>(null);
+	const [sharingId, setSharingId] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [adding, setAdding] = useState(false);
 	const [newName, setNewName] = useState('');
@@ -182,6 +322,10 @@ export const ProjectsScreen = () => {
 	const editing = useMemo(
 		() => division?.projects.find(p => p.projectId === editingId) ?? null,
 		[division, editingId],
+	);
+	const sharing = useMemo(
+		() => division?.projects.find(p => p.projectId === sharingId) ?? null,
+		[division, sharingId],
 	);
 
 	// モデル一覧は滅多に変わらないので、接続ごとに 1 回だけ取る。
@@ -293,6 +437,12 @@ export const ProjectsScreen = () => {
 							/>
 							<Button title='編集' variant='secondary' onPress={() => setEditingId(project.projectId)} />
 						</Row>
+						<Button
+							title='この割り当てを共有する'
+							variant='ghost'
+							disabled={project.agents.length === 0}
+							onPress={() => setSharingId(project.projectId)}
+						/>
 					</Card>
 				))}
 
@@ -343,6 +493,14 @@ export const ProjectsScreen = () => {
 					}}
 				/>
 			) : null}
+
+			{sharing ? (
+				<ShareSheet
+					project={sharing}
+					onClose={() => setSharingId(null)}
+					onDone={setNotice}
+				/>
+			) : null}
 		</Screen>
 	);
 };
@@ -350,6 +508,30 @@ export const ProjectsScreen = () => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
+	removeButton: {
+		width: 40,
+		height: 40,
+		alignItems: 'center',
+		justifyContent: 'center',
+	},
+	roleChips: {
+		flexDirection: 'row',
+		flexWrap: 'wrap',
+		gap: spacing.xs,
+	},
+	roleChip: {
+		minHeight: 40,
+		justifyContent: 'center',
+		borderWidth: 1,
+		borderColor: colors.border,
+		borderRadius: radius.lg,
+		paddingHorizontal: spacing.md,
+	},
+	roleChipText: {
+		color: colors.accentText,
+		fontSize: fontSize.xs,
+		fontWeight: '600',
+	},
 	content: {
 		padding: spacing.lg,
 		gap: spacing.lg,
