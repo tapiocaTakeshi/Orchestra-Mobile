@@ -88,11 +88,12 @@ The "extra.eas.projectId" field is missing from your app config.
 ```
 
 この ID は EAS がサーバー側で発行する UUID なので、リポジトリに決め打ちでは書けません。
-一度だけ次を実行して発行し (既に EAS 上にプロジェクトがあるなら `--id <uuid>` で紐づけ)、
+警告を消すにはアカウント側で一度だけ発行する必要があります (既に EAS 上にプロジェクトが
+あるなら `--id <uuid>` で紐づけ)。
 
 ```bash
 npx eas-cli login
-npx eas-cli init            # 既存プロジェクトなら: npx eas-cli init --id <uuid>
+npm run eas:init            # 既存プロジェクトなら: npx eas-cli init --id <uuid>
 ```
 
 発行された ID を環境変数で渡します (`app.config.ts` が `extra.eas.projectId` に差し込みます)。
@@ -104,12 +105,22 @@ npm run build:android
 ```
 
 `eas init` が `app.json` に ID を書き込んだ場合はそちらが使われるので、環境変数は要りません。
-ID が UUID の形をしていないときは、ビルドに進む前に `app.config.ts` がエラーで止めます。
+
+設定できているかは単体でも確認できます。
+
+```bash
+npm run eas:check           # 解決された projectId を表示。未設定なら手順を出して exit 1
+```
+
+`npm run build:android` / `build:ios` はこのチェックを先に通します。ID が無いまま
+`eas build` に進むと、警告のあと対話的に別プロジェクトを作ってしまうことがあるためです。
+ID が UUID の形をしていないときは、`app.config.ts` もビルド前にエラーで止めます。
 
 ### ディレクトリ構成
 
 ```
 app.config.ts                  app.json に EAS のプロジェクト ID / アカウントを差し込む
+scripts/eas-preflight.js       ビルド前に EAS のプロジェクト ID が揃っているか確認
 App.tsx                        ルート。ログイン/検出/手動接続/タブの切り替え
 src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
