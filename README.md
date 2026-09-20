@@ -79,9 +79,37 @@ npm run typecheck  # tsc --noEmit
 npm test           # jest (API クライアントと純粋ロジックのテスト)
 ```
 
+### EAS ビルドの設定 (プロジェクト ID)
+
+`eas build` などを叩くと、まず次の警告が出ます。
+
+```
+The "extra.eas.projectId" field is missing from your app config.
+```
+
+この ID は EAS がサーバー側で発行する UUID なので、リポジトリに決め打ちでは書けません。
+一度だけ次を実行して発行し (既に EAS 上にプロジェクトがあるなら `--id <uuid>` で紐づけ)、
+
+```bash
+npx eas-cli login
+npx eas-cli init            # 既存プロジェクトなら: npx eas-cli init --id <uuid>
+```
+
+発行された ID を環境変数で渡します (`app.config.ts` が `extra.eas.projectId` に差し込みます)。
+
+```bash
+export EXPO_OWNER=<EAS のアカウント名>   # 個人アカウントなら省略可
+export EAS_PROJECT_ID=<発行された UUID>
+npm run build:android
+```
+
+`eas init` が `app.json` に ID を書き込んだ場合はそちらが使われるので、環境変数は要りません。
+ID が UUID の形をしていないときは、ビルドに進む前に `app.config.ts` がエラーで止めます。
+
 ### ディレクトリ構成
 
 ```
+app.config.ts                  app.json に EAS のプロジェクト ID / アカウントを差し込む
 App.tsx                        ルート。ログイン/検出/手動接続/タブの切り替え
 src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
