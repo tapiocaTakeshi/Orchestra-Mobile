@@ -19,6 +19,7 @@ import { AppState, AppStateStatus } from 'react-native';
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, Snapshot } from '../api/types';
+import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import { useDivisionAuth } from './DivisionAuthContext';
 import {
 	loadActiveUrl,
@@ -87,6 +88,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	const inFlightRef = useRef<AbortController | null>(null);
 	const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 	const failuresRef = useRef(0);
+	const snapshotRef = useRef<Snapshot | null>(null);
 
 	const client = useMemo(() => {
 		if (!connection) {
@@ -134,6 +136,16 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			const next = await current.getSnapshot(controller.signal);
 			failuresRef.current = 0;
 			setError(null);
+			const previous = snapshotRef.current;
+			if (previous && previous.revision !== next.revision) {
+				if (!previous.chat.awaitingApproval && next.chat.awaitingApproval) {
+					void notifyRemoteEvent('承認が必要です', 'Orchestra がモバイルからの承認を待っています。', 'approval-required');
+				}
+				if (previous.chat.isRunning && !next.chat.isRunning && !next.chat.awaitingApproval) {
+					void notifyRemoteEvent('処理が完了しました', 'Orchestra のエージェント処理が完了しました。', 'agent-completed');
+				}
+			}
+			snapshotRef.current = next;
 			// revision が同じなら中身も同じ。参照を保って無駄な再描画を避ける。
 			setSnapshot(prev => (prev && prev.revision === next.revision && prev.generatedAt !== 0 ? prev : next));
 
@@ -166,6 +178,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		if (!connection) {
 			clearTimer();
 			setSnapshot(null);
+			snapshotRef.current = null;
 			setError(null);
 			return;
 		}

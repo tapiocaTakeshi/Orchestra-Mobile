@@ -7,6 +7,7 @@
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, PROTOCOL_VERSION } from '../api/types';
+import { notifyRemoteConnected } from './remoteNotifications';
 
 export type ConnectOutcome =
 	| { ok: true; connection: Connection; warning?: string }
@@ -36,6 +37,7 @@ export const verifyAndConnect = async (
 			label: candidate.label || snapshot.ide.workspaceName || candidate.url,
 		};
 		await connect(resolved);
+		void notifyRemoteConnected(resolved.label);
 		return { ok: true, connection: resolved, warning };
 	} catch (e) {
 		const message = e instanceof OrchestraApiError ? e.userMessage : `接続に失敗しました: ${String(e)}`;
