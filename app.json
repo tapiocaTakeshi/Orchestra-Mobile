@@ -18,7 +18,7 @@
 		],
 		"ios": {
 			"supportsTablet": true,
-			"bundleIdentifier": "jp.he-ro.orchestra.mobile",
+			"bundleIdentifier": "com.hero.orchestra",
 			"infoPlist": {
 				"NSAppTransportSecurity": {
 					"NSAllowsLocalNetworking": true
@@ -27,7 +27,7 @@
 			}
 		},
 		"android": {
-			"package": "jp.hero.orchestra.mobile",
+			"package": "com.hero.orchestra",
 			"usesCleartextTraffic": true,
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/adaptive-icon.png",
