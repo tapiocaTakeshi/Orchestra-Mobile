@@ -13,7 +13,7 @@ import { Button, Card, ErrorBanner, Input, Muted, SectionTitle } from '../compon
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, spacing } from '../theme';
 
-export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
+export const LoginScreen = () => {
 	const { login } = useDivisionAuth();
 
 	const [email, setEmail] = useState('');
@@ -79,8 +79,6 @@ export const LoginScreen = ({ onSkip }: { onSkip: () => void }) => {
 					</Card>
 
 					<Muted style={{ textAlign: 'center' }}>アカウントの作成はデスクトップの Orchestra から。</Muted>
-
-					<Button title='ペアリングリンクで接続する' variant='ghost' onPress={onSkip} />
 
 				</ScrollView>
 			</KeyboardAvoidingView>
