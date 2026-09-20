@@ -13,14 +13,17 @@
 			"resizeMode": "contain",
 			"backgroundColor": "#0d1117"
 		},
-		"assetBundlePatterns": ["**/*"],
+		"assetBundlePatterns": [
+			"**/*"
+		],
 		"ios": {
 			"supportsTablet": true,
 			"bundleIdentifier": "jp.he-ro.orchestra.mobile",
 			"infoPlist": {
 				"NSAppTransportSecurity": {
 					"NSAllowsLocalNetworking": true
-				}
+				},
+				"NSLocalNetworkUsageDescription": "同じWi-Fi上のOrchestra IDEへ接続するためにローカルネットワークへアクセスします。"
 			}
 		},
 		"android": {
@@ -33,7 +36,17 @@
 		},
 		"web": {
 			"bundler": "metro",
-			"favicon": "./assets/favicon.png"
+			"favicon": "./assets/favicon.png",
+			"output": "static"
+		},
+		"plugins": [
+			[
+				"expo-notifications",
+				{}
+			]
+		],
+		"extra": {
+			"appVariant": "production"
 		}
 	}
 }
