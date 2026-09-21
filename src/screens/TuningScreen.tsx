@@ -186,7 +186,8 @@ export const TuningScreen = () => {
 		[issues],
 	);
 
-	const apiKey = profile?.divisionApiKey ?? '';
+	// Division APIはプロフィールのAPIキーではなく、ログイン中のSupabase JWTで認証する。
+	const hasOAuthSession = !!session?.accessToken;
 
 	// --- 読み込み ---
 
@@ -226,11 +227,11 @@ export const TuningScreen = () => {
 	useEffect(() => { void loadAccount(); }, [loadAccount]);
 
 	const loadHistory = useCallback(async (more = false) => {
-		if (!apiKey) return;
+		if (!session) return;
 		setHistoryLoading(true);
 		setError(null);
 		try {
-			const page = await fetchRoutingHistory(apiKey, { cursor: more ? cursor : null });
+			const page = await fetchRoutingHistory(session, { cursor: more ? cursor : null });
 			setHistory(prev => (more ? [...prev, ...page.items] : page.items));
 			setCursor(page.nextCursor);
 			setGroupTotals(prev => (more ? { ...prev, ...page.groupTotals } : page.groupTotals));
@@ -240,22 +241,22 @@ export const TuningScreen = () => {
 		} finally {
 			setHistoryLoading(false);
 		}
-	}, [apiKey, cursor]);
+	}, [session, cursor]);
 
 	// 「利用履歴」を開いた時点で 1 回だけ自動で取りに行く (課金は発生しない)。
 	useEffect(() => {
-		if (section === 'history' && apiKey && !historyLoaded && !historyLoading) void loadHistory();
-	}, [section, apiKey, historyLoaded, historyLoading, loadHistory]);
+		if (section === 'history' && hasOAuthSession && !historyLoaded && !historyLoading) void loadHistory();
+	}, [section, hasOAuthSession, historyLoaded, historyLoading, loadHistory]);
 
 	const refresh = useCallback(async () => {
 		setRefreshing(true);
 		try {
 			await loadAccount();
-			if (section === 'history' && apiKey) await loadHistory();
+			if (section === 'history' && hasOAuthSession) await loadHistory();
 		} finally {
 			setRefreshing(false);
 		}
-	}, [loadAccount, loadHistory, section, apiKey]);
+	}, [loadAccount, loadHistory, section, hasOAuthSession]);
 
 	// --- 操作 ---
 
@@ -269,12 +270,12 @@ export const TuningScreen = () => {
 	}, [issues, parsedDraft]);
 
 	const runQuote = useCallback(async () => {
-		if (!apiKey) return;
+		if (!session) return;
 		setQuoting(true);
 		setError(null);
 		setQuotes([]);
 		try {
-			setQuotes(await fetchRoutingQuotes(apiKey, {
+			setQuotes(await fetchRoutingQuotes(session, {
 				input: promptText,
 				inputTokens: Number(inputTokens),
 				policy: parsedDraft,
@@ -284,7 +285,7 @@ export const TuningScreen = () => {
 		} finally {
 			setQuoting(false);
 		}
-	}, [apiKey, promptText, inputTokens, parsedDraft]);
+	}, [session, promptText, inputTokens, parsedDraft]);
 
 	const saveAutoCharge = useCallback(async () => {
 		if (!session) return;
@@ -344,7 +345,7 @@ export const TuningScreen = () => {
 		);
 	}
 
-	const missingApiKey = !!profile && !apiKey;
+	const missingOAuthSession = !session;
 
 	return (
 		<Screen>
@@ -360,12 +361,12 @@ export const TuningScreen = () => {
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
 			>
-				{missingApiKey && section !== 'policy' ? (
+				{missingOAuthSession && section !== 'policy' ? (
 					<Card>
-						<SectionTitle>Division API キーがありません</SectionTitle>
+						<SectionTitle>DivisionのJWT認証が必要です</SectionTitle>
 						<Muted>
-							見積もりと利用履歴は Division API キーで認証します。Orchestra の
-							設定 → Division からキーを発行すると、ここでも使えるようになります。
+							見積もりと利用履歴は、Divisionにログイン中のSupabase JWTで認証します。
+							もう一度ログインしてから利用してください。
 						</Muted>
 					</Card>
 				) : null}
@@ -467,7 +468,7 @@ export const TuningScreen = () => {
 							<Button
 								title='Jev で見積もる (判定料金が発生)'
 								loading={quoting}
-								disabled={!apiKey || !promptText.trim() || issues.length > 0 || !isInputTokensValid(Number(inputTokens))}
+								disabled={!hasOAuthSession || !promptText.trim() || issues.length > 0 || !isInputTokensValid(Number(inputTokens))}
 								onPress={() => void runQuote()}
 							/>
 						</Card>
