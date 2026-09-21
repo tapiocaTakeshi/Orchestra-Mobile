@@ -70,7 +70,11 @@ export class DivisionRoutingError extends Error {
 		switch (this.status) {
 			case 0: return 'Division API に接続できません。通信環境を確認してください。';
 			case 401:
-			case 403: return 'DivisionのJWTが無効です。もう一度ログインしてください。';
+				return 'DivisionのJWTが無効です。もう一度ログインしてください。';
+			case 403:
+				return this.message.toLowerCase().includes('plus') || this.message.includes('有料')
+					? 'この機能は有料プラン（Plus）が必要です。管理タブからプランを確認してください。'
+					: 'このアカウントではこの機能を利用できません。';
 			case 404: return 'この Division API はルーティング API に対応していません。';
 			default: return this.message;
 		}
