@@ -228,8 +228,8 @@ Division の「どの役割をどのモデルに振るか」という組み合�
 方針はこの端末に保存され、見積もりの条件として使われます。IDE 側の
 「設定 → Division」の `divisionAutoRouting` とは別管理です。
 
-見積もりと利用履歴は `profiles.division_api_key` を Bearer トークンとして Division API
-(`/api/routing/quote`, `/api/routing/history`) に投げます。キーが未発行のときはその旨を表示します。
+見積もりと利用履歴は、Divisionログイン時に発行される Supabase JWT を Bearer トークンとして
+Division API (`/api/routing/quote`, `/api/routing/history`) に送ります。APIキーを端末に保存・利用することはありません。
 
 ---
 
@@ -252,5 +252,5 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
   操作そのものは引き続き LAN 直結です。ログアウトすると、その端末の行は IDE 側で削除されます。
 - 共有タブに出す投稿はログイン済みユーザー全員が読めます。公開するのは役割とモデルの組み合わせだけで、
   API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
-- Division API キーは端末に保存せず、必要なときだけ `profiles` から読み出して使います。
+- Division APIはログイン中のSupabase JWTで認証します。JWTの期限が切れた場合はrefresh tokenで更新します。
 - 支払いはアプリ内では行わず、Stripe の画面をブラウザで開きます。
