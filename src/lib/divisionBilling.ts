@@ -39,7 +39,6 @@ export type DivisionProfile = {
 	autoChargeThreshold: number;
 	autoChargeAmount: number;
 	hasStripeCustomer: boolean;
-	divisionApiKey: string | null;
 };
 
 export type CreditTransaction = {
@@ -54,7 +53,7 @@ const PROFILE_COLUMNS = [
 	'plan', 'full_name', 'email', 'subscription_status', 'current_period_end',
 	'credit_balance', 'credit_used', 'purchased_credit_balance', 'subscription_credit_balance',
 	'subscription_credits_expire_at', 'auto_charge', 'auto_charge_threshold', 'auto_charge_amount',
-	'stripe_customer_id', 'division_api_key',
+	'stripe_customer_id',
 ].join(', ');
 
 const num = (value: unknown, fallback = 0): number => {
@@ -94,7 +93,6 @@ export const fetchDivisionProfile = async (session: DivisionSession): Promise<Di
 		autoChargeThreshold: num(row.auto_charge_threshold, 5),
 		autoChargeAmount: num(row.auto_charge_amount, 20),
 		hasStripeCustomer: !!row.stripe_customer_id,
-		divisionApiKey: (row.division_api_key as string) ?? null,
 	};
 };
 
