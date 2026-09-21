@@ -1,65 +1,68 @@
 {
-	"expo": {
-		"name": "Orchestra Mobile",
-		"slug": "orchestra-mobile",
-		"version": "0.1.0",
-		"orientation": "portrait",
-		"scheme": "orchestra",
-		"userInterfaceStyle": "dark",
-		"newArchEnabled": false,
-		"icon": "./assets/icon.png",
-		"splash": {
-			"image": "./assets/splash-icon.png",
-			"resizeMode": "contain",
-			"backgroundColor": "#0d1117"
-		},
-		"assetBundlePatterns": [
-			"**/*"
-		],
-		"ios": {
-			"supportsTablet": true,
-			"bundleIdentifier": "com.hero.orchestra",
-			"infoPlist": {
-				"NSAppTransportSecurity": {
-					"NSAllowsLocalNetworking": true
-				},
-				"NSLocalNetworkUsageDescription": "同じWi-Fi上のOrchestra IDEへ接続するためにローカルネットワークへアクセスします。"
-			}
-		},
-		"android": {
-			"package": "com.hero.orchestra",
-			"adaptiveIcon": {
-				"foregroundImage": "./assets/adaptive-icon.png",
-				"backgroundColor": "#ffffff"
-			}
-		},
-		"web": {
-			"bundler": "metro",
-			"favicon": "./assets/favicon.png",
-			"output": "static"
-		},
-		"plugins": [
-			[
-				"expo-notifications",
-				{}
-			],
-			"expo-secure-store",
-			"expo-font",
-			[
-				"expo-build-properties",
-				{
-					"android": {
-						"usesCleartextTraffic": true
-					}
-				}
-			]
-		],
-		"extra": {
-			"appVariant": "production",
-			"eas": {
-				"projectId": "9fcf7fc6-456d-44d3-b873-1a7a006b9bc4"
-			}
-		},
-		"owner": "he-ro1112"
-	}
+  "expo": {
+    "name": "Orchestra Mobile",
+    "slug": "orchestra-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "orchestra",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0d1117"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.hero.orchestra",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "同じWi-Fi上のOrchestra IDEへ接続するためにローカルネットワークへアクセスします。"
+      }
+    },
+    "android": {
+      "package": "com.hero.orchestra",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png",
+      "output": "static"
+    },
+    "experiments": {
+      "baseUrl": "/Orchestra-Mobile"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {}
+      ],
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "appVariant": "production",
+      "eas": {
+        "projectId": "9fcf7fc6-456d-44d3-b873-1a7a006b9bc4"
+      }
+    },
+    "owner": "he-ro1112"
+  }
 }
