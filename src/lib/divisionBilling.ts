@@ -15,6 +15,16 @@ import {
 
 export type DivisionPlanId = 'free' | 'plus';
 
+export const isPaidDivisionPlan = (
+	plan: DivisionPlanId,
+	subscriptionStatus: string | null,
+): boolean => {
+	if (plan === 'free') return false;
+	// Stripe may leave a paid plan in past_due while it is still recoverable.
+	// Canceled/incomplete subscriptions must not be treated as paid.
+	return !['canceled', 'incomplete', 'incomplete_expired', 'unpaid'].includes(subscriptionStatus ?? '');
+};
+
 export const DIVISION_PLANS: {
 	id: DivisionPlanId;
 	name: string;
@@ -27,6 +37,7 @@ export const DIVISION_PLANS: {
 
 export type DivisionProfile = {
 	plan: DivisionPlanId;
+	isPaid: boolean;
 	displayName: string;
 	subscriptionStatus: string | null;
 	currentPeriodEnd: string | null;
@@ -81,6 +92,10 @@ export const fetchDivisionProfile = async (session: DivisionSession): Promise<Di
 	const row = data as unknown as Record<string, unknown>;
 	return {
 		plan: (row.plan as DivisionPlanId) ?? 'free',
+		isPaid: isPaidDivisionPlan(
+			(row.plan as DivisionPlanId) ?? 'free',
+			(row.subscription_status as string) ?? null,
+		),
 		displayName: (row.full_name as string)?.trim() || (row.email as string) || session.email,
 		subscriptionStatus: (row.subscription_status as string) ?? null,
 		currentPeriodEnd: (row.current_period_end as string) ?? null,
