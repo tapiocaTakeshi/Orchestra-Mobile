@@ -28,7 +28,6 @@
 		},
 		"android": {
 			"package": "com.hero.orchestra",
-			"usesCleartextTraffic": true,
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/adaptive-icon.png",
 				"backgroundColor": "#ffffff"
@@ -43,6 +42,16 @@
 			[
 				"expo-notifications",
 				{}
+			],
+			"expo-secure-store",
+			"expo-font",
+			[
+				"expo-build-properties",
+				{
+					"android": {
+						"usesCleartextTraffic": true
+					}
+				}
 			]
 		],
 		"extra": {
