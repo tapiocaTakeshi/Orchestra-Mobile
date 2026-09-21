@@ -4,10 +4,11 @@
  * IDE 側の AutoRouting.tsx と同じエンドポイントを叩く。
  *   POST /api/routing/quote   … Jev に出力トークン予算を判定させ、条件を満たす最安モデルを見積もる
  *   GET  /api/routing/history … モデル実行ごとの実測トークン数と料金
- * 認証は profiles.division_api_key を Bearer で渡す。
+ * 認証はDivisionアカウントのSupabase JWTをBearerで渡す。
  */
 
 import { DIVISION_API_BASE_URL } from './divisionAuthConfig';
+import { DivisionSession, getDivisionAccessToken } from './divisionAuth';
 
 /** ルーティングの方針。IDE の globalSettings.divisionAutoRouting と同じ形。 */
 export type RoutingPolicy = {
@@ -69,7 +70,7 @@ export class DivisionRoutingError extends Error {
 		switch (this.status) {
 			case 0: return 'Division API に接続できません。通信環境を確認してください。';
 			case 401:
-			case 403: return 'Division API キーが無効です。IDE の設定からキーを発行し直してください。';
+			case 403: return 'DivisionのJWTが無効です。もう一度ログインしてください。';
 			case 404: return 'この Division API はルーティング API に対応していません。';
 			default: return this.message;
 		}
@@ -82,11 +83,13 @@ const num = (value: unknown, fallback = 0): number => {
 };
 
 const request = async <T>(
-	apiKey: string,
+	session: DivisionSession,
 	path: string,
 	options: { body?: unknown; endpoint?: string; timeoutMs?: number } = {},
 ): Promise<T> => {
-	if (!apiKey) throw new DivisionRoutingError(401, 'Division API キーがありません。');
+	const accessToken = await getDivisionAccessToken(session).catch((error: unknown) => {
+		throw new DivisionRoutingError(401, error instanceof Error ? error.message : String(error));
+	});
 
 	const base = (options.endpoint || DIVISION_API_BASE_URL).replace(/\/+$/, '');
 	const controller = new AbortController();
@@ -96,7 +99,7 @@ const request = async <T>(
 	try {
 		response = await fetch(`${base}/api/routing/${path}`, {
 			method: options.body ? 'POST' : 'GET',
-			headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+			headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
 			...(options.body ? { body: JSON.stringify(options.body) } : {}),
 			signal: controller.signal,
 		});
@@ -113,10 +116,10 @@ const request = async <T>(
 
 /** Jev にトークン予算を判定させて見積もる。実行のたびに判定料金がかかる。 */
 export const fetchRoutingQuotes = async (
-	apiKey: string,
+	session: DivisionSession,
 	input: { input: string; inputTokens: number; policy: RoutingPolicy; roles?: readonly string[]; endpoint?: string },
 ): Promise<RoutingQuote[]> => {
-	const data = await request<{ quotes?: unknown[] }>(apiKey, 'quote', {
+	const data = await request<{ quotes?: unknown[] }>(session, 'quote', {
 		endpoint: input.endpoint,
 		body: {
 			input: input.input,
@@ -141,12 +144,12 @@ export const fetchRoutingQuotes = async (
 };
 
 export const fetchRoutingHistory = async (
-	apiKey: string,
+	session: DivisionSession,
 	options: { cursor?: string | null; endpoint?: string } = {},
 ): Promise<RoutingHistoryPage> => {
 	const path = options.cursor ? `history?cursor=${encodeURIComponent(options.cursor)}` : 'history';
 	const data = await request<{ items?: unknown[]; nextCursor?: string | null; groupTotals?: Record<string, unknown> }>(
-		apiKey, path, { endpoint: options.endpoint },
+		session, path, { endpoint: options.endpoint },
 	);
 
 	const items = (data.items ?? []).map(raw => {
