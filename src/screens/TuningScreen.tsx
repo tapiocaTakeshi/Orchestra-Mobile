@@ -468,9 +468,12 @@ export const TuningScreen = () => {
 							<Button
 								title='Jev で見積もる (判定料金が発生)'
 								loading={quoting}
-								disabled={!hasOAuthSession || !promptText.trim() || issues.length > 0 || !isInputTokensValid(Number(inputTokens))}
+								disabled={!hasOAuthSession || (profile !== null && !profile.isPaid) || !promptText.trim() || issues.length > 0 || !isInputTokensValid(Number(inputTokens))}
 								onPress={() => void runQuote()}
 							/>
+							{profile && !profile.isPaid ? (
+								<Muted>見積もりの実行には有料プラン（Plus）が必要です。管理タブからプランを確認できます。</Muted>
+							) : null}
 						</Card>
 
 						{quotes.length > 0 ? (
@@ -614,8 +617,8 @@ export const TuningScreen = () => {
 								<Row style={styles.spread}>
 									<SectionTitle>クレジット残高</SectionTitle>
 									<Badge
-										label={DIVISION_PLANS.find(p => p.id === profile.plan)?.name ?? profile.plan}
-										color={profile.plan === 'free' ? colors.fgMuted : colors.accentText}
+										label={profile.isPaid ? '有料プラン' : '無料プラン'}
+										color={profile.isPaid ? colors.accentText : colors.fgMuted}
 									/>
 								</Row>
 								<Text style={styles.balance}>{formatUsdShort(profile.creditBalance)}</Text>
