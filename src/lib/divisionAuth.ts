@@ -23,7 +23,7 @@ export const getDivisionSupabase = (): SupabaseClient => {
 	_client = createClient(DIVISION_SUPABASE_URL, DIVISION_SUPABASE_ANON_KEY, {
 		auth: {
 			persistSession: false,
-			autoRefreshToken: false,
+			autoRefreshToken: true,
 			detectSessionInUrl: false,
 		},
 	});
@@ -40,6 +40,19 @@ export type DivisionSession = {
 const restoreSupabaseSession = async (accessToken: string, refreshToken: string): Promise<void> => {
 	const sb = getDivisionSupabase();
 	await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+};
+
+/** Division APIへ送る最新のSupabase JWTを取得する。 */
+export const getDivisionAccessToken = async (session: DivisionSession): Promise<string> => {
+	if (!session.accessToken || !session.refreshToken) {
+		throw new Error('Divisionのログインセッションがありません。');
+	}
+	await restoreSupabaseSession(session.accessToken, session.refreshToken);
+	const { data, error } = await getDivisionSupabase().auth.getSession();
+	if (error || !data.session?.access_token) {
+		throw new Error('DivisionのJWTを更新できませんでした。もう一度ログインしてください。');
+	}
+	return data.session.access_token;
 };
 
 export const signInWithDivision = async (email: string, password: string): Promise<DivisionSession> => {
