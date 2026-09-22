@@ -29,14 +29,44 @@ export const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
 /** 見積もりを出す役割。IDE 側と同じ 3 つ。 */
 export const QUOTE_ROLES = ['leader', 'coder', 'review'] as const;
 
+export type RoutingBenchmark = {
+	score: number;
+	rawScore: number;
+	metric: string;
+	source: string;
+	asOf: string | null;
+	citation?: string | null;
+	sourceUrl?: string | null;
+};
+
 export type RoutingQuote = {
 	role: string;
 	model: string;
+	domain?: string;
 	performance: number;
 	performanceSource: string;
+	benchmark?: RoutingBenchmark;
 	inputTokens: number;
 	outputTokens: number;
 	totalCostUsd: number;
+};
+
+export type RoutingPlan = {
+	allocator: 'jev';
+	snapshotId: string;
+	catalogUpdatedAt: string;
+	quotes: RoutingQuote[];
+	allocatorCostUsd: number;
+	inferenceEstimateUsd: number;
+	totalEstimateUsd: number;
+	overallPerformance: {
+		score: number;
+		minimum: number;
+		method: string;
+		isEstimate: true;
+		note: string;
+	};
+	scope: string;
 };
 
 export type RoutingHistoryItem = {
@@ -118,12 +148,12 @@ const request = async <T>(
 	return data as T;
 };
 
-/** Jev にトークン予算を判定させて見積もる。実行のたびに判定料金がかかる。 */
-export const fetchRoutingQuotes = async (
+/** Jev に保存済みの料金・性能を渡し、分野・モデル・トークン配分を見積もる。 */
+export const fetchRoutingPlan = async (
 	session: DivisionSession,
 	input: { input: string; inputTokens: number; policy: RoutingPolicy; roles?: readonly string[]; endpoint?: string },
-): Promise<RoutingQuote[]> => {
-	const data = await request<{ quotes?: unknown[] }>(session, 'quote', {
+): Promise<RoutingPlan> => {
+	const data = await request<Record<string, unknown>>(session, 'quote', {
 		endpoint: input.endpoint,
 		body: {
 			input: input.input,
@@ -133,18 +163,53 @@ export const fetchRoutingQuotes = async (
 		},
 	});
 
-	return (data.quotes ?? []).map(raw => {
+	const quotes = ((data.quotes as unknown[]) ?? []).map(raw => {
 		const q = (raw ?? {}) as Record<string, unknown>;
 		return {
 			role: String(q.role ?? ''),
 			model: String(q.model ?? ''),
+			domain: String(q.domain ?? ''),
 			performance: num(q.performance),
 			performanceSource: String(q.performanceSource ?? ''),
+			benchmark: q.benchmark && typeof q.benchmark === 'object' ? q.benchmark as RoutingBenchmark : undefined,
 			inputTokens: num(q.inputTokens),
 			outputTokens: num(q.outputTokens),
 			totalCostUsd: num(q.totalCostUsd),
 		};
 	});
+	const performance = (data.overallPerformance ?? {}) as Record<string, unknown>;
+	return {
+		allocator: 'jev',
+		snapshotId: String(data.snapshotId ?? ''),
+		catalogUpdatedAt: String(data.catalogUpdatedAt ?? ''),
+		quotes,
+		allocatorCostUsd: num(data.allocatorCostUsd),
+		inferenceEstimateUsd: num(data.inferenceEstimateUsd, quotes.reduce((sum, q) => sum + q.totalCostUsd, 0)),
+		totalEstimateUsd: num(data.totalEstimateUsd, quotes.reduce((sum, q) => sum + q.totalCostUsd, 0)),
+		overallPerformance: {
+			score: num(performance.score),
+			minimum: num(performance.minimum),
+			method: String(performance.method ?? ''),
+			isEstimate: true,
+			note: String(performance.note ?? ''),
+		},
+		scope: String(data.scope ?? ''),
+	};
+};
+
+/** 旧呼び出し元向け。新しい画面では合計と性能を含む fetchRoutingPlan を使う。 */
+export const fetchRoutingQuotes = async (...args: Parameters<typeof fetchRoutingPlan>): Promise<RoutingQuote[]> =>
+	(await fetchRoutingPlan(...args)).quotes;
+
+export const refreshRoutingCatalog = async (session: DivisionSession, endpoint?: string) => {
+	const accessToken = await getDivisionAccessToken(session);
+	const base = (endpoint || DIVISION_API_BASE_URL).replace(/\/+$/, '');
+	const response = await fetch(`${base}/api/models/sync`, {
+		method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+	});
+	const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+	if (!response.ok) throw new DivisionRoutingError(response.status, String(data.error ?? `HTTP ${response.status}`));
+	return data as { routingCatalog?: { snapshotId?: string; fetchedAt?: string; models?: number; domains?: string[] } };
 };
 
 export const fetchRoutingHistory = async (
