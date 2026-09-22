@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	KeyboardAvoidingView,
+	Modal,
 	Platform,
 	Pressable,
 	RefreshControl,
@@ -20,8 +21,9 @@ import {
 	View,
 } from 'react-native';
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TuningScreen } from './TuningScreen';
 import { OrchestraApiError } from '../api/client';
 import { ChatMessage } from '../api/types';
 import {
@@ -81,6 +83,7 @@ export const RemoteScreen = () => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
 	const [draft, setDraft] = useState('');
+	const [showCostTuning, setShowCostTuning] = useState(false);
 	const [sending, setSending] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [showThreads, setShowThreads] = useState(false);
@@ -244,6 +247,13 @@ export const RemoteScreen = () => {
 				</ScrollView>
 
 				<View style={styles.composer}>
+					<Button title='コスト調整' variant='secondary' onPress={() => setShowCostTuning(true)} />
+					<Modal visible={showCostTuning} animationType='slide' onRequestClose={() => setShowCostTuning(false)}>
+						<SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'bottom']}>
+							<Button title='チャットに戻る' variant='secondary' onPress={() => setShowCostTuning(false)} />
+							{showCostTuning ? <TuningScreen composerPrompt={draft} /> : null}
+						</SafeAreaView>
+					</Modal>
 					{notice ? <Text accessibilityLiveRegion='polite' style={styles.notice}>{notice}</Text> : null}
 					<Input
 						value={draft}

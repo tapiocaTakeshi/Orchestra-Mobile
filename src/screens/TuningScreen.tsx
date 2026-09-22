@@ -140,10 +140,10 @@ const GroupTable = ({ title, groups }: { title: string; groups: CostGroup[] }) =
 	</Card>
 );
 
-export const TuningScreen = () => {
+export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {}) => {
 	const { session } = useDivisionAuth();
 
-	const [section, setSection] = useState<Section>('policy');
+	const [section, setSection] = useState<Section>(composerPrompt === undefined ? 'policy' : 'estimate');
 	const [notice, setNotice] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
@@ -164,8 +164,8 @@ export const TuningScreen = () => {
 	const [savingAutoCharge, setSavingAutoCharge] = useState(false);
 
 	// --- 見積もり ---
-	const [promptText, setPromptText] = useState('');
-	const [inputTokens, setInputTokens] = useState('2000');
+	const [promptText, setPromptText] = useState(composerPrompt ?? '');
+	const [inputTokens, setInputTokens] = useState(composerPrompt ? String(estimateInputTokens(composerPrompt)) : '2000');
 	const [quotes, setQuotes] = useState<RoutingQuote[]>([]);
 	const [plan, setPlan] = useState<RoutingPlan | null>(null);
 	const [quoting, setQuoting] = useState(false);
@@ -373,8 +373,9 @@ export const TuningScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='チューニング' subtitle='コストと性能の条件でモデルの選ばれ方を調整する' />
+			<ScreenHeader title='チューニング' subtitle={composerPrompt === undefined ? 'コストと性能の条件でモデルの選ばれ方を調整する' : '入力中の依頼を見積もる・方針タブで条件を調整'} />
 
+			{composerPrompt !== undefined ? <Muted>ここでの条件は見積もり用です。接続先PCの実行条件はPC側のDivision設定を使います。</Muted> : null}
 			<View style={styles.toolbar}>
 				<ChipGroup<Section> options={SECTIONS} value={section} onChange={setSection} />
 			</View>
@@ -476,7 +477,7 @@ export const TuningScreen = () => {
 								Jev に出力トークン予算を判定させ、リーダー / コーダー / レビューの 3 役割について
 								想定コストを出します。判定のたびに料金が発生します。
 							</Muted>
-							<Input
+							{composerPrompt === undefined ? <Input
 								value={promptText}
 								onChangeText={text => {
 									setPromptText(text);
@@ -487,7 +488,7 @@ export const TuningScreen = () => {
 								placeholder='見積もりたい依頼の内容'
 								multiline
 								accessibilityLabel='見積もる依頼'
-							/>
+							/> : <Muted>入力中のプロンプト: {promptText || '入力欄に依頼を記入してください。'}</Muted>}
 							<NumberField
 								label='各役割の想定入力トークン数'
 								hint={isInputTokensValid(Number(inputTokens))
