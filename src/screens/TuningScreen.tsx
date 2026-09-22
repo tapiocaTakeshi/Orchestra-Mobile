@@ -54,9 +54,11 @@ import {
 	DivisionRoutingError,
 	RoutingHistoryItem,
 	RoutingPolicy,
+	RoutingPlan,
 	RoutingQuote,
 	fetchRoutingHistory,
-	fetchRoutingQuotes,
+	fetchRoutingPlan,
+	refreshRoutingCatalog,
 } from '../lib/divisionRouting';
 import {
 	CostGroup,
@@ -165,7 +167,9 @@ export const TuningScreen = () => {
 	const [promptText, setPromptText] = useState('');
 	const [inputTokens, setInputTokens] = useState('2000');
 	const [quotes, setQuotes] = useState<RoutingQuote[]>([]);
+	const [plan, setPlan] = useState<RoutingPlan | null>(null);
 	const [quoting, setQuoting] = useState(false);
+	const [refreshingCatalog, setRefreshingCatalog] = useState(false);
 
 	// --- 履歴 ---
 	const [history, setHistory] = useState<RoutingHistoryItem[]>([]);
@@ -265,7 +269,7 @@ export const TuningScreen = () => {
 		setPolicy(parsedDraft);
 		setEnabled(nextEnabled);
 		await saveRoutingPolicy(parsedDraft, nextEnabled);
-		setQuotes([]);
+		setQuotes([]); setPlan(null);
 		setNotice(nextEnabled ? '方針を保存して有効にしました。' : '方針を無効にしました。');
 	}, [issues, parsedDraft]);
 
@@ -273,19 +277,39 @@ export const TuningScreen = () => {
 		if (!session) return;
 		setQuoting(true);
 		setError(null);
-		setQuotes([]);
+		setQuotes([]); setPlan(null);
 		try {
-			setQuotes(await fetchRoutingQuotes(session, {
+			const nextPlan = await fetchRoutingPlan(session, {
 				input: promptText,
 				inputTokens: Number(inputTokens),
 				policy: parsedDraft,
-			}));
+			});
+			setPlan(nextPlan);
+			setQuotes(nextPlan.quotes);
 		} catch (e) {
 			setError(errorText(e));
 		} finally {
 			setQuoting(false);
 		}
 	}, [session, promptText, inputTokens, parsedDraft]);
+
+	const refreshModels = useCallback(async () => {
+		if (!session) return;
+		setRefreshingCatalog(true);
+		setError(null);
+		try {
+			const result = await refreshRoutingCatalog(session);
+			const catalog = result.routingCatalog;
+			setNotice(catalog
+				? `モデルを更新しました（${catalog.models ?? 0}モデル・${catalog.domains?.length ?? 0}分野）`
+				: 'モデルを更新しました。');
+			setQuotes([]); setPlan(null);
+		} catch (e) {
+			setError(errorText(e));
+		} finally {
+			setRefreshingCatalog(false);
+		}
+	}, [session]);
 
 	const saveAutoCharge = useCallback(async () => {
 		if (!session) return;
@@ -330,7 +354,7 @@ export const TuningScreen = () => {
 		[profile, totals],
 	);
 
-	const quoteTotal = useMemo(() => quoteTotalUsd(quotes), [quotes]);
+	const quoteTotal = useMemo(() => plan?.totalEstimateUsd ?? quoteTotalUsd(quotes), [plan, quotes]);
 	const violations = useMemo(() => quoteViolations(quotes, parsedDraft), [quotes, parsedDraft]);
 
 	if (!session) {
@@ -380,32 +404,40 @@ export const TuningScreen = () => {
 								<Badge label={enabled ? '有効' : '無効'} color={enabled ? colors.success : colors.fgFaint} />
 							</Row>
 							<Muted>
-								Jev が役割ごとの出力トークン予算を決め、性能条件を満たす中で最も安いモデルを選びます。
-								上限は「役割ごとの 1 回のモデル呼び出し」に効きます。Jev の判定そのものにも料金がかかります。
+								Jev がSupabaseに保存した料金・分野別性能を見て、役割ごとの分野と出力トークン予算を決めます。
+								上限は役割ごとの1回のモデル呼び出しに適用され、合計見積もりにはJevの料金も含まれます。
 							</Muted>
 
 							<NumberField
 								label='最低性能スコア (0〜100)'
-								hint={issueFor('minPerformance') ?? 'サーバーに登録された評価スコア。低くするほど安いモデルが選ばれます。'}
+								hint={issueFor('minPerformance') ?? '保存済みランキングの分野内パーセンタイル。低くするほど候補が増えます。'}
 								value={draft.minPerformance}
 								invalid={!!issueFor('minPerformance')}
-								onChange={text => { setDraft(d => ({ ...d, minPerformance: text })); setQuotes([]); }}
+								onChange={text => { setDraft(d => ({ ...d, minPerformance: text })); setQuotes([]); setPlan(null); }}
 							/>
 							<NumberField
 								label='1 回のモデル呼び出しの上限 (USD)'
 								hint={issueFor('maxCostUsd') ?? '料金 = 入力トークン × 入力単価 + 出力トークン × 出力単価 + 固定料金。'}
 								value={draft.maxCostUsd}
 								invalid={!!issueFor('maxCostUsd')}
-								onChange={text => { setDraft(d => ({ ...d, maxCostUsd: text })); setQuotes([]); }}
+								onChange={text => { setDraft(d => ({ ...d, maxCostUsd: text })); setQuotes([]); setPlan(null); }}
 							/>
 							<NumberField
 								label='割り当て可能な最大出力トークン'
 								hint={issueFor('maxOutputTokens') ?? '256〜32768。長い出力を許すほど料金が上がります。'}
 								value={draft.maxOutputTokens}
 								invalid={!!issueFor('maxOutputTokens')}
-								onChange={text => { setDraft(d => ({ ...d, maxOutputTokens: text })); setQuotes([]); }}
+								onChange={text => { setDraft(d => ({ ...d, maxOutputTokens: text })); setQuotes([]); setPlan(null); }}
 							/>
 
+							<Button
+								title='モデル料金・性能を更新'
+								variant='secondary'
+								loading={refreshingCatalog}
+								disabled={!hasOAuthSession}
+								onPress={() => void refreshModels()}
+							/>
+							<Muted>更新時だけOpenRouterから料金とベンチマークを取得し、以後のチューニングは保存データを使います。</Muted>
 							<Row>
 								<Button
 									title='保存して有効にする'
@@ -448,7 +480,7 @@ export const TuningScreen = () => {
 								value={promptText}
 								onChangeText={text => {
 									setPromptText(text);
-									setQuotes([]);
+									setQuotes([]); setPlan(null);
 									// 依頼文を書き換えたら入力トークンの目安も追従させる。
 									if (text.trim()) setInputTokens(String(estimateInputTokens(text)));
 								}}
@@ -463,7 +495,7 @@ export const TuningScreen = () => {
 									: '0〜2,000,000 の整数で入力してください。'}
 								value={inputTokens}
 								invalid={!isInputTokensValid(Number(inputTokens))}
-								onChange={text => { setInputTokens(text); setQuotes([]); }}
+								onChange={text => { setInputTokens(text); setQuotes([]); setPlan(null); }}
 							/>
 							<Button
 								title='Jev で見積もる (判定料金が発生)'
@@ -482,13 +514,22 @@ export const TuningScreen = () => {
 									<SectionTitle>試算</SectionTitle>
 									<Text style={styles.amount}>合計 {formatUsd(quoteTotal)}</Text>
 								</Row>
+								{plan ? <>
+									<Muted>モデル推論 {formatUsd(plan.inferenceEstimateUsd)} + Jev {formatUsd(plan.allocatorCostUsd)}</Muted>
+									<Row>
+										<Badge label={`全体性能 ${plan.overallPerformance.score.toFixed(1)}`} color={colors.accent} />
+										<Badge label={`最低 ${plan.overallPerformance.minimum.toFixed(1)}`} />
+									</Row>
+									<Muted>性能は分野内順位の参考値で、実際の完成品質を保証する値ではありません。</Muted>
+									<Muted>データ更新: {relativeTimeFromIso(plan.catalogUpdatedAt)} · {plan.snapshotId.slice(0, 8)}</Muted>
+								</> : null}
 								<Muted>実行時は実際の各役割で再判定されるため、結果は前後します。</Muted>
 								{quotes.map(quote => (
 									<View key={quote.role} style={styles.quoteRow}>
 										<Row style={styles.spread}>
 											<View style={styles.flex}>
 												<Body>{roleTitle(quote.role)}</Body>
-												<Muted>{quote.model}</Muted>
+												<Muted>{quote.model}{quote.domain ? ` · ${quote.domain}` : ''}</Muted>
 											</View>
 											<Text style={styles.amount}>{formatUsd(quote.totalCostUsd)}</Text>
 										</Row>
@@ -498,6 +539,7 @@ export const TuningScreen = () => {
 											<Badge label={`出力 ${formatTokens(quote.outputTokens)}`} />
 										</Row>
 										{violations[quote.role] ? <Text style={styles.warn}>{violations[quote.role]}</Text> : null}
+										{quote.benchmark ? <Muted>元スコア: {quote.benchmark.rawScore} ({quote.benchmark.metric} / {quote.benchmark.source})</Muted> : null}
 										{quote.performanceSource ? <Muted>性能の出典: {quote.performanceSource}</Muted> : null}
 									</View>
 								))}
