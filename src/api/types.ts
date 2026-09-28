@@ -177,6 +177,11 @@ export type Connection = {
 	token: string;
 	/** 接続先を見分けるためのラベル。ペアリング時のワークスペース名を入れる */
 	label: string;
+	/**
+	 * この接続を保存したときにログインしていた Division アカウント。
+	 * 別のアカウントでログインしているあいだは一覧に出さず、使わない。
+	 */
+	ownerUserId?: string;
 };
 
 export type FileEntry = {

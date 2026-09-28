@@ -6,6 +6,7 @@ import {
 	checklistProgress,
 	columnWithRole,
 	isOverdue,
+	labelColor,
 	matchesFilter,
 	moveTargets,
 	tasksInColumn,
@@ -127,5 +128,18 @@ describe('checklistProgress and allLabels', () => {
 
 	it('sorts labels by usage', () => {
 		expect(allLabels(board)).toEqual(['bug', 'core', 'docs']);
+	});
+});
+
+describe('labelColor', () => {
+	it('gives the same colour as the desktop board for the same label', () => {
+		// 値はデスクトップ (kanban-tsx/shared.tsx の labelColor) で出る色
+		expect(labelColor('bug')).toBe('#f59e0b');
+		expect(labelColor('docs')).toBe('#10b981');
+		expect(labelColor('バグ')).toBe('#3b82f6');
+	});
+
+	it('is stable across calls', () => {
+		expect(labelColor('feature')).toBe(labelColor('feature'));
 	});
 });

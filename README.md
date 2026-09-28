@@ -11,14 +11,14 @@
 | 🎭 Division | `.division/projects.json` のプロジェクト管理、役割の追加/削除とモデル割り当て、有効化、Supabase 同期、割り当ての共有 |
 | 🤝 共有 | 役割とモデルの組み合わせを公開・閲覧・いいね・自分のプロジェクトへ取り込み |
 | 📊 コスト | ルーティング方針 (性能/上限コスト/出力トークン) の調整、Jev による見積もり、実測の利用履歴と集計、クレジット残高・自動チャージ・プランの管理 |
-| ⚙️ 接続 | 接続先の切替・解除、ワークスペースのファイルを IDE で開く |
+| ⚙️ 接続 | 接続先の切替・解除、ワークスペースのファイルを IDE で開く、Division アカウントのログアウト |
 
 IDE との通信 (カンバン閲覧・エージェント操作など) は **同じ LAN 内の IDE と直接** 行い、外部サーバーは
-経由しません。一方、**アカウントでのログイン / 接続先の自動検出だけは Supabase (Division) を経由**します
-(接続先候補の一覧を得るためだけで、操作そのものは引き続き LAN 直結です)。
+経由しません。一方、**アカウントでのログイン / 接続先の検出 / 接続先がそのアカウントの PC かの確認だけは
+Supabase (Division) を経由**します (接続先候補の一覧を得るためだけで、操作そのものは引き続き LAN 直結です)。
 
 **共有タブとコストタブは Division (Supabase / Division API) 直結**なので、PC に接続していなくても使えます。
-ログイン後の「接続先を選ぶ」画面から *接続せずにソーシャル / チューニングを見る* を選ぶと、
+ログイン後の「接続先を選ぶ」画面から *接続せずに共有 / コストを見る* を選ぶと、
 未接続のままこの 2 つのタブを開けます (プロジェクトへの取り込みと共有だけは接続が要ります)。
 
 ---
@@ -38,7 +38,10 @@ Orchestra の **設定 → リモートコントロール** で「リモート�
 
 ### 2. アプリから接続する
 
-#### ① アカウントでログイン (推奨)
+アプリが繋ぐのは、**ログイン中の Division アカウントのセッション (同じアカウントでログインしている PC) だけ**です。
+ログインしないと接続できず、別のアカウントでログインしている PC には、ペアリングリンクや手入力で指定しても繋ぎません。
+
+#### ① 見つかったデバイスから接続 (推奨)
 
 1. IDE で Division アカウントにログインした状態でリモートコントロールを有効にする
 2. アプリを開き、同じ Division アカウントでログインする
@@ -49,15 +52,22 @@ Orchestra の **設定 → リモートコントロール** で「リモート�
 新しい PC が追加されるとローカル通知でお知らせします (アプリ起動中/フォアグラウンドのみ。
 アプリを完全に閉じていても届く push 通知は今後対応予定です)。
 
-#### ② 手入力・ペアリングリンク (アカウントを使わない場合)
+#### ② 手入力・ペアリングリンク (一覧に出ないとき)
 
-1. スマホと PC を同じ Wi-Fi に繋ぐ
-2. ログイン画面や見つからないときの導線から「ペアリングリンクで接続する」を選び、
+1. スマホと PC を同じ Wi-Fi に繋ぐ (PC 側も同じアカウントでログインしておく)
+2. 「接続先を選ぶ」画面の「手入力・ペアリングリンクで接続」を選び、
    IDE でコピーしたペアリングリンク (`orchestra://pair?...`) を貼り付ける
    - 貼り付けが難しければ「手入力」タブでアドレスとトークンを入力する
 3. 「接続」をタップ
 
-接続情報は端末内に保存され、次回起動時に自動で復帰します。複数の PC を登録して切り替えることもできます。
+接続する前に、指定された PC のトークンがアカウントの RemoteSession にあるかを確かめます。
+無ければ「この PC は、ログイン中のアカウントのセッションではありません」と表示して繋ぎません。
+PC 側も、アプリが送る Division の JWT のユーザーが PC のアカウントと違えば `403 account_mismatch` で断ります。
+
+接続情報は端末内に保存され、次回起動時に自動で復帰します。保存した接続は保存したアカウントに
+ひも付いていて、別のアカウントでログインしているあいだは一覧に出ません。ログアウトすると PC との
+通信を止め (同じアカウントでログインし直せば復帰します)、別のアカウントでログインすると接続を切ります。
+PC 側のアカウントが途中で変わった場合も、その場で切断します。
 
 ### USB 接続で使う (Wi-Fi が使えない場合)
 
@@ -152,11 +162,61 @@ Set ascAppId in the submit profile (eas.json) or re-run this command in interact
 `eas.json` の `submit.production.ios.ascAppId` に設定済みです。別アプリに使い回す場合は
 この値を書き換えてください。
 
+### Xcode Cloud でビルドする
+
+EAS の代わりに、Apple の Xcode Cloud でも iOS 版をビルド・TestFlight 配信できます。
+`ios/` はコミットしていない (Expo の managed workflow のまま) ので、Xcode Cloud が
+リポジトリを clone した直後に `ios/ci_scripts/ci_post_clone.sh` が毎回ネイティブプロジェクトを作ります。
+
+1. Homebrew で Node (既定は `node@22`) を入れる。CocoaPods が無ければそれも入れる
+2. `npm ci`
+3. `npx expo prebuild --platform ios` (チーム ID とビルド番号をここで差し込む)
+4. `pod install`
+
+`app.json` を変えても、次のビルドの prebuild でそのまま反映されます。
+
+#### 初回のセットアップ (Mac で一度だけ)
+
+ワークフローは Xcode から作るので、手元で一度だけ iOS プロジェクトを生成します
+(`ios/` は `.gitignore` 済みで、`ios/ci_scripts/` だけがコミット対象です)。
+
+```bash
+npm ci
+APPLE_TEAM_ID=<チーム ID> npx expo prebuild --platform ios
+open ios/OrchestraMobile.xcworkspace
+```
+
+Xcode で Xcode Cloud のワークフローを作成し、次のように設定します。
+
+| 項目 | 値 |
+| --- | --- |
+| ワークスペース / スキーム | `ios/OrchestraMobile.xcworkspace` / `OrchestraMobile` |
+| Environment → Environment Variables | `APPLE_TEAM_ID` = チーム ID (developer.apple.com → Membership details の 10 文字) |
+| Actions | Archive (iOS)。配信するなら Deployment Preparation を TestFlight / App Store に |
+
+App Store Connect には、バンドル ID `com.hero.orchestra` のアプリ (`eas.json` の `ascAppId` と同じもの) が
+登録済みである必要があります。
+
+任意の環境変数:
+
+| 変数 | 用途 |
+| --- | --- |
+| `NODE_FORMULA` | Homebrew の Node フォーミュラを変える (例: `node@24`) |
+
+#### ビルド番号
+
+`CFBundleVersion` には Xcode Cloud の `CI_BUILD_NUMBER` を使います (`app.config.ts` が
+`IOS_BUILD_NUMBER` として受け取る)。EAS (`appVersionSource: remote`) で同じバージョンを
+アップロード済みの場合、それ以下の番号は App Store Connect に弾かれるので、Xcode Cloud の設定で
+次のビルド番号を EAS の最新より大きくしておいてください。EAS 側のビルドはこれまで通りで、
+環境変数を渡さない限り `app.config.ts` は何も上書きしません。
+
 ### ディレクトリ構成
 
 ```
-app.config.ts                  app.json に EAS のプロジェクト ID / アカウントを差し込む
+app.config.ts                  app.json に EAS のプロジェクト ID / アカウント、Xcode Cloud のチーム ID / ビルド番号を差し込む
 scripts/eas-preflight.js       ビルド前に EAS のプロジェクト ID が揃っているか確認
+ios/ci_scripts/ci_post_clone.sh  Xcode Cloud: clone 直後に prebuild と pod install を行う
 App.tsx                        ルート。ログイン/検出/手動接続/タブの切り替え
 src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
@@ -177,6 +237,7 @@ src/state/DivisionAuthContext.tsx  Division ログイン状態 + 新規セッシ
 src/state/storage.ts           AsyncStorage への保存 (接続情報のみ)
 src/state/tuningStorage.ts     ルーティング方針の保存
 src/components/ui.tsx          共通の UI 部品
+src/theme.ts                   色・余白・角丸 (デスクトップの既定テーマ Orchestra Dark と同じ色)
 src/screens/                   各画面 (ログイン / 検出 / 手動接続 / 各タブ)
 ```
 
@@ -204,7 +265,7 @@ Division の「どの役割をどのモデルに振るか」という組み合�
 - **閲覧**: 新着 / 人気 / 取り込み数で並べ替え、タイトルやモデル名で検索
 - **いいね**: タップで ON/OFF (いいね数は DB 側のトリガで集計するので、数を直接書き換えることはできません)
 - **取り込み**: 既存プロジェクトに重ねる / 置き換える / 新しいプロジェクトとして作る の 3 通り
-- **公開**: 共有タブ、または Division タブの各プロジェクトの「この割り当てを共有する」から
+- **公開**: 共有タブの「共有」ボタン、または Division タブの各プロジェクトカードにある共有アイコンから
 
 共有されるのは **役割とモデルの組み合わせ・タイトル・説明・表示名だけ** です。API キー、コード、
 ワークスペースの中身は一切含まれません。投稿を編集・削除できるのは投稿者本人だけです

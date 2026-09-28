@@ -4,6 +4,11 @@
  * IDE 側は WebSocket を持たないので、`GET /api/state` を一定間隔で叩いて
  * 差分を拾う。返ってくる `revision` が変わったときだけ再描画が走るよう、
  * 同じ revision なら state を差し替えない。
+ *
+ * 繋ぐのはログイン中の Division アカウントのセッションだけ:
+ *   - 保存済みの接続は、保存したアカウント (ownerUserId) でログインしているときだけ見せる・使う
+ *   - ログアウト中は PC にリクエストを送らない。別のアカウントでログインしたら接続を切る
+ *   - PC 側のアカウントが変わって 403 account_mismatch が返ってきたら、その場で切る
  */
 
 import React, {
@@ -19,6 +24,8 @@ import { AppState, AppStateStatus } from 'react-native';
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, Snapshot } from '../api/types';
+import { useToast } from '../components/ui';
+import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import { useDivisionAuth } from './DivisionAuthContext';
 import {
@@ -39,6 +46,7 @@ const POLL_INTERVAL_ERROR_MS = 8_000;
 
 type AppContextValue = {
 	// 接続
+	/** ログイン中のアカウントで保存した接続だけ */
 	connections: Connection[];
 	connection: Connection | null;
 	client: OrchestraClient | null;
@@ -74,7 +82,9 @@ export const useClient = (): OrchestraClient => {
 };
 
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
-	const { session } = useDivisionAuth();
+	const { session, isRestoring: isRestoringAuth } = useDivisionAuth();
+	const toast = useToast();
+	// 端末に保存された全アカウント分の接続。画面に渡すのはログイン中のアカウントの分だけ。
 	const [connections, setConnections] = useState<Connection[]>([]);
 	const [connection, setConnection] = useState<Connection | null>(null);
 	const [isRestoring, setIsRestoring] = useState(true);
@@ -90,16 +100,19 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	const failuresRef = useRef(0);
 	const snapshotRef = useRef<Snapshot | null>(null);
 
+	// ログイン中のアカウントで保存した接続のときだけ使う。別のアカウントの PC には、リクエストも送らない。
+	const accountConnection = connection && session && connection.ownerUserId === session.userId ? connection : null;
+
 	const client = useMemo(() => {
-		if (!connection) {
+		if (!accountConnection) {
 			clientRef.current = null;
 			return null;
 		}
-		if (clientRef.current) clientRef.current.setConnection(connection);
-		else clientRef.current = new OrchestraClient(connection);
+		if (clientRef.current) clientRef.current.setConnection(accountConnection);
+		else clientRef.current = new OrchestraClient(accountConnection);
 		clientRef.current.setDivisionAccessToken(session?.accessToken);
 		return clientRef.current;
-	}, [connection, session?.accessToken]);
+	}, [accountConnection, session?.accessToken]);
 
 	// --- 保存済みの接続を復元 ---
 	useEffect(() => {
@@ -123,6 +136,24 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			timerRef.current = null;
 		}
 	}, []);
+
+	/** 繋いでいる接続を切る (保存済みの一覧には残す)。 */
+	const dropActiveConnection = useCallback(async () => {
+		setConnection(null);
+		setSnapshot(null);
+		snapshotRef.current = null;
+		setError(null);
+		await saveActiveUrl(null);
+	}, []);
+
+	// --- アカウントとの突き合わせ ---
+	// 未ログインのあいだは accountConnection が null なので、PC にはリクエストを送らない (ログアウトも同じ)。
+	// 同じアカウントでログインし直せばそのまま復帰し、別のアカウント (や保存元の分からない古い接続) なら
+	// ここで切って、接続先を選び直してもらう。起動直後はログイン状態の復元が終わるまで待つ。
+	useEffect(() => {
+		if (isRestoring || isRestoringAuth || !connection || !session) return;
+		if (connection.ownerUserId !== session.userId) void dropActiveConnection();
+	}, [isRestoring, isRestoringAuth, connection, session, dropActiveConnection]);
 
 	const pollOnce = useCallback(async (): Promise<number> => {
 		const current = clientRef.current;
@@ -153,6 +184,13 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			return busy ? POLL_INTERVAL_BUSY_MS : POLL_INTERVAL_MS;
 		} catch (e) {
 			if (controller.signal.aborted) return POLL_INTERVAL_MS;
+			if (isAccountMismatch(e)) {
+				// PC 側が別のアカウントに切り替わった。繋ぎっぱなしにせず、接続先を選び直してもらう。
+				clientRef.current = null;
+				void dropActiveConnection();
+				toast.show(NOT_ACCOUNT_SESSION_MESSAGE, 'error');
+				return POLL_INTERVAL_MS;
+			}
 			failuresRef.current += 1;
 			const message = e instanceof OrchestraApiError ? e.userMessage : String(e);
 			// 1 回のタイムアウトで赤くしない (スマホのスリープ復帰直後によく起きる)。
@@ -161,12 +199,14 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		} finally {
 			if (inFlightRef.current === controller) inFlightRef.current = null;
 		}
-	}, []);
+	}, [dropActiveConnection, toast]);
 
 	const scheduleLoop = useCallback((delay: number) => {
 		clearTimer();
 		timerRef.current = setTimeout(() => {
 			void (async () => {
+				// 切断済み (または切り替え中) なら、ここでループを止める。
+				if (!clientRef.current) return;
 				if (appStateRef.current !== 'active') { scheduleLoop(POLL_INTERVAL_MS); return; }
 				const nextDelay = await pollOnce();
 				scheduleLoop(nextDelay);
@@ -175,7 +215,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	}, [clearTimer, pollOnce]);
 
 	useEffect(() => {
-		if (!connection) {
+		if (!accountConnection) {
 			clearTimer();
 			setSnapshot(null);
 			snapshotRef.current = null;
@@ -191,7 +231,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			clearTimer();
 			inFlightRef.current?.abort();
 		};
-	}, [connection, clearTimer, pollOnce, scheduleLoop]);
+	}, [accountConnection, clearTimer, pollOnce, scheduleLoop]);
 
 	// バックグラウンドの間はポーリングを止め、戻ってきたら即座に取り直す。
 	useEffect(() => {
@@ -232,20 +272,18 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	}, [clearTimer, pollOnce, scheduleLoop]);
 
 	const connect = useCallback(async (next: Connection) => {
-		const updated = upsertConnection(connections, next);
+		if (!session) throw new Error('Division アカウントでログインしてから接続してください。');
+		// どのアカウントで繋いだかを残し、別のアカウントでは使わないようにする。
+		const owned: Connection = { ...next, ownerUserId: session.userId };
+		const updated = upsertConnection(connections, owned);
 		setConnections(updated);
-		setConnection(next);
+		setConnection(owned);
 		setSnapshot(null);
 		setError(null);
-		await Promise.all([saveConnections(updated), saveActiveUrl(next.url)]);
-	}, [connections]);
+		await Promise.all([saveConnections(updated), saveActiveUrl(owned.url)]);
+	}, [connections, session]);
 
-	const disconnect = useCallback(async () => {
-		setConnection(null);
-		setSnapshot(null);
-		setError(null);
-		await saveActiveUrl(null);
-	}, []);
+	const disconnect = dropActiveConnection;
 
 	const forget = useCallback(async (url: string) => {
 		const updated = removeConnection(connections, url);
@@ -258,9 +296,13 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		}
 	}, [connections, connection]);
 
+	const accountConnections = useMemo(
+		() => connectionsForAccount(connections, session?.userId),
+		[connections, session?.userId],
+	);
 	const value = useMemo<AppContextValue>(() => ({
-		connections,
-		connection,
+		connections: accountConnections,
+		connection: accountConnection,
 		client,
 		isRestoring,
 		connect,
@@ -271,7 +313,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		isRefreshing,
 		refresh,
 		invalidate,
-	}), [connections, connection, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
+	}), [accountConnections, accountConnection, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
 
 	return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

@@ -8,7 +8,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-	Modal,
 	Pressable,
 	RefreshControl,
 	ScrollView,
@@ -24,10 +23,10 @@ import {
 	Body,
 	Button,
 	Card,
-	Divider,
 	EmptyState,
 	ErrorBanner,
 	Icon,
+	IconButton,
 	Input,
 	Loading,
 	Muted,
@@ -35,7 +34,9 @@ import {
 	Screen,
 	ScreenHeader,
 	SectionTitle,
-	Title,
+	Sheet,
+	confirmAction,
+	useToast,
 } from '../components/ui';
 import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
 import { publishAssignmentPost } from '../lib/divisionSocial';
@@ -60,20 +61,25 @@ const AgentRow = ({
 
 	return (
 		<View style={styles.agentRow}>
-			<Pressable accessibilityRole='button' onPress={() => setOpen(o => !o)} style={styles.agentHeader}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityState={{ expanded: open }}
+				accessibilityLabel={`${roleTitle(assignment.role)}、${assignment.model || 'モデル未設定'}。モデルを変更`}
+				onPress={() => setOpen(o => !o)}
+				style={styles.agentHeader}
+			>
 				<View style={styles.flex}>
 					<Body>{roleTitle(assignment.role)}</Body>
 					<Muted>{providerTitle(assignment.provider)} · {assignment.model || '(未設定)'}</Muted>
 				</View>
-				<Text style={styles.link}>{open ? '閉じる' : '変更'}</Text>
-				<Pressable
-					accessibilityRole='button'
+				<Text style={styles.link}>{open ? '閉じる' : 'モデルを変更'}</Text>
+				<Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={colors.accentText} />
+				<IconButton
+					icon='x'
+					color={colors.fgFaint}
 					accessibilityLabel={`${roleTitle(assignment.role)} の役割を外す`}
 					onPress={onRemove}
-					style={styles.removeButton}
-				>
-					<Icon name='x' size={18} color={colors.fgFaint} />
-				</Pressable>
+				/>
 			</Pressable>
 
 			{open ? (
@@ -96,7 +102,8 @@ const AgentRow = ({
 											}}
 											style={[styles.modelChip, selected && styles.modelChipSelected]}
 										>
-											<Text style={[styles.modelChipText, selected && { color: colors.fg }]}>{model}</Text>
+											{selected ? <Icon name='check' size={14} color={colors.fg} /> : null}
+										<Text style={[styles.modelChipText, selected && { color: colors.fg }]}>{model}</Text>
 										</Pressable>
 									);
 								})}
@@ -127,10 +134,12 @@ const ProjectEditor = ({
 	const [customRole, setCustomRole] = useState('');
 	const [saving, setSaving] = useState(false);
 
+	// ポーリングで revision が進むたびに project は別オブジェクトになる。
+	// それで入力中の内容を戻さないよう、別のプロジェクトを開いたときだけ読み直す。
 	useEffect(() => {
 		setName(project.name);
 		setAgents(project.agents);
-	}, [project]);
+	}, [project.projectId]);
 
 	const save = useCallback(async () => {
 		setSaving(true);
@@ -141,89 +150,113 @@ const ProjectEditor = ({
 		}
 	}, [name, agents, onSave]);
 
+	const dirty = name !== project.name || JSON.stringify(agents) !== JSON.stringify(project.agents);
+
+	/** 保存せずに閉じると編集が消えるので、変更があるときだけ確かめる。 */
+	const close = useCallback(async () => {
+		if (dirty) {
+			const ok = await confirmAction({
+				title: '変更を破棄しますか？',
+				message: '保存していない変更は失われます。',
+				confirmLabel: '破棄して閉じる',
+				destructive: true,
+			});
+			if (!ok) return;
+		}
+		onClose();
+	}, [dirty, onClose]);
+
+	const remove = useCallback(async () => {
+		const ok = await confirmAction({
+			title: 'プロジェクトを削除しますか？',
+			message: `「${project.name}」と役割の割り当てを削除します。元に戻せません。`,
+			confirmLabel: '削除',
+			destructive: true,
+		});
+		if (ok) await onDelete();
+	}, [project.name, onDelete]);
+
 	return (
-		<Modal animationType='slide' presentationStyle='pageSheet' onRequestClose={onClose}>
-			<Screen>
-				<View style={styles.modalHeader}>
-					<Title>プロジェクトを編集</Title>
-					<Pressable accessibilityRole='button' onPress={onClose}>
-						<Text style={styles.link}>閉じる</Text>
-					</Pressable>
-				</View>
+		<Sheet
+			title='プロジェクトを編集'
+			eyebrow={project.name}
+			onClose={() => void close()}
+			headerRight={<Button title='保存' size='sm' loading={saving} disabled={!dirty || !name.trim()} onPress={() => void save()} />}
+		>
+			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+				<Card>
+					<SectionTitle>基本情報</SectionTitle>
+					<Muted>プロジェクト名</Muted>
+					<Input value={name} onChangeText={setName} placeholder='プロジェクト名' />
+					<Muted>プロジェクト ID</Muted>
+					<Body>{project.projectId || '(未設定)'}</Body>
+				</Card>
 
-				<ScrollView contentContainerStyle={styles.content}>
-					<Card>
-						<SectionTitle>基本情報</SectionTitle>
-						<Muted>プロジェクト名</Muted>
-						<Input value={name} onChangeText={setName} placeholder='プロジェクト名' />
-						<Muted>プロジェクト ID</Muted>
-						<Body>{project.projectId || '(未設定)'}</Body>
-					</Card>
+				<Card>
+					<SectionTitle right={<Badge label={`${agents.length} 役割`} />}>役割ごとのモデル</SectionTitle>
+					<Muted>ここで割り当てたモデルが、Division API のオーケストレーションで使われます。</Muted>
+					{agents.length === 0 ? <Muted>役割が登録されていません。</Muted> : null}
+					{agents.map((a, idx) => (
+						<AgentRow
+							key={`${a.role}-${idx}`}
+							assignment={a}
+							providers={providers}
+							onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
+							onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
+						/>
+					))}
+				</Card>
 
-					<Card>
-						<SectionTitle right={<Badge label={`${agents.length} 役割`} />}>役割ごとのモデル</SectionTitle>
-						<Muted>ここで割り当てたモデルが、Division API のオーケストレーションで使われます。</Muted>
-						{agents.length === 0 ? <Muted>役割が登録されていません。</Muted> : null}
-						{agents.map((a, idx) => (
-							<AgentRow
-								key={`${a.role}-${idx}`}
-								assignment={a}
-								providers={providers}
-								onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
-								onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
-							/>
+				<Card>
+					<SectionTitle>役割を追加</SectionTitle>
+					<Muted>まだ割り当てていない役割を足せます。モデルは追加したあとに選んでください。</Muted>
+					<View style={styles.roleChips}>
+						{KNOWN_ROLES.filter(role => !agents.some(a => a.role === role)).map(role => (
+							<Pressable
+								key={role}
+								accessibilityRole='button'
+								accessibilityLabel={`${roleTitle(role)} を追加`}
+								onPress={() => setAgents(prev => [...prev, {
+									role,
+									provider: providers[0]?.provider ?? '',
+									model: providers[0]?.models[0] ?? '',
+								}])}
+								style={styles.roleChip}
+							>
+								<Icon name='plus' size={14} color={colors.accentText} />
+								<Text style={styles.roleChipText}>{roleTitle(role)}</Text>
+							</Pressable>
 						))}
-					</Card>
+					</View>
+					<Row>
+						<Input
+							value={customRole}
+							onChangeText={setCustomRole}
+							placeholder='その他の役割 (英小文字)'
+							autoCapitalize='none'
+							style={styles.flex}
+						/>
+						<Button
+							title='追加'
+							variant='secondary'
+							disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
+							onPress={() => {
+								const role = customRole.trim();
+								setCustomRole('');
+								setAgents(prev => [...prev, {
+									role,
+									provider: providers[0]?.provider ?? '',
+									model: providers[0]?.models[0] ?? '',
+								}]);
+							}}
+						/>
+					</Row>
+				</Card>
 
-					<Card>
-						<SectionTitle>役割を追加</SectionTitle>
-						<Muted>まだ割り当てていない役割を足せます。モデルは追加したあとに選んでください。</Muted>
-						<View style={styles.roleChips}>
-							{KNOWN_ROLES.filter(role => !agents.some(a => a.role === role)).map(role => (
-								<Pressable
-									key={role}
-									accessibilityRole='button'
-									onPress={() => setAgents(prev => [...prev, {
-										role,
-										provider: providers[0]?.provider ?? '',
-										model: providers[0]?.models[0] ?? '',
-									}])}
-									style={styles.roleChip}
-								>
-									<Text style={styles.roleChipText}>+ {roleTitle(role)}</Text>
-								</Pressable>
-							))}
-						</View>
-						<Row>
-							<Input
-								value={customRole}
-								onChangeText={setCustomRole}
-								placeholder='その他の役割 (英小文字)'
-								autoCapitalize='none'
-								style={styles.flex}
-							/>
-							<Button
-								title='追加'
-								variant='secondary'
-								disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
-								onPress={() => {
-									const role = customRole.trim();
-									setCustomRole('');
-									setAgents(prev => [...prev, {
-										role,
-										provider: providers[0]?.provider ?? '',
-										model: providers[0]?.models[0] ?? '',
-									}]);
-								}}
-							/>
-						</Row>
-					</Card>
-
-					<Button title='保存' onPress={() => void save()} loading={saving} />
-					<Button title='このプロジェクトを削除' variant='danger' onPress={() => void onDelete()} />
-				</ScrollView>
-			</Screen>
-		</Modal>
+				<Button title='保存' icon='check' onPress={() => void save()} loading={saving} disabled={!dirty || !name.trim()} />
+				<Button title='このプロジェクトを削除' icon='trash-2' variant='ghost' onPress={() => void remove()} style={styles.centered} />
+			</ScrollView>
+		</Sheet>
 	);
 };
 
@@ -264,59 +297,54 @@ const ShareSheet = ({
 	}, [session, project, title, description, onClose, onDone]);
 
 	return (
-		<Modal animationType='slide' presentationStyle='pageSheet' onRequestClose={onClose}>
-			<Screen>
-				<View style={styles.modalHeader}>
-					<Title>役割の割り当てを共有</Title>
-					<Pressable accessibilityRole='button' onPress={onClose}><Text style={styles.link}>閉じる</Text></Pressable>
-				</View>
-				<ScrollView contentContainerStyle={styles.content}>
-					{!session ? (
-						<Card><Muted>共有するには Division アカウントでログインしてください。</Muted></Card>
-					) : (
-						<>
-							<Card>
-								<Muted>タイトル</Muted>
-								<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
-								<Muted>説明 (任意)</Muted>
-								<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
-							</Card>
-							<Card>
-								<SectionTitle>共有される内容</SectionTitle>
-								{project.agents.map((a, i) => (
-									<Row key={`${a.role}-${i}`} style={styles.spread}>
-										<Muted>{roleTitle(a.role)}</Muted>
-										<Body>{a.model || '(未設定)'}</Body>
-									</Row>
-								))}
-								<Muted>API キーやコードは共有されません。</Muted>
-							</Card>
-							{error ? <ErrorBanner message={error} /> : null}
-							<Button
-								title='共有する'
-								loading={busy}
-								disabled={!title.trim() || project.agents.length === 0}
-								onPress={() => void run()}
-							/>
-						</>
-					)}
-				</ScrollView>
-			</Screen>
-		</Modal>
+		<Sheet title='役割の割り当てを共有' eyebrow={project.name} onClose={onClose}>
+			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+				{!session ? (
+					<Card><Muted>共有するには Division アカウントでログインしてください。</Muted></Card>
+				) : (
+					<>
+						<Card>
+							<Muted>タイトル</Muted>
+							<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
+							<Muted>説明 (任意)</Muted>
+							<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
+						</Card>
+						<Card>
+							<SectionTitle>共有される内容</SectionTitle>
+							{project.agents.map((a, i) => (
+								<Row key={`${a.role}-${i}`} style={styles.spread}>
+									<Muted>{roleTitle(a.role)}</Muted>
+									<Body>{a.model || '(未設定)'}</Body>
+								</Row>
+							))}
+							<Muted>API キーやコードは共有されません。</Muted>
+						</Card>
+						{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
+						<Button
+							title='共有する'
+							icon='share-2'
+							loading={busy}
+							disabled={!title.trim() || project.agents.length === 0}
+							onPress={() => void run()}
+						/>
+					</>
+				)}
+			</ScrollView>
+		</Sheet>
 	);
 };
 
 export const ProjectsScreen = () => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
+	const toast = useToast();
 	const [providers, setProviders] = useState<ProviderModels[]>([]);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [sharingId, setSharingId] = useState<string | null>(null);
-	const [notice, setNotice] = useState<string | null>(null);
 	const [adding, setAdding] = useState(false);
 	const [newName, setNewName] = useState('');
 	const [newId, setNewId] = useState('');
-	const [syncing, setSyncing] = useState(false);
+	const [syncing, setSyncing] = useState<'pull' | 'push' | null>(null);
 
 	const division = snapshot?.division ?? null;
 	const editing = useMemo(
@@ -343,16 +371,17 @@ export const ProjectsScreen = () => {
 		return () => { cancelled = true; };
 	}, [client]);
 
-	const act = useCallback(async (fn: () => Promise<unknown>, successNote?: string) => {
-		setNotice(null);
+	const act = useCallback(async (fn: () => Promise<unknown>, successNote?: string): Promise<boolean> => {
 		try {
 			await fn();
-			if (successNote) setNotice(successNote);
+			if (successNote) toast.show(successNote, 'success');
 			invalidate();
+			return true;
 		} catch (e) {
-			setNotice(e instanceof OrchestraApiError ? e.userMessage : String(e));
+			toast.show(e instanceof OrchestraApiError ? e.userMessage : String(e), 'error');
+			return false;
 		}
-	}, [invalidate]);
+	}, [invalidate, toast]);
 
 	if (!snapshot || !client || !division) {
 		return (
@@ -370,7 +399,7 @@ export const ProjectsScreen = () => {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				<Card>
 					<SectionTitle right={<Badge label={`${division.projects.length} 件`} />}>Division プロジェクト</SectionTitle>
@@ -378,21 +407,27 @@ export const ProjectsScreen = () => {
 					<Row>
 						<Button
 							title='クラウドから取得'
+							icon='download-cloud'
 							variant='secondary'
-							loading={syncing}
+							size='sm'
+							loading={syncing === 'pull'}
+							disabled={syncing !== null}
 							onPress={() => {
-								setSyncing(true);
-								void act(() => client.pullProjectsFromSupabase(), '取得しました').finally(() => setSyncing(false));
+								setSyncing('pull');
+								void act(() => client.pullProjectsFromSupabase(), 'クラウドから取得しました').finally(() => setSyncing(null));
 							}}
 							style={styles.flex}
 						/>
 						<Button
 							title='クラウドへ保存'
+							icon='upload-cloud'
 							variant='secondary'
-							loading={syncing}
+							size='sm'
+							loading={syncing === 'push'}
+							disabled={syncing !== null}
 							onPress={() => {
-								setSyncing(true);
-								void act(() => client.pushProjectsToSupabase(), '送信しました').finally(() => setSyncing(false));
+								setSyncing('push');
+								void act(() => client.pushProjectsToSupabase(), 'クラウドへ保存しました').finally(() => setSyncing(null));
 							}}
 							style={styles.flex}
 						/>
@@ -400,17 +435,26 @@ export const ProjectsScreen = () => {
 				</Card>
 
 				{division.projects.length === 0 ? (
-					<EmptyState title='プロジェクトがありません' detail='下の「プロジェクトを追加」から作成できます。' />
+					<EmptyState icon='layers' title='プロジェクトがありません' detail='下の「プロジェクトを追加」から作成できます。' />
 				) : null}
 
 				{division.projects.map(project => (
 					<Card key={project.projectId || project.name}>
 						<Row style={styles.spread}>
 							<View style={styles.flex}>
-								<Body numberOfLines={1}>{project.name}</Body>
+								<Row>
+									<Body numberOfLines={1}>{project.name}</Body>
+									{project.isActive ? <Badge label='有効' icon='check-circle' color={colors.success} /> : null}
+								</Row>
 								<Muted numberOfLines={1}>{project.projectId || 'ID 未設定'} · {project.agents.length} 役割</Muted>
 							</View>
-							{project.isActive ? <Badge label='有効' color={colors.success} /> : null}
+							<IconButton
+								icon='share-2'
+								accessibilityLabel={`${project.name} の割り当てを共有`}
+								disabled={project.agents.length === 0}
+								onPress={() => setSharingId(project.projectId)}
+							/>
+							<IconButton icon='edit-2' accessibilityLabel={`${project.name} を編集`} onPress={() => setEditingId(project.projectId)} />
 						</Row>
 
 						<View style={styles.agentPreview}>
@@ -422,34 +466,27 @@ export const ProjectsScreen = () => {
 							{project.agents.length > 4 ? <Muted>他 {project.agents.length - 4} 件</Muted> : null}
 						</View>
 
-						<Divider />
-
 						<Row>
 							<Button
 								title={project.isActive ? 'このプロジェクトのみ有効' : '有効にする'}
+								variant={project.isActive ? 'secondary' : 'primary'}
+								size='sm'
 								onPress={() => void act(() => client.activateProject(project.projectId, true), `${project.name} を有効にしました`)}
-								style={styles.flex}
 							/>
 							<Button
 								title={project.isActive ? '無効' : '併用'}
-								variant='secondary'
+								variant='ghost'
+								size='sm'
 								onPress={() => void act(() => client.activateProject(project.projectId, false))}
 							/>
-							<Button title='編集' variant='secondary' onPress={() => setEditingId(project.projectId)} />
 						</Row>
-						<Button
-							title='この割り当てを共有する'
-							variant='ghost'
-							disabled={project.agents.length === 0}
-							onPress={() => setSharingId(project.projectId)}
-						/>
 					</Card>
 				))}
 
 				{adding ? (
 					<Card>
 						<SectionTitle>プロジェクトを追加</SectionTitle>
-						<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' />
+						<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' autoFocus />
 						<Input value={newId} onChangeText={setNewId} placeholder='プロジェクト ID (任意)' autoCapitalize='none' />
 						<Row>
 							<Button
@@ -460,8 +497,9 @@ export const ProjectsScreen = () => {
 									const base = division.projects[0]?.agents ?? [];
 									void act(
 										() => client.addProject({ projectId: newId.trim(), name: newName.trim(), agents: base }),
-										'追加しました',
-									).then(() => {
+										'プロジェクトを追加しました',
+									).then(ok => {
+										if (!ok) return;
 										setNewName('');
 										setNewId('');
 										setAdding(false);
@@ -472,10 +510,8 @@ export const ProjectsScreen = () => {
 						</Row>
 					</Card>
 				) : (
-					<Button title='プロジェクトを追加' variant='secondary' onPress={() => setAdding(true)} />
+					<Button title='プロジェクトを追加' icon='plus' variant='secondary' onPress={() => setAdding(true)} />
 				)}
-
-				{notice ? <Text style={styles.notice}>{notice}</Text> : null}
 			</ScrollView>
 
 			{editing ? (
@@ -484,12 +520,10 @@ export const ProjectsScreen = () => {
 					providers={providers}
 					onClose={() => setEditingId(null)}
 					onSave={async (name, agents) => {
-						await act(() => client.saveProject(editing.projectId, { name, agents }), '保存しました');
-						setEditingId(null);
+						if (await act(() => client.saveProject(editing.projectId, { name, agents }), '保存しました')) setEditingId(null);
 					}}
 					onDelete={async () => {
-						await act(() => client.deleteProject(editing.projectId), '削除しました');
-						setEditingId(null);
+						if (await act(() => client.deleteProject(editing.projectId), 'プロジェクトを削除しました')) setEditingId(null);
 					}}
 				/>
 			) : null}
@@ -498,7 +532,7 @@ export const ProjectsScreen = () => {
 				<ShareSheet
 					project={sharing}
 					onClose={() => setSharingId(null)}
-					onDone={setNotice}
+					onDone={message => toast.show(message, 'success')}
 				/>
 			) : null}
 		</Screen>
@@ -508,20 +542,18 @@ export const ProjectsScreen = () => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
-	removeButton: {
-		width: 40,
-		height: 40,
-		alignItems: 'center',
-		justifyContent: 'center',
-	},
+	centered: { alignSelf: 'center' },
+	bannerFlush: { margin: 0 },
 	roleChips: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',
 		gap: spacing.xs,
 	},
 	roleChip: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 4,
 		minHeight: 40,
-		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: radius.lg,
@@ -533,17 +565,9 @@ const styles = StyleSheet.create({
 		fontWeight: '600',
 	},
 	content: {
-		padding: spacing.lg,
-		gap: spacing.lg,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
-	},
-	modalHeader: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		justifyContent: 'space-between',
-		padding: spacing.lg,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		gap: spacing.xs,
 	},
 	agentRow: {
 		borderWidth: 1,
@@ -555,7 +579,8 @@ const styles = StyleSheet.create({
 	agentHeader: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.sm,
+		gap: spacing.xs,
+		minHeight: 44,
 	},
 	agentPreview: {
 		gap: 2,
@@ -576,8 +601,10 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	modelChip: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 4,
 		minHeight: 44,
-		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: 999,
@@ -585,8 +612,8 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.xs,
 	},
 	modelChipSelected: {
-		borderColor: colors.accent,
-		backgroundColor: colors.accentSoft,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgHover,
 	},
 	modelChipText: {
 		color: colors.fgMuted,
@@ -596,11 +623,6 @@ const styles = StyleSheet.create({
 		color: colors.accentText,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
-	},
-	notice: {
-		color: colors.fgMuted,
-		fontSize: fontSize.xs,
-		textAlign: 'center',
 	},
 });
 
