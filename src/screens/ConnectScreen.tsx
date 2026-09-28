@@ -5,16 +5,31 @@
  * (クリップボード共有ができないなど) のために、アドレスとトークンの手入力も残す。
  */
 
-import React, { useCallback, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Connection } from '../api/types';
-import { Body, Button, Card, Input, Muted, Row, Screen, SectionTitle, Title } from '../components/ui';
+import {
+	Body,
+	Button,
+	Card,
+	ErrorBanner,
+	Icon,
+	IconButton,
+	Input,
+	Muted,
+	Row,
+	Screen,
+	SectionTitle,
+	SegmentedControl,
+	Title,
+	confirmAction,
+} from '../components/ui';
 import { verifyAndConnect } from '../lib/connect';
 import { buildConnection, parsePairingInput } from '../lib/pairing';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, fontSize, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
 
 type Mode = 'link' | 'manual';
 
@@ -26,46 +41,62 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 	const [link, setLink] = useState('');
 	const [host, setHost] = useState('');
 	const [token, setToken] = useState('');
-	const [status, setStatus] = useState<string | null>(null);
+	const [status, setStatus] = useState<{ message: string; tone: 'error' | 'warning' } | null>(null);
 	const [busy, setBusy] = useState(false);
+	/** どのボタンから繋ぎに行ったか。そのボタンにだけスピナーを出す。 */
+	const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+	const tokenRef = useRef<TextInput>(null);
 
 	/** 繋ぐ前に /api/ping と /api/state を叩いて、相手と権限を確かめる。 */
-	const tryConnect = useCallback(async (candidate: Connection) => {
+	const tryConnect = useCallback(async (candidate: Connection, source: string) => {
 		if (!session) {
-			setStatus('リモートコントロールには、デスクトップと同じ Division アカウントでのログインが必要です。');
+			setStatus({ message: 'リモートコントロールには、デスクトップと同じ Division アカウントでのログインが必要です。', tone: 'error' });
 			return;
 		}
 		setBusy(true);
+		setConnectingFrom(source);
 		setStatus(null);
 		const result = await verifyAndConnect(candidate, connect, session.accessToken);
-		setStatus(result.ok ? (result.warning ?? null) : result.message);
+		if (!result.ok) setStatus({ message: result.message, tone: 'error' });
+		else if (result.warning) setStatus({ message: result.warning, tone: 'warning' });
 		setBusy(false);
+		setConnectingFrom(null);
 	}, [connect, session]);
 
 	const onSubmitLink = useCallback(() => {
 		const parsed = parsePairingInput(link);
 		if (!parsed) {
-			setStatus('ペアリングリンクを読み取れませんでした。IDE の設定 → リモートコントロール →「ペアリングリンクをコピー」で取得したものを貼り付けてください。');
+			setStatus({ message: 'ペアリングリンクを読み取れませんでした。IDE の設定 → リモートコントロール →「ペアリングリンクをコピー」で取得したものを貼り付けてください。', tone: 'error' });
 			return;
 		}
-		void tryConnect(parsed);
+		void tryConnect(parsed, 'link');
 	}, [link, tryConnect]);
 
 	const onSubmitManual = useCallback(() => {
 		const built = buildConnection(host, token);
 		if (!built) {
-			setStatus('アドレスとトークンの両方を入力してください。');
+			setStatus({ message: 'アドレスとトークンの両方を入力してください。', tone: 'error' });
 			return;
 		}
-		void tryConnect(built);
+		void tryConnect(built, 'manual');
 	}, [host, token, tryConnect]);
+
+	const onForget = useCallback(async (c: Connection) => {
+		const ok = await confirmAction({
+			title: '保存済みの接続を削除しますか？',
+			message: `${c.label} (${c.url}) を一覧から削除します。`,
+			confirmLabel: '削除',
+			destructive: true,
+		});
+		if (ok) await forget(c.url);
+	}, [forget]);
 
 	return (
 		<Screen>
 			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
 
-					{onBack ? <Button title='戻る' variant='ghost' onPress={onBack} style={{ alignSelf: 'flex-start' }} /> : null}
+					{onBack ? <Button title='戻る' icon='chevron-left' variant='ghost' size='sm' onPress={onBack} style={styles.back} /> : null}
 
 					<View style={styles.hero}>
 						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
@@ -74,20 +105,11 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 					</View>
 
 					<Card>
-						<Row>
-							<Button
-								title='リンクを貼る'
-								variant={mode === 'link' ? 'primary' : 'secondary'}
-								onPress={() => setMode('link')}
-								style={styles.flex}
-							/>
-							<Button
-								title='手入力'
-								variant={mode === 'manual' ? 'primary' : 'secondary'}
-								onPress={() => setMode('manual')}
-								style={styles.flex}
-							/>
-						</Row>
+						<SegmentedControl<Mode>
+							options={[{ value: 'link', label: 'リンクを貼る' }, { value: 'manual', label: '手入力' }]}
+							value={mode}
+							onChange={next => { setMode(next); setStatus(null); }}
+						/>
 
 						{mode === 'link' ? (
 							<>
@@ -100,7 +122,7 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 									autoCorrect={false}
 									multiline
 								/>
-								<Button title='接続' onPress={onSubmitLink} loading={busy} />
+								<Button title='接続' icon='link' onPress={onSubmitLink} loading={connectingFrom === 'link'} disabled={!link.trim() || busy} />
 							</>
 						) : (
 							<>
@@ -109,23 +131,30 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 									value={host}
 									onChangeText={setHost}
 									placeholder='192.168.0.12:39231'
+									accessibilityLabel='アドレス'
 									autoCapitalize='none'
 									autoCorrect={false}
 									keyboardType='url'
+									returnKeyType='next'
+									onSubmitEditing={() => tokenRef.current?.focus()}
+									blurOnSubmit={false}
 								/>
 								<Input
+									ref={tokenRef}
 									value={token}
 									onChangeText={setToken}
 									placeholder='トークン'
 									autoCapitalize='none'
 									autoCorrect={false}
 									secureTextEntry
+									returnKeyType='go'
+									onSubmitEditing={onSubmitManual}
 								/>
-								<Button title='接続' onPress={onSubmitManual} loading={busy} />
+								<Button title='接続' icon='link' onPress={onSubmitManual} loading={connectingFrom === 'manual'} disabled={!host.trim() || !token.trim() || busy} />
 							</>
 						)}
 
-						{status ? <Text style={styles.status}>{status}</Text> : null}
+						{status ? <ErrorBanner message={status.message} tone={status.tone} style={styles.bannerFlush} /> : null}
 					</Card>
 
 					{connections.length > 0 ? (
@@ -133,12 +162,23 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 							<SectionTitle>保存済みの接続</SectionTitle>
 							{connections.map(c => (
 								<Card key={c.url} style={styles.savedCard}>
-									<Body numberOfLines={1}>{c.label}</Body>
-									<Muted>{c.url}</Muted>
 									<Row>
-										<Button title='接続' onPress={() => void tryConnect(c)} style={styles.flex} />
-										<Button title='削除' variant='secondary' onPress={() => void forget(c.url)} />
+										<View style={styles.deviceIcon}>
+											<Icon name='monitor' size={20} color={colors.accentText} />
+										</View>
+										<View style={styles.flex}>
+											<Body numberOfLines={1}>{c.label}</Body>
+											<Muted numberOfLines={1}>{c.url}</Muted>
+										</View>
+										<IconButton icon='trash-2' accessibilityLabel={`${c.label} を削除`} onPress={() => void onForget(c)} />
 									</Row>
+									<Button
+										title='接続'
+										icon='link'
+										onPress={() => void tryConnect(c, `saved:${c.url}`)}
+										loading={connectingFrom === `saved:${c.url}`}
+										disabled={busy}
+									/>
 								</Card>
 							))}
 						</View>
@@ -173,13 +213,18 @@ const styles = StyleSheet.create({
 		width: 64,
 		height: 64,
 	},
-	status: {
-		color: colors.warning,
-		fontSize: fontSize.xs,
-		lineHeight: 17,
-	},
+	back: { alignSelf: 'flex-start' },
+	bannerFlush: { margin: 0 },
 	savedCard: {
 		marginBottom: spacing.sm,
+	},
+	deviceIcon: {
+		width: 40,
+		height: 40,
+		borderRadius: radius.md,
+		backgroundColor: colors.accentSoft,
+		alignItems: 'center',
+		justifyContent: 'center',
 	},
 });
 

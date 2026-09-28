@@ -26,7 +26,6 @@ import {
 	Body,
 	Button,
 	Card,
-	ChipGroup,
 	Divider,
 	EmptyState,
 	ErrorBanner,
@@ -37,6 +36,8 @@ import {
 	Screen,
 	ScreenHeader,
 	SectionTitle,
+	SegmentedControl,
+	useToast,
 } from '../components/ui';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
@@ -142,9 +143,11 @@ const GroupTable = ({ title, groups }: { title: string; groups: CostGroup[] }) =
 
 export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {}) => {
 	const { session } = useDivisionAuth();
+	const toast = useToast();
+	// チャットの入力欄から開いたときはシートの中に出すので、見出しはシート側に任せる。
+	const embedded = composerPrompt !== undefined;
 
-	const [section, setSection] = useState<Section>(composerPrompt === undefined ? 'policy' : 'estimate');
-	const [notice, setNotice] = useState<string | null>(null);
+	const [section, setSection] = useState<Section>(embedded ? 'estimate' : 'policy');
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 
@@ -270,8 +273,8 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 		setEnabled(nextEnabled);
 		await saveRoutingPolicy(parsedDraft, nextEnabled);
 		setQuotes([]); setPlan(null);
-		setNotice(nextEnabled ? '方針を保存して有効にしました。' : '方針を無効にしました。');
-	}, [issues, parsedDraft]);
+		toast.show(nextEnabled ? '方針を保存して有効にしました' : '方針を無効にしました', 'success');
+	}, [issues, parsedDraft, toast]);
 
 	const runQuote = useCallback(async () => {
 		if (!session) return;
@@ -300,16 +303,16 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 		try {
 			const result = await refreshRoutingCatalog(session);
 			const catalog = result.routingCatalog;
-			setNotice(catalog
+			toast.show(catalog
 				? `モデルを更新しました（${catalog.models ?? 0}モデル・${catalog.domains?.length ?? 0}分野）`
-				: 'モデルを更新しました。');
+				: 'モデルを更新しました', 'success');
 			setQuotes([]); setPlan(null);
 		} catch (e) {
 			setError(errorText(e));
 		} finally {
 			setRefreshingCatalog(false);
 		}
-	}, [session]);
+	}, [session, toast]);
 
 	const saveAutoCharge = useCallback(async () => {
 		if (!session) return;
@@ -321,14 +324,14 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 				threshold: Number(autoChargeDraft.threshold),
 				amount: Number(autoChargeDraft.amount),
 			});
-			setNotice('自動チャージの設定を保存しました。');
+			toast.show('自動チャージの設定を保存しました', 'success');
 			await loadAccount();
 		} catch (e) {
 			setError(errorText(e));
 		} finally {
 			setSavingAutoCharge(false);
 		}
-	}, [session, autoChargeDraft, loadAccount]);
+	}, [session, autoChargeDraft, loadAccount, toast]);
 
 	const openBillingUrl = useCallback(async (make: () => Promise<string>) => {
 		setError(null);
@@ -360,8 +363,9 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 	if (!session) {
 		return (
 			<Screen>
-				<ScreenHeader title='チューニング' />
+				{embedded ? null : <ScreenHeader title='コスト' />}
 				<EmptyState
+					icon='log-in'
 					title='Division にログインしてください'
 					detail='コストの見積もりと利用履歴は Division アカウントに紐づいています。'
 				/>
@@ -373,11 +377,11 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 
 	return (
 		<Screen>
-			<ScreenHeader title='チューニング' subtitle={composerPrompt === undefined ? 'コストと性能の条件でモデルの選ばれ方を調整する' : '入力中の依頼を見積もる・方針タブで条件を調整'} />
+			{embedded ? null : <ScreenHeader title='コスト' subtitle='コストと性能の条件でモデルの選ばれ方を調整する' />}
 
-			{composerPrompt !== undefined ? <Muted>ここでの条件は見積もり用です。接続先PCの実行条件はPC側のDivision設定を使います。</Muted> : null}
 			<View style={styles.toolbar}>
-				<ChipGroup<Section> options={SECTIONS} value={section} onChange={setSection} />
+				<SegmentedControl<Section> options={SECTIONS} value={section} onChange={setSection} />
+				{embedded ? <Muted>ここでの条件は見積もり用です。接続先 PC の実行条件は PC 側の Division 設定を使います。</Muted> : null}
 			</View>
 
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
@@ -555,7 +559,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 						<Card>
 							<Row style={styles.spread}>
 								<SectionTitle>実際の料金</SectionTitle>
-								<Button title='更新' variant='ghost' onPress={() => void loadHistory()} />
+								<Button title='更新' icon='refresh-cw' variant='ghost' size='sm' loading={historyLoading && history.length > 0} onPress={() => void loadHistory()} />
 							</Row>
 							{historyLoading && history.length === 0 ? <Loading label='履歴を読み込んでいます…' /> : null}
 							{!historyLoading && history.length === 0 ? <Muted>まだ記録がありません。</Muted> : null}
@@ -590,17 +594,15 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 
 						{history.length > 0 ? (
 							<>
-								<View style={styles.inlineToolbar}>
-									<ChipGroup<'day' | 'role' | 'model'>
-										options={[
-											{ value: 'day', label: '日別' },
-											{ value: 'role', label: '役割別' },
-											{ value: 'model', label: 'モデル別' },
-										]}
-										value={breakdown}
-										onChange={setBreakdown}
-									/>
-								</View>
+								<SegmentedControl<'day' | 'role' | 'model'>
+									options={[
+										{ value: 'day', label: '日別' },
+										{ value: 'role', label: '役割別' },
+										{ value: 'model', label: 'モデル別' },
+									]}
+									value={breakdown}
+									onChange={setBreakdown}
+								/>
 								<GroupTable
 									title={breakdown === 'day' ? '日ごとの料金' : breakdown === 'role' ? '役割ごとの料金' : 'モデルごとの料金'}
 									groups={groups}
@@ -778,7 +780,6 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 					)
 				) : null}
 
-				{notice ? <Text style={styles.notice}>{notice}</Text> : null}
 			</ScrollView>
 		</Screen>
 	);
@@ -789,10 +790,10 @@ const styles = StyleSheet.create({
 	spread: { justifyContent: 'space-between' },
 	toolbar: {
 		padding: spacing.md,
+		gap: spacing.sm,
 		borderBottomWidth: 1,
 		borderBottomColor: colors.border,
 	},
-	inlineToolbar: { paddingHorizontal: spacing.xs },
 	content: {
 		padding: spacing.md,
 		gap: spacing.md,
@@ -840,10 +841,5 @@ const styles = StyleSheet.create({
 	warn: {
 		color: colors.warning,
 		fontSize: fontSize.xs,
-	},
-	notice: {
-		color: colors.fgMuted,
-		fontSize: fontSize.xs,
-		textAlign: 'center',
 	},
 });

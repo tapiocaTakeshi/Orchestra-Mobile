@@ -6,10 +6,10 @@
  * アカウントを使わない場合は、下のリンクから今まで通り手動ペアリングもできる。
  */
 
-import React, { useCallback, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Button, Card, ErrorBanner, Input, Muted, SectionTitle } from '../components/ui';
+import { Button, Card, ErrorBanner, IconButton, Input, Muted, SectionTitle } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, spacing } from '../theme';
 
@@ -20,8 +20,11 @@ export const LoginScreen = () => {
 	const [password, setPassword] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
+	const [showPassword, setShowPassword] = useState(false);
+	const passwordRef = useRef<TextInput>(null);
 
 	const onSubmit = useCallback(async () => {
+		if (busy) return;
 		if (!email.trim() || !password) {
 			setStatus('メールアドレスとパスワードを入力してください。');
 			return;
@@ -35,7 +38,7 @@ export const LoginScreen = () => {
 		} finally {
 			setBusy(false);
 		}
-	}, [email, password, login]);
+	}, [busy, email, password, login]);
 
 	return (
 		<View style={styles.flex}>
@@ -56,26 +59,42 @@ export const LoginScreen = () => {
 						<Input
 							accessibilityLabel='メールアドレス'
 							value={email}
-							onChangeText={setEmail}
+							onChangeText={text => { setEmail(text); setStatus(null); }}
 							placeholder='you@example.com'
 							autoCapitalize='none'
 							autoCorrect={false}
 							keyboardType='email-address'
 							autoComplete='email'
+							textContentType='username'
+							returnKeyType='next'
+							onSubmitEditing={() => passwordRef.current?.focus()}
+							blurOnSubmit={false}
 						/>
 						<Muted>パスワード</Muted>
-						<Input
-							accessibilityLabel='パスワード'
-							value={password}
-							onChangeText={setPassword}
-							placeholder='パスワード'
-							autoCapitalize='none'
-							autoCorrect={false}
-							secureTextEntry
-							autoComplete='password'
-						/>
-						<Button title='ログイン' onPress={() => { void onSubmit(); }} loading={busy} />
-						{status ? <ErrorBanner message={status} /> : null}
+						<View style={styles.passwordRow}>
+							<Input
+								ref={passwordRef}
+								accessibilityLabel='パスワード'
+								value={password}
+								onChangeText={text => { setPassword(text); setStatus(null); }}
+								placeholder='パスワード'
+								autoCapitalize='none'
+								autoCorrect={false}
+								secureTextEntry={!showPassword}
+								autoComplete='password'
+								textContentType='password'
+								returnKeyType='go'
+								onSubmitEditing={() => { void onSubmit(); }}
+								style={styles.flex}
+							/>
+							<IconButton
+								icon={showPassword ? 'eye-off' : 'eye'}
+								accessibilityLabel={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+								onPress={() => setShowPassword(v => !v)}
+							/>
+						</View>
+						{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
+						<Button title='ログイン' icon='log-in' onPress={() => { void onSubmit(); }} loading={busy} />
 					</Card>
 
 					<Muted style={{ textAlign: 'center' }}>アカウントの作成はデスクトップの Orchestra から。</Muted>
@@ -110,5 +129,7 @@ const styles = StyleSheet.create({
 		width: 64,
 		height: 64,
 	},
+	passwordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+	bannerFlush: { margin: 0 },
 });
 

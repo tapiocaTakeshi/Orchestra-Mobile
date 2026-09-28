@@ -9,13 +9,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Image, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Body, Button, Card, EmptyState, Muted, Row, Screen, SectionTitle, Title } from '../components/ui';
+import {
+	Badge,
+	Body,
+	Button,
+	Card,
+	EmptyState,
+	ErrorBanner,
+	Icon,
+	Loading,
+	Muted,
+	Row,
+	Screen,
+	SectionTitle,
+	Title,
+	confirmAction,
+} from '../components/ui';
 import { RemoteSessionRow, listRemoteSessions } from '../lib/divisionAuth';
 import { verifyAndConnect } from '../lib/connect';
 import { relativeTimeFromIso } from '../lib/format';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -35,6 +50,7 @@ export const DiscoverScreen = ({
 	const [error, setError] = useState<string | null>(null);
 	const [connectingId, setConnectingId] = useState<string | null>(null);
 	const [status, setStatus] = useState<string | null>(null);
+	const [pulling, setPulling] = useState(false);
 
 	const refresh = useCallback(async () => {
 		if (!session) return;
@@ -55,6 +71,21 @@ export const DiscoverScreen = ({
 		return () => clearInterval(timer);
 	}, [refresh]);
 
+	const onPull = useCallback(async () => {
+		setPulling(true);
+		try { await refresh(); } finally { setPulling(false); }
+	}, [refresh]);
+
+	const onLogout = useCallback(async () => {
+		const ok = await confirmAction({
+			title: 'ログアウトしますか？',
+			message: '保存済みの接続先は端末に残ります。',
+			confirmLabel: 'ログアウト',
+			destructive: true,
+		});
+		if (ok) await logout();
+	}, [logout]);
+
 	const onConnect = useCallback(async (row: RemoteSessionRow) => {
 		if (!session) return;
 		setConnectingId(row.id);
@@ -71,7 +102,7 @@ export const DiscoverScreen = ({
 		<Screen>
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={loading} onRefresh={() => { void refresh(); }} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.accent} />}
 			>
 				<View style={styles.hero}>
 					<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
@@ -79,50 +110,56 @@ export const DiscoverScreen = ({
 					<Muted>{session.email} でログイン中</Muted>
 				</View>
 
-				{error ? (
-					<Card>
-						<Body>{error}</Body>
-					</Card>
-				) : null}
+				{error ? <ErrorBanner message={error} onRetry={() => { void refresh(); }} style={styles.bannerFlush} /> : null}
+				{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
 
-				{status ? (
-					<Card>
-						<Body>{status}</Body>
-					</Card>
-				) : null}
-
-				{sessions.length === 0 && !loading ? (
+				{loading ? (
+					<Loading label='同じアカウントの PC を探しています…' />
+				) : sessions.length === 0 ? (
 					<EmptyState
+						icon='monitor'
 						title='デバイスが見つかりません'
-						detail='IDE 側でリモートコントロールを有効にし、同じ Division アカウントでログインしてください。'
+						detail='IDE 側でリモートコントロールを有効にし、同じ Division アカウントでログインしてください。見つかると自動でここに表示されます。'
 					/>
 				) : (
 					<View>
-						<SectionTitle>見つかったデバイス</SectionTitle>
-						{sessions.map(row => (
-							<Card key={row.id} style={styles.deviceCard}>
-								<Row>
-									<Body numberOfLines={1}>{row.deviceLabel || row.lanUrl}</Body>
-									{newSessionIds.includes(row.id) ? <View style={styles.newBadge} /> : null}
-								</Row>
-								<Muted>{row.lanUrl} · {relativeTimeFromIso(row.lastSeenAt)}</Muted>
-								<Button
-									title='接続'
-									onPress={() => { void onConnect(row); }}
-									loading={connectingId === row.id}
-								/>
-							</Card>
-						))}
+						<SectionTitle right={<Muted>自動で更新中</Muted>}>見つかったデバイス</SectionTitle>
+						{sessions.map(row => {
+							const isNew = newSessionIds.includes(row.id);
+							return (
+								<Card key={row.id} style={styles.deviceCard}>
+									<Row>
+										<View style={styles.deviceIcon}>
+											<Icon name='monitor' size={20} color={colors.accentText} />
+										</View>
+										<View style={styles.flex}>
+											<Row>
+												<Body numberOfLines={1}>{row.deviceLabel || row.lanUrl}</Body>
+												{isNew ? <Badge label='NEW' color={colors.accentText} /> : null}
+											</Row>
+											<Muted numberOfLines={1}>{row.lanUrl} · {relativeTimeFromIso(row.lastSeenAt)}</Muted>
+										</View>
+									</Row>
+									<Button
+										title='接続'
+										icon='link'
+										onPress={() => { void onConnect(row); }}
+										loading={connectingId === row.id}
+										disabled={connectingId !== null && connectingId !== row.id}
+									/>
+								</Card>
+							);
+						})}
 					</View>
 				)}
 
-				<Row>
-					<Button title='手入力・ペアリングリンクで接続' variant='ghost' onPress={onManualConnect} style={styles.flex} />
-				</Row>
-				{onBrowseOffline ? (
-					<Button title='接続せずにソーシャル / チューニングを見る' variant='ghost' onPress={onBrowseOffline} />
-				) : null}
-				<Button title='ログアウト' variant='ghost' onPress={() => { void logout(); }} />
+				<View style={styles.links}>
+					<Button title='手入力・ペアリングリンクで接続' icon='edit-3' variant='ghost' onPress={onManualConnect} />
+					{onBrowseOffline ? (
+						<Button title='接続せずに共有 / コストを見る' icon='compass' variant='ghost' onPress={onBrowseOffline} />
+					) : null}
+					<Button title='ログアウト' icon='log-out' variant='ghost' onPress={() => { void onLogout(); }} />
+				</View>
 			</ScrollView>
 		</Screen>
 	);
@@ -146,10 +183,14 @@ const styles = StyleSheet.create({
 	deviceCard: {
 		marginBottom: spacing.sm,
 	},
-	newBadge: {
-		width: 8,
-		height: 8,
-		borderRadius: 4,
-		backgroundColor: colors.accent,
+	deviceIcon: {
+		width: 40,
+		height: 40,
+		borderRadius: radius.md,
+		backgroundColor: colors.accentSoft,
+		alignItems: 'center',
+		justifyContent: 'center',
 	},
+	links: { gap: spacing.xs, alignItems: 'center' },
+	bannerFlush: { margin: 0 },
 });

@@ -13,7 +13,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { Icon, Loading } from './src/components/ui';
+import { Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
@@ -43,30 +43,36 @@ const TABS: Tab[] = [
 /** 未接続でも使えるタブ。接続タブは接続先を選ぶ画面になる。 */
 const OFFLINE_TAB_KEYS: TabKey[] = ['social', 'tuning', 'settings'];
 
-const TabBar = ({ tabs, active, onChange, busy }: {
+/** リモートタブに付ける印。承認待ちは急ぎなので稼働中と色を分ける。 */
+type RemoteStatus = 'idle' | 'running' | 'approval';
+
+const TabBar = ({ tabs, active, onChange, remoteStatus }: {
 	tabs: Tab[];
 	active: TabKey;
 	onChange: (t: TabKey) => void;
-	busy: boolean;
+	remoteStatus: RemoteStatus;
 }) => (
-	<View style={styles.tabBar}>
+	<View accessibilityRole='tablist' style={styles.tabBar}>
 		{tabs.map(tab => {
 			const selected = tab.key === active;
+			const status = tab.key === 'remote' ? remoteStatus : 'idle';
+			const statusLabel = status === 'approval' ? '、承認待ち' : status === 'running' ? '、エージェント稼働中' : '';
 			return (
 				<Pressable
 					key={tab.key}
 					accessibilityRole='tab'
 					accessibilityState={{ selected }}
 					onPress={() => onChange(tab.key)}
-					accessibilityLabel={tab.key === 'remote' && busy ? `${tab.label}、エージェント稼働中または承認待ち` : tab.label}
-					style={({ pressed }) => [styles.tab, selected && styles.tabActive, pressed && { opacity: 0.7 }]}
+					accessibilityLabel={`${tab.label}${statusLabel}`}
+					style={({ pressed }) => [styles.tab, pressed && { opacity: 0.7 }]}
 				>
 					<View style={[styles.tabIcon, selected && styles.tabIconActive]}>
 						<Icon name={tab.icon} size={20} color={selected ? colors.accentText : colors.fgFaint} />
+						{status !== 'idle' ? (
+							<View style={[styles.busyDot, { backgroundColor: status === 'approval' ? colors.warning : colors.running }]} />
+						) : null}
 					</View>
 					<Text style={[styles.tabLabel, selected && styles.tabLabelActive]} numberOfLines={1}>{tab.label}</Text>
-					{selected ? <View style={styles.tabIndicator} /> : null}
-					{tab.key === 'remote' && busy ? <View style={styles.busyDot} /> : null}
 				</Pressable>
 			);
 		})}
@@ -104,6 +110,7 @@ const Shell = () => {
 				{showManualConnect
 					? <ConnectScreen onBack={() => setShowManualConnect(false)} />
 					: <LoginScreen />}
+				<ToastHost />
 			</SafeAreaView>
 		);
 	}
@@ -119,11 +126,14 @@ const Shell = () => {
 						onBrowseOffline={() => { setBrowseOffline(true); setTab('social'); }}
 					/>
 				)}
+				<ToastHost />
 			</SafeAreaView>
 		);
 	}
 
-	const busy = !!snapshot && (snapshot.chat.isRunning || snapshot.chat.awaitingApproval);
+	const remoteStatus: RemoteStatus = !snapshot
+		? 'idle'
+		: snapshot.chat.awaitingApproval ? 'approval' : snapshot.chat.isRunning ? 'running' : 'idle';
 
 	return (
 		<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
@@ -140,8 +150,9 @@ const Shell = () => {
 						/>
 						: <SettingsScreen />
 				) : null}
+				<ToastHost />
 			</View>
-			<TabBar tabs={tabs} active={activeTab} onChange={setTab} busy={busy} />
+			<TabBar tabs={tabs} active={activeTab} onChange={setTab} remoteStatus={remoteStatus} />
 		</SafeAreaView>
 	);
 };
@@ -150,11 +161,13 @@ export default function App() {
 	return (
 		<SafeAreaProvider>
 			<StatusBar style='light' />
-			<DivisionAuthProvider>
-				<AppProvider>
-					<Shell />
-				</AppProvider>
-			</DivisionAuthProvider>
+			<ToastProvider>
+				<DivisionAuthProvider>
+					<AppProvider>
+						<Shell />
+					</AppProvider>
+				</DivisionAuthProvider>
+			</ToastProvider>
 		</SafeAreaProvider>
 	);
 }
@@ -177,16 +190,14 @@ const styles = StyleSheet.create({
 	tab: {
 		flex: 1,
 		alignItems: 'center',
-		paddingVertical: spacing.sm,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.xs + 2,
 		paddingHorizontal: 2,
-		minHeight: 62,
-		gap: 3,
-		borderTopWidth: 2,
-		borderTopColor: 'transparent',
+		minHeight: 60,
+		gap: 4,
 	},
-	tabActive: { borderTopColor: colors.accent },
-	tabIcon: { width: 44, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-	tabIconActive: { backgroundColor: 'transparent' },
+	tabIcon: { width: 52, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+	tabIconActive: { backgroundColor: colors.accentSoft },
 	tabLabel: {
 		color: colors.fgFaint,
 		fontSize: fontSize.xs - 1,
@@ -195,14 +206,14 @@ const styles = StyleSheet.create({
 	tabLabelActive: {
 		color: colors.accentText,
 	},
-	tabIndicator: { position: 'absolute', top: -2, width: 24, height: 2, borderRadius: 2, backgroundColor: colors.accent },
 	busyDot: {
 		position: 'absolute',
-		top: spacing.xs,
-		right: '22%',
-		width: 8,
-		height: 8,
-		borderRadius: 4,
-		backgroundColor: colors.running,
+		top: 3,
+		right: 10,
+		width: 9,
+		height: 9,
+		borderRadius: 5,
+		borderWidth: 1.5,
+		borderColor: colors.bgElevated,
 	},
 });
