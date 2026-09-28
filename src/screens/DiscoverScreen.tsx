@@ -90,11 +90,16 @@ export const DiscoverScreen = ({
 		if (!session) return;
 		setConnectingId(row.id);
 		setStatus(null);
-		const result = await verifyAndConnect({ url: row.lanUrl, token: row.token, label: row.deviceLabel }, connect, session.accessToken);
+		// 一覧はログイン中アカウントの RemoteSession だけなので、それをそのまま照合に使う。
+		const result = await verifyAndConnect(
+			{ url: row.lanUrl, token: row.token, label: row.deviceLabel },
+			connect,
+			{ accessToken: session.accessToken, sessions },
+		);
 		if (!result.ok) setStatus(result.message);
 		else dismissNewSession(row.id);
 		setConnectingId(null);
-	}, [connect, dismissNewSession, session]);
+	}, [connect, dismissNewSession, session, sessions]);
 
 	if (!session) return null;
 

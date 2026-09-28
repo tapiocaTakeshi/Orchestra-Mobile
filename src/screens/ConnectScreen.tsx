@@ -26,6 +26,7 @@ import {
 	confirmAction,
 } from '../components/ui';
 import { verifyAndConnect } from '../lib/connect';
+import { listRemoteSessions } from '../lib/divisionAuth';
 import { buildConnection, parsePairingInput } from '../lib/pairing';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
@@ -47,7 +48,11 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 	const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
 	const tokenRef = useRef<TextInput>(null);
 
-	/** 繋ぐ前に /api/ping と /api/state を叩いて、相手と権限を確かめる。 */
+	/**
+	 * リンクや手入力で指定された PC でも、ログイン中アカウントのセッションでなければ繋がない。
+	 * アカウントの RemoteSession (オフラインの行も含む) を取り、トークンで照合してから
+	 * /api/ping と /api/state で相手と権限を確かめる。
+	 */
 	const tryConnect = useCallback(async (candidate: Connection, source: string) => {
 		if (!session) {
 			setStatus({ message: 'リモートコントロールには、デスクトップと同じ Division アカウントでのログインが必要です。', tone: 'error' });
@@ -56,11 +61,17 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 		setBusy(true);
 		setConnectingFrom(source);
 		setStatus(null);
-		const result = await verifyAndConnect(candidate, connect, session.accessToken);
-		if (!result.ok) setStatus({ message: result.message, tone: 'error' });
-		else if (result.warning) setStatus({ message: result.warning, tone: 'warning' });
-		setBusy(false);
-		setConnectingFrom(null);
+		try {
+			const sessions = await listRemoteSessions(session, Number.POSITIVE_INFINITY);
+			const result = await verifyAndConnect(candidate, connect, { accessToken: session.accessToken, sessions });
+			if (!result.ok) setStatus({ message: result.message, tone: 'error' });
+			else if (result.warning) setStatus({ message: result.warning, tone: 'warning' });
+		} catch (e) {
+			setStatus({ message: e instanceof Error ? e.message : String(e), tone: 'error' });
+		} finally {
+			setBusy(false);
+			setConnectingFrom(null);
+		}
 	}, [connect, session]);
 
 	const onSubmitLink = useCallback(() => {
@@ -101,7 +112,7 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 					<View style={styles.hero}>
 						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
 						<Title>Orchestra に接続</Title>
-						<Muted>IDE の 設定 → リモートコントロール で「リモートコントロールを有効にする」をオンにしてください。</Muted>
+						<Muted>繋げるのは、このアカウント ({session?.email}) でログインしている PC だけです。PC 側の Orchestra でも同じアカウントでログインし、設定 → リモートコントロールを有効にしてください。</Muted>
 					</View>
 
 					<Card>

@@ -8,7 +8,7 @@
  *                                Division 直結なので PC なしでも使える)
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -88,6 +88,12 @@ const Shell = () => {
 	// 「接続せずに使う」を選んだあとは、未接続のままタブを出す。
 	const [browseOffline, setBrowseOffline] = useState(false);
 
+	// アカウントが替わったら、前のアカウントで選んでいた画面の状態を持ち越さない。
+	useEffect(() => {
+		setBrowseOffline(false);
+		setShowManualConnect(false);
+	}, [session?.userId]);
+
 	const isOffline = !connection;
 	const tabs = useMemo(
 		() => (isOffline ? TABS.filter(t => OFFLINE_TAB_KEYS.includes(t.key)) : TABS),
@@ -104,12 +110,11 @@ const Shell = () => {
 		);
 	}
 
-	if (!session && !connection) {
+	// 繋げるのはログイン中アカウントのセッションだけなので、未ログインならまずログイン。
+	if (!session) {
 		return (
 			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-				{showManualConnect
-					? <ConnectScreen onBack={() => setShowManualConnect(false)} />
-					: <LoginScreen />}
+				<LoginScreen />
 				<ToastHost />
 			</SafeAreaView>
 		);

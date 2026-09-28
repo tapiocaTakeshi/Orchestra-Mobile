@@ -91,7 +91,7 @@ export const SettingsScreen = () => {
 	const onLogout = useCallback(async () => {
 		const ok = await confirmAction({
 			title: 'ログアウトしますか？',
-			message: 'PC との接続は続きますが、共有タブとコストタブが使えなくなります。',
+			message: 'この PC との接続も切れます。同じアカウントでログインし直すと、また繋がります。',
 			confirmLabel: 'ログアウト',
 			destructive: true,
 		});
@@ -207,7 +207,7 @@ export const SettingsScreen = () => {
 							</View>
 							<View style={styles.flex}>
 								<Body numberOfLines={1}>{session.email}</Body>
-								<Muted>共有タブとコストタブで使います</Muted>
+								<Muted>このアカウントでログインしている PC にだけ繋ぎます</Muted>
 							</View>
 						</Row>
 						<Button title='ログアウト' variant='secondary' size='sm' onPress={() => void onLogout()} style={styles.start} />

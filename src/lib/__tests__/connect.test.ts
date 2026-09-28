@@ -6,10 +6,20 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { AddressInfo } from 'net';
 
-import { verifyAndConnect } from '../connect';
+import {
+	NOT_ACCOUNT_SESSION_MESSAGE,
+	connectionsForAccount,
+	findAccountSession,
+	isAccountMismatch,
+	verifyAndConnect,
+} from '../connect';
+import { OrchestraApiError } from '../../api/client';
 import { Connection } from '../../api/types';
 
 const TOKEN = 'connect-test-token';
+/** PC 側でログインしているアカウントの JWT。これ以外は 403 account_mismatch にする (デスクトップと同じ)。 */
+const ACCOUNT_JWT = 'account-jwt';
+const ACCOUNT = { accessToken: ACCOUNT_JWT, sessions: [{ token: TOKEN }] };
 
 let server: Server;
 let baseUrl: string;
@@ -39,6 +49,10 @@ beforeAll(async () => {
 		}
 		if (url.pathname === '/api/state') {
 			if (req.headers['x-orchestra-token'] !== TOKEN) { send(401, { error: 'unauthorized' }); return; }
+			if (req.headers['x-division-access-token'] !== ACCOUNT_JWT) {
+				send(403, { error: 'account_mismatch', detail: '同じ Division アカウントでログインしてください。' });
+				return;
+			}
 			send(200, snapshotBody);
 			return;
 		}
@@ -62,7 +76,7 @@ describe('verifyAndConnect', () => {
 		const candidate: Connection = { url: baseUrl, token: TOKEN, label: '' };
 		const connected: Connection[] = [];
 
-		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); });
+		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); }, ACCOUNT);
 
 		expect(result.ok).toBe(true);
 		if (result.ok) {
@@ -74,7 +88,7 @@ describe('verifyAndConnect', () => {
 
 	it('keeps a caller-provided label instead of overwriting it', async () => {
 		const candidate: Connection = { url: baseUrl, token: TOKEN, label: 'My PC' };
-		const result = await verifyAndConnect(candidate, async () => { });
+		const result = await verifyAndConnect(candidate, async () => { }, ACCOUNT);
 		expect(result.ok).toBe(true);
 		if (result.ok) expect(result.connection.label).toBe('My PC');
 	});
@@ -84,7 +98,7 @@ describe('verifyAndConnect', () => {
 		const candidate: Connection = { url: baseUrl, token: TOKEN, label: '' };
 		const connected: Connection[] = [];
 
-		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); });
+		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); }, ACCOUNT);
 
 		expect(result.ok).toBe(true);
 		if (result.ok) expect(result.warning).toContain('v99');
@@ -92,15 +106,59 @@ describe('verifyAndConnect', () => {
 	});
 
 	it('fails with a readable message on a wrong token (401)', async () => {
+		// RemoteSession に古いトークンが残っていて、PC 側ではもう変わっている場合
 		const candidate: Connection = { url: baseUrl, token: 'wrong-token', label: '' };
-		const result = await verifyAndConnect(candidate, async () => { });
+		const result = await verifyAndConnect(candidate, async () => { }, { accessToken: ACCOUNT_JWT, sessions: [{ token: 'wrong-token' }] });
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.message).toContain('トークンが一致しません');
 	});
 
 	it('fails with a readable message when the IDE is unreachable', async () => {
 		const candidate: Connection = { url: 'http://127.0.0.1:1', token: TOKEN, label: '' };
-		const result = await verifyAndConnect(candidate, async () => { });
+		const result = await verifyAndConnect(candidate, async () => { }, ACCOUNT);
 		expect(result.ok).toBe(false);
+	});
+
+	it('refuses a PC that is not one of the account\'s sessions, without contacting it', async () => {
+		// ペアリングリンクや手入力で、別アカウントの PC を指定された場合
+		const candidate: Connection = { url: 'http://127.0.0.1:1', token: 'someone-elses-token', label: '' };
+		const connected: Connection[] = [];
+		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); }, ACCOUNT);
+		expect(result).toEqual({ ok: false, message: NOT_ACCOUNT_SESSION_MESSAGE });
+		expect(connected).toHaveLength(0);
+	});
+
+	it('refuses when the PC reports that it belongs to another account (403 account_mismatch)', async () => {
+		const candidate: Connection = { url: baseUrl, token: TOKEN, label: '' };
+		const connected: Connection[] = [];
+		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); }, { accessToken: 'other-account-jwt', sessions: [{ token: TOKEN }] });
+		expect(result).toEqual({ ok: false, message: NOT_ACCOUNT_SESSION_MESSAGE });
+		expect(connected).toHaveLength(0);
+	});
+});
+
+describe('account scoping helpers', () => {
+	it('matches a candidate to the account session with the same pairing token', () => {
+		const sessions = [{ id: 'a', token: 't1' }, { id: 'b', token: 't2' }];
+		expect(findAccountSession({ token: 't2' }, sessions)?.id).toBe('b');
+		expect(findAccountSession({ token: 't3' }, sessions)).toBeUndefined();
+		// 空のトークン同士を「一致」とはみなさない
+		expect(findAccountSession({ token: '' }, [{ token: '' }])).toBeUndefined();
+	});
+
+	it('only lists saved connections that were made by the signed-in account', () => {
+		const saved: Connection[] = [
+			{ url: 'http://a', token: 'x', label: 'A', ownerUserId: 'user-1' },
+			{ url: 'http://b', token: 'y', label: 'B', ownerUserId: 'user-2' },
+			{ url: 'http://c', token: 'z', label: '保存元が分からない古い接続' },
+		];
+		expect(connectionsForAccount(saved, 'user-1').map(c => c.label)).toEqual(['A']);
+		expect(connectionsForAccount(saved, null)).toEqual([]);
+	});
+
+	it('recognises the desktop\'s account_mismatch rejection', () => {
+		expect(isAccountMismatch(new OrchestraApiError(403, 'account_mismatch', '同じ Division アカウントでログインしてください。'))).toBe(true);
+		expect(isAccountMismatch(new OrchestraApiError(403, 'forbidden'))).toBe(false);
+		expect(isAccountMismatch(new OrchestraApiError(401, 'invalid_token'))).toBe(false);
 	});
 });
