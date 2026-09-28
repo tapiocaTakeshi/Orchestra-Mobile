@@ -25,7 +25,6 @@ import {
 	Body,
 	Button,
 	Card,
-	Divider,
 	EmptyState,
 	ErrorBanner,
 	Input,
@@ -388,7 +387,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
+				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				{missingOAuthSession && section !== 'policy' ? (
 					<Card>
@@ -676,7 +675,6 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 								{profile.subscriptionCreditsExpireAt ? (
 									<Muted>プラン付与分の有効期限: {relativeTimeFromIso(profile.subscriptionCreditsExpireAt)}</Muted>
 								) : null}
-								<Divider />
 								<Row style={styles.spread}>
 									<Muted>これまでの利用額</Muted><Body>{formatUsdShort(profile.creditUsed)}</Body>
 								</Row>
@@ -789,15 +787,16 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	toolbar: {
-		padding: spacing.md,
+		paddingHorizontal: spacing.lg,
+		paddingVertical: spacing.md,
 		gap: spacing.sm,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
+		gap: spacing.xs,
 	},
 	field: { gap: spacing.xs },
 	inputInvalid: { borderColor: colors.danger },

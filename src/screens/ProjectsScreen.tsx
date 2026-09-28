@@ -23,7 +23,6 @@ import {
 	Body,
 	Button,
 	Card,
-	Divider,
 	EmptyState,
 	ErrorBanner,
 	Icon,
@@ -103,7 +102,7 @@ const AgentRow = ({
 											}}
 											style={[styles.modelChip, selected && styles.modelChipSelected]}
 										>
-											{selected ? <Icon name='check' size={14} color={colors.accentText} /> : null}
+											{selected ? <Icon name='check' size={14} color={colors.fg} /> : null}
 										<Text style={[styles.modelChipText, selected && { color: colors.fg }]}>{model}</Text>
 										</Pressable>
 									);
@@ -400,7 +399,7 @@ export const ProjectsScreen = () => {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				<Card>
 					<SectionTitle right={<Badge label={`${division.projects.length} 件`} />}>Division プロジェクト</SectionTitle>
@@ -440,7 +439,7 @@ export const ProjectsScreen = () => {
 				) : null}
 
 				{division.projects.map(project => (
-					<Card key={project.projectId || project.name} style={project.isActive ? styles.activeCard : undefined}>
+					<Card key={project.projectId || project.name}>
 						<Row style={styles.spread}>
 							<View style={styles.flex}>
 								<Row>
@@ -467,17 +466,17 @@ export const ProjectsScreen = () => {
 							{project.agents.length > 4 ? <Muted>他 {project.agents.length - 4} 件</Muted> : null}
 						</View>
 
-						<Divider />
-
 						<Row>
 							<Button
 								title={project.isActive ? 'このプロジェクトのみ有効' : '有効にする'}
+								variant={project.isActive ? 'secondary' : 'primary'}
+								size='sm'
 								onPress={() => void act(() => client.activateProject(project.projectId, true), `${project.name} を有効にしました`)}
-								style={styles.flex}
 							/>
 							<Button
 								title={project.isActive ? '無効' : '併用'}
-								variant='secondary'
+								variant='ghost'
+								size='sm'
 								onPress={() => void act(() => client.activateProject(project.projectId, false))}
 							/>
 						</Row>
@@ -545,7 +544,6 @@ const styles = StyleSheet.create({
 	spread: { justifyContent: 'space-between' },
 	centered: { alignSelf: 'center' },
 	bannerFlush: { margin: 0 },
-	activeCard: { borderColor: colors.selectedBorder, borderLeftWidth: 3, borderLeftColor: colors.accentText },
 	roleChips: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',
@@ -567,9 +565,9 @@ const styles = StyleSheet.create({
 		fontWeight: '600',
 	},
 	content: {
-		padding: spacing.lg,
-		gap: spacing.lg,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
+		gap: spacing.xs,
 	},
 	agentRow: {
 		borderWidth: 1,
@@ -614,8 +612,8 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.xs,
 	},
 	modelChipSelected: {
-		borderColor: colors.selectedBorder,
-		backgroundColor: colors.accentSoft,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgHover,
 	},
 	modelChipText: {
 		color: colors.fgMuted,

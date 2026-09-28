@@ -164,7 +164,7 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 								<Card key={c.url}>
 									<Row>
 										<View style={styles.deviceIcon}>
-											<Icon name='monitor' size={20} color={colors.accentText} />
+											<Icon name='monitor' size={20} color={colors.fgMuted} />
 										</View>
 										<View style={styles.flex}>
 											<Body numberOfLines={1}>{c.label}</Body>
@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
 		width: 40,
 		height: 40,
 		borderRadius: radius.md,
-		backgroundColor: colors.accentSoft,
+		backgroundColor: colors.bgHover,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},

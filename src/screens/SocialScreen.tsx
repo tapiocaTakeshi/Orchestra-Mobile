@@ -27,7 +27,6 @@ import {
 	Button,
 	Card,
 	ChipGroup,
-	Divider,
 	EmptyState,
 	ErrorBanner,
 	Icon,
@@ -176,7 +175,7 @@ const ImportSheet = ({
 										<Body>{p.name}</Body>
 										<Muted>{p.agents.length} 役割{p.isActive ? ' · 有効' : ''}</Muted>
 									</View>
-									{selected ? <Icon name='check' color={colors.accentText} /> : null}
+									{selected ? <Icon name='check' color={colors.fg} /> : null}
 								</Pressable>
 							);
 						})}
@@ -262,7 +261,7 @@ const PublishSheet = ({
 									<Body>{p.name}</Body>
 									<Muted>{assignmentSummary(toPostAssignments(p.agents))}</Muted>
 								</View>
-								{selected ? <Icon name='check' color={colors.accentText} /> : null}
+								{selected ? <Icon name='check' color={colors.fg} /> : null}
 							</Pressable>
 						);
 					})}
@@ -336,7 +335,6 @@ const PostCard = ({
 
 			{open ? (
 				<>
-					<Divider />
 					{[...post.assignments].sort((a, b) => a.priority - b.priority).map(a => (
 						<Row key={`${a.roleSlug}-${a.priority}`} style={styles.spread}>
 							<Muted>{a.roleName}</Muted>
@@ -345,8 +343,6 @@ const PostCard = ({
 					))}
 				</>
 			) : null}
-
-			<Divider />
 
 			<Row style={styles.spread}>
 				<Row>
@@ -566,7 +562,7 @@ export const SocialScreen = () => {
 			) : (
 				<ScrollView
 					contentContainerStyle={styles.content}
-					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
+					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 				>
 					{!canUseProjects ? (
 						<View style={styles.hint}>
@@ -633,25 +629,23 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	toolbar: {
-		padding: spacing.md,
+		paddingHorizontal: spacing.lg,
+		paddingVertical: spacing.md,
 		gap: spacing.sm,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
+		gap: spacing.xs,
 	},
 	bannerFlush: { margin: 0 },
 	hint: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.sm,
-		padding: spacing.md,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: colors.border,
+		paddingVertical: spacing.md,
 	},
 	badgeRow: {
 		flexDirection: 'row',
@@ -687,7 +681,7 @@ const styles = StyleSheet.create({
 		minHeight: 56,
 	},
 	selectRowActive: {
-		borderColor: colors.selectedBorder,
-		backgroundColor: colors.accentSoft,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgHover,
 	},
 });

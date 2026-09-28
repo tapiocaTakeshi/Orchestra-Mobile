@@ -102,7 +102,7 @@ export const DiscoverScreen = ({
 		<Screen>
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.accentText} />}
+				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.fgMuted} />}
 			>
 				<View style={styles.hero}>
 					<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
@@ -130,7 +130,7 @@ export const DiscoverScreen = ({
 								<Card key={row.id}>
 									<Row>
 										<View style={styles.deviceIcon}>
-											<Icon name='monitor' size={20} color={colors.accentText} />
+											<Icon name='monitor' size={20} color={colors.fgMuted} />
 										</View>
 										<View style={styles.flex}>
 											<Row>
@@ -185,7 +185,7 @@ const styles = StyleSheet.create({
 		width: 40,
 		height: 40,
 		borderRadius: radius.md,
-		backgroundColor: colors.accentSoft,
+		backgroundColor: colors.bgHover,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},

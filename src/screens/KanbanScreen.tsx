@@ -30,7 +30,6 @@ import {
 	Button,
 	Card,
 	ChipGroup,
-	Divider,
 	EmptyState,
 	ErrorBanner,
 	Icon,
@@ -112,12 +111,6 @@ const runStatusColor = (status: string): string => {
 	}
 };
 
-const ROLE_TAG: Partial<Record<KanbanColumnRole, string>> = {
-	'todo': 'TO DO',
-	'in-progress': '進行中',
-	'done': '完了',
-	'error': 'エラー',
-};
 
 /** カード下段の小さな情報 (アイコン + 文字)。 */
 const Meta = ({ icon, label, color }: { icon?: React.ComponentProps<typeof Icon>['name']; label: string; color?: string }) => (
@@ -128,8 +121,8 @@ const Meta = ({ icon, label, color }: { icon?: React.ComponentProps<typeof Icon>
 );
 
 /**
- * デスクトップのボードと同じカード: 左端の帯が優先度、ラベルは色付きのチップ、
- * 下段に優先度・期限・チェックリスト・コメント・担当・最後の実行結果を小さく並べる。
+ * タスクのカード。飾りは付けず、題名の下に優先度・ラベル・期限・チェックリスト・
+ * コメント・担当・最後の実行結果を小さな文字で 1 行に並べるだけにする。
  */
 const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: boolean; onPress: () => void }) => {
 	const progress = checklistProgress(task);
@@ -149,21 +142,14 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 				pressed && styles.taskCardPressed,
 			]}
 		>
-			<View style={[styles.priorityBar, { backgroundColor: priorityColor(task.priority) }]} />
-
 			<View style={styles.taskTitleRow}>
 				<Text style={styles.taskTitle} numberOfLines={3}>{task.title}</Text>
 				{isRunning ? <ActivityIndicator size='small' color='#f59e0b' /> : null}
 			</View>
 
-			{task.labels.length > 0 ? (
-				<View style={styles.taskMetaRow}>
-					{task.labels.map(l => <Badge key={l} label={l} color={labelColor(l)} />)}
-				</View>
-			) : null}
-
 			<View style={styles.taskMetaRow}>
 				<Text style={[styles.metaText, styles.metaStrong, { color: priorityColor(task.priority) }]}>{priorityLabel(task.priority)}</Text>
+				{task.labels.map(l => <Text key={l} style={[styles.metaText, { color: labelColor(l) }]}>#{l}</Text>)}
 				{task.dueDate ? <Meta icon='clock' label={task.dueDate} color={overdue ? '#ef4444' : undefined} /> : null}
 				{progress.total > 0 ? (
 					<Meta icon='check-square' label={`${progress.done}/${progress.total}`} color={progress.done === progress.total ? '#10b981' : undefined} />
@@ -709,11 +695,17 @@ export const KanbanScreen = () => {
 							{summary.overdue > 0 ? ` · 期限切れ ${summary.overdue}` : ''}
 						</Muted>
 					</View>
+					<IconButton
+						icon='filter'
+						accessibilityLabel='絞り込み'
+						active={showFilters || filterCount > 0}
+						badge={filterCount}
+						onPress={() => setShowFilters(v => !v)}
+					/>
 					<IconButton icon='settings' accessibilityLabel='ボードの設定' onPress={() => setShowSettings(true)} />
 				</Row>
 
 				<View style={styles.runBar}>
-					<Icon name='repeat' size={16} color={runtime.autoRunEnabled ? colors.accentText : colors.fgFaint} />
 					<Text style={styles.runBarLabel}>自動実行</Text>
 					<Toggle
 						value={runtime.autoRunEnabled}
@@ -726,24 +718,14 @@ export const KanbanScreen = () => {
 						: <Button title='今すぐ実行' icon='play' size='sm' variant='secondary' onPress={() => void act(() => client.runPendingTasks(), '実行を開始しました')} />}
 				</View>
 
-				<Row>
-					<Input
-						value={filterText}
-						onChangeText={setFilterText}
-						placeholder='タスクを検索'
-						style={styles.flex}
-						autoCapitalize='none'
-						returnKeyType='search'
-						clearButtonMode='while-editing'
-					/>
-					<IconButton
-						icon='filter'
-						accessibilityLabel='絞り込み'
-						active={showFilters || filterCount > 0}
-						badge={filterCount}
-						onPress={() => setShowFilters(v => !v)}
-					/>
-				</Row>
+				<Input
+					value={filterText}
+					onChangeText={setFilterText}
+					placeholder='タスクを検索'
+					autoCapitalize='none'
+					returnKeyType='search'
+					clearButtonMode='while-editing'
+				/>
 
 				{showFilters ? (
 					<View style={styles.filterPanel}>
@@ -757,7 +739,7 @@ export const KanbanScreen = () => {
 										accessibilityRole='button'
 										accessibilityState={{ selected }}
 										onPress={() => setPriorityFilter(prev => toggleIn(prev, p))}
-										style={[styles.filterChip, selected && { borderColor: priorityColor(p), backgroundColor: `${priorityColor(p)}22` }]}
+										style={[styles.filterChip, selected && { borderColor: withAlpha(priorityColor(p), '66'), backgroundColor: withAlpha(priorityColor(p), '1a') }]}
 									>
 										<Text style={[styles.filterChipText, selected && { color: colors.fg }]}>{priorityLabel(p)}</Text>
 									</Pressable>
@@ -850,11 +832,10 @@ export const KanbanScreen = () => {
 				scrollEventThrottle={32}
 				onScroll={onBoardScroll}
 				contentContainerStyle={styles.boardScroll}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				{views.map(view => (
 					<View key={view.column.id} style={[styles.column, { width: columnWidth }]}>
-						{/* デスクトップのカラム見出し: 色の点・名前・件数 (/WIP 上限)・役割 */}
 						<View style={styles.columnHeader}>
 							<View style={[styles.columnDot, { backgroundColor: view.column.color || colors.fgFaint }]} />
 							<Text style={styles.columnTitle} numberOfLines={1}>{view.column.title}</Text>
@@ -865,10 +846,6 @@ export const KanbanScreen = () => {
 								{view.tasks.length === view.totalCount ? `${view.totalCount}` : `${view.tasks.length}/${view.totalCount}`}
 								{view.column.wipLimit > 0 ? `/${view.column.wipLimit}` : ''}
 							</Text>
-							{/* 役割がカラム名と同じ (To Do 列の「TO DO」など) なら重ねて出さない */}
-							{ROLE_TAG[view.column.role] && ROLE_TAG[view.column.role]!.toLowerCase() !== view.column.title.trim().toLowerCase()
-								? <Text style={styles.roleTag}>{ROLE_TAG[view.column.role]}</Text>
-								: null}
 						</View>
 
 						<ScrollView nestedScrollEnabled contentContainerStyle={styles.columnScroll} showsVerticalScrollIndicator={false}>
@@ -912,59 +889,50 @@ const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	boardHeader: {
-		padding: spacing.md,
+		paddingHorizontal: spacing.lg,
+		paddingTop: spacing.md,
+		paddingBottom: spacing.md,
 		gap: spacing.sm,
-		backgroundColor: colors.bgElevated,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
 	runBar: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.sm,
-		paddingLeft: spacing.md,
-		paddingRight: spacing.xs,
-		paddingVertical: spacing.xs,
-		minHeight: 52,
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: colors.border,
-		backgroundColor: colors.bgInput,
 	},
-	runBarLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	runBarLabel: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	inlineBanner: { margin: 0 },
-	columnTabsBar: { flexGrow: 0, flexShrink: 0 },
-	columnTabs: { paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 2, gap: spacing.xs, alignItems: 'center' },
+	columnTabsBar: {
+		flexGrow: 0,
+		flexShrink: 0,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
+	},
+	columnTabs: { paddingHorizontal: spacing.lg, gap: spacing.lg, alignItems: 'center' },
 	columnTab: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.xs + 2,
-		minHeight: 36,
+		minHeight: 40,
 		maxWidth: 200,
-		paddingHorizontal: spacing.md,
-		borderRadius: 18,
-		borderWidth: 1,
-		borderColor: colors.border,
+		borderBottomWidth: 2,
+		borderBottomColor: 'transparent',
 	},
-	columnTabActive: { borderColor: colors.selectedBorder, backgroundColor: colors.accentSoft },
-	columnTabText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', flexShrink: 1 },
+	columnTabActive: { borderBottomColor: colors.fg },
+	columnTabText: { color: colors.fgFaint, fontSize: fontSize.xs + 1, fontWeight: '600', flexShrink: 1 },
 	columnTabTextActive: { color: colors.fgStrong },
 	columnTabCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	boardScroll: {
-		padding: spacing.md,
+		paddingHorizontal: spacing.lg,
+		paddingTop: spacing.md,
 		gap: spacing.md,
 	},
 	column: {
-		backgroundColor: colors.bgElevated,
-		borderWidth: 1,
-		borderColor: colors.border,
-		borderRadius: radius.md,
 		maxHeight: '100%',
-		overflow: 'hidden',
 	},
 	columnScroll: {
-		gap: spacing.sm - 2,
-		padding: spacing.sm,
+		gap: spacing.sm,
 		paddingBottom: spacing.md,
 	},
 	columnDot: {
@@ -973,26 +941,20 @@ const styles = StyleSheet.create({
 		borderRadius: 5,
 	},
 	columnTitle: {
-		color: colors.fgStrong,
+		color: colors.fg,
 		fontSize: fontSize.sm - 1,
-		fontWeight: '700',
+		fontWeight: '600',
 		flexShrink: 1,
 	},
 	taskCard: {
-		position: 'relative',
-		backgroundColor: colors.bgInput,
-		borderWidth: 1,
-		borderColor: colors.border,
-		borderRadius: radius.sm,
-		paddingTop: spacing.sm + 2,
-		paddingBottom: spacing.sm + 2,
-		paddingLeft: spacing.md + 2,
-		paddingRight: spacing.md,
+		backgroundColor: colors.bgElevated,
+		borderRadius: radius.md,
+		paddingVertical: spacing.md,
+		paddingHorizontal: spacing.md,
 		gap: spacing.sm - 2,
-		overflow: 'hidden',
 	},
 	taskCardMuted: { opacity: 0.72 },
-	taskCardPressed: { borderColor: colors.borderStrong, backgroundColor: colors.bgHover },
+	taskCardPressed: { backgroundColor: colors.bgHover },
 	taskTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
 	meta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
 	metaText: { color: colors.fgFaint, fontSize: fontSize.xs - 1 },
@@ -1001,44 +963,19 @@ const styles = StyleSheet.create({
 	columnHeader: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.sm - 2,
-		paddingHorizontal: spacing.md - 2,
-		paddingVertical: spacing.sm + 2,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		gap: spacing.sm,
+		paddingHorizontal: 2,
+		paddingBottom: spacing.sm,
 	},
 	columnCount: {
 		color: colors.fgFaint,
-		fontSize: fontSize.xs - 1,
-		fontWeight: '600',
+		fontSize: fontSize.xs,
 		fontVariant: ['tabular-nums'],
-		paddingHorizontal: 6,
-		paddingVertical: 1,
-		borderRadius: 8,
-		overflow: 'hidden',
-		backgroundColor: colors.bgInput,
 	},
 	columnCountOver: { color: '#ef4444' },
-	roleTag: {
-		color: colors.fgMuted,
-		fontSize: 10,
-		fontWeight: '700',
-		letterSpacing: 0.4,
-		paddingHorizontal: 5,
-		paddingVertical: 1,
-		borderRadius: 3,
-		overflow: 'hidden',
-		backgroundColor: colors.bgInput,
-	},
 	taskCardRunning: {
-		borderColor: withAlpha('#f59e0b', '99'),
-	},
-	priorityBar: {
-		position: 'absolute',
-		left: 0,
-		top: 0,
-		bottom: 0,
-		width: 3,
+		borderWidth: 1,
+		borderColor: withAlpha(colors.running, '80'),
 	},
 	taskTitle: {
 		flex: 1,
@@ -1055,15 +992,14 @@ const styles = StyleSheet.create({
 		rowGap: spacing.xs,
 	},
 	composer: {
-		borderTopWidth: 1,
-		borderTopColor: colors.border,
-		padding: spacing.md,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: colors.borderStrong,
+		paddingHorizontal: spacing.lg,
+		paddingVertical: spacing.sm + 2,
 		gap: spacing.xs,
-		backgroundColor: colors.bg,
 	},
 	content: {
-		padding: spacing.md,
-		gap: spacing.md,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
 	},
 	chipWrap: {
@@ -1075,12 +1011,11 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.xs + 2,
-		minHeight: 44,
+		minHeight: 40,
 		paddingHorizontal: spacing.md,
-		borderRadius: radius.sm,
+		borderRadius: 999,
 		borderWidth: 1,
 		borderColor: colors.borderStrong,
-		backgroundColor: colors.bgInput,
 	},
 	moveChipText: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	progressTrack: { height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' },
@@ -1129,25 +1064,18 @@ const styles = StyleSheet.create({
 		color: colors.danger,
 		fontSize: fontSize.xs,
 	},
-	filterPanel: {
-		gap: spacing.xs,
-		borderWidth: 1,
-		borderColor: colors.border,
-		borderRadius: radius.sm,
-		padding: spacing.md,
-		backgroundColor: colors.bgElevated,
-	},
+	filterPanel: { gap: spacing.sm, paddingTop: spacing.xs },
 	filterChip: {
-		minHeight: 40,
+		minHeight: 36,
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
-		borderRadius: radius.lg,
+		borderRadius: 999,
 		paddingHorizontal: spacing.md,
 	},
 	filterChipOn: {
-		borderColor: colors.selectedBorder,
-		backgroundColor: colors.accentSoft,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgHover,
 	},
 	filterChipText: {
 		color: colors.fgMuted,

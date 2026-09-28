@@ -15,7 +15,6 @@ import {
 	Body,
 	Button,
 	Card,
-	Divider,
 	ErrorBanner,
 	Icon,
 	IconButton,
@@ -124,13 +123,12 @@ export const SettingsScreen = () => {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				<Card>
 					<SectionTitle right={<Badge label='接続中' color={colors.success} />}>接続先</SectionTitle>
 					<Body>{connection.label}</Body>
 					<Muted>{connection.url}</Muted>
-					<Divider />
 					<Muted>{snapshot.ide.appName} {snapshot.ide.version}</Muted>
 					<Muted>ワークスペース: {snapshot.ide.workspaceName || '(未オープン)'}</Muted>
 					<Muted>最終更新: {relativeTime(snapshot.generatedAt)} · rev {snapshot.revision}</Muted>
@@ -139,11 +137,11 @@ export const SettingsScreen = () => {
 							プロトコルが違います (IDE v{snapshot.ide.protocolVersion} / アプリ v{PROTOCOL_VERSION})。どちらかを更新してください。
 						</Text>
 					) : null}
-					<Button title='接続を解除' icon='x-circle' variant='secondary' onPress={() => void onDisconnect()} />
+					<Button title='接続を解除' variant='secondary' size='sm' onPress={() => void onDisconnect()} style={styles.start} />
 				</Card>
 
 				<Card>
-					<SectionTitle right={loadingFiles ? <ActivityIndicator color={colors.accentText} size='small' /> : null}>
+					<SectionTitle right={loadingFiles ? <ActivityIndicator color={colors.fgMuted} size='small' /> : null}>
 						ワークスペースのファイル
 					</SectionTitle>
 					<Muted>ファイルをタップすると IDE 側で開きます。</Muted>
@@ -173,7 +171,7 @@ export const SettingsScreen = () => {
 								style={({ pressed }) => [styles.fileRow, pressed && styles.fileRowPressed]}
 								onPress={() => void openEntry(entry)}
 							>
-								<Icon name={entry.isDirectory ? 'folder' : 'file-text'} size={18} color={entry.isDirectory ? colors.accentText : colors.fgMuted} />
+								<Icon name={entry.isDirectory ? 'folder' : 'file-text'} size={18} color={colors.fgMuted} />
 								<View style={styles.flex}><Body numberOfLines={1}>{entry.name}</Body></View>
 								<Icon name={entry.isDirectory ? 'chevron-right' : 'external-link'} size={16} color={colors.fgFaint} />
 							</Pressable>
@@ -205,14 +203,14 @@ export const SettingsScreen = () => {
 						<SectionTitle>Division アカウント</SectionTitle>
 						<Row>
 							<View style={styles.avatar}>
-								<Icon name='user' size={18} color={colors.accentText} />
+								<Icon name='user' size={18} color={colors.fgMuted} />
 							</View>
 							<View style={styles.flex}>
 								<Body numberOfLines={1}>{session.email}</Body>
 								<Muted>共有タブとコストタブで使います</Muted>
 							</View>
 						</Row>
-						<Button title='ログアウト' icon='log-out' variant='secondary' onPress={() => void onLogout()} />
+						<Button title='ログアウト' variant='secondary' size='sm' onPress={() => void onLogout()} style={styles.start} />
 					</Card>
 				) : null}
 
@@ -230,10 +228,11 @@ export const SettingsScreen = () => {
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
+	start: { alignSelf: 'flex-start' },
 	content: {
-		padding: spacing.lg,
-		gap: spacing.lg,
+		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
+		gap: spacing.xs,
 	},
 	fileRow: {
 		minHeight: 48,
@@ -259,7 +258,7 @@ const styles = StyleSheet.create({
 		width: 36,
 		height: 36,
 		borderRadius: 18,
-		backgroundColor: colors.accentSoft,
+		backgroundColor: colors.bgHover,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},

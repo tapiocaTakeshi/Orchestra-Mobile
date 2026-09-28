@@ -1,12 +1,13 @@
 /**
- * デスクトップ Orchestra の既定テーマ「Orchestra Dark」(extensions/theme-orchestra) に合わせた、
- * モバイル共通トークン。値はテーマの VS Code 色キーから取っている (右のコメント)。
+ * モバイル共通トークン。色はデスクトップ Orchestra の既定テーマ「Orchestra Dark」
+ * (extensions/theme-orchestra) の値を使い、右のコメントに元の VS Code 色キーを書いている。
+ * 見た目は Claude Code のように飾りを減らす方針: 地・線・文字の濃淡で組み、色は状態の印くらいにしか使わない。
  */
 
 export const colors = {
 	bg: '#0e0c0b', // editor.background — 画面の地
-	bgElevated: '#131110', // sideBar / titleBar.background — ヘッダー・タブバー・カード
-	bgInput: '#1a1716', // input.background — 入力欄・カンバンのカード
+	bgElevated: '#131110', // sideBar.background — 入力欄の箱・カンバンのカード
+	bgInput: '#1a1716', // input.background — 1 行の入力欄
 	bgHover: '#24201e', // list.hoverBackground / button.secondaryBackground
 	border: '#262120', // sideBar.border / editorGroup.border
 	borderStrong: '#3a3330', // input.border
@@ -16,23 +17,13 @@ export const colors = {
 	fgMuted: '#bdb3a8', // sideBar.foreground
 	fgFaint: '#877c72', // input.placeholderForeground / tab.inactiveForeground
 
-	// 主ボタンはロゴのクリムゾン、選択・フォーカス・リンクはゴールド
-	accent: '#8f1d2c', // button.background
-	accentPressed: '#a5263a', // button.hoverBackground
-	accentFg: '#fbf6ee', // button.foreground
-	accentText: '#c6a769', // textLink.foreground / activityBar.activeBorder
-	accentSoft: '#c6a7691f', // list.activeSelectionBackground
-	focus: '#c6a769b3', // focusBorder
-	selectedBorder: '#c6a76999', // inputOption.activeBorder
-
-	// ログイン画面だけは、デスクトップのログインと同じ明るい赤
-	brand: '#dc2626',
-	brandPressed: '#b91c1c',
+	// 色はほぼ使わず、リンクや稼働中の印だけゴールドにする
+	accentText: '#c6a769', // textLink.foreground
 
 	success: '#89d185', // charts.green (デスクトップの状態ドット)
 	warning: '#cca700', // charts.yellow (= --void-warning、「確認待ち」のドット)
 	danger: '#f87171',
-	running: '#c6a769', // 生成中のカードの枠と同じゴールド
+	running: '#c6a769', // 「作業中」の印
 } as const;
 
 /** `#rrggbb` に透明度を足す (デスクトップの `${color}22` と同じ書き方)。 */

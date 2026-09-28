@@ -9,9 +9,9 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { ErrorBanner, Icon, IconButton, Input } from '../components/ui';
+import { ErrorBanner, IconButton, Input } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
+import { colors, fontSize, radius, spacing } from '../theme';
 
 export const LoginScreen = () => {
 	const { login } = useDivisionAuth();
@@ -40,7 +40,7 @@ export const LoginScreen = () => {
 		}
 	}, [busy, email, password, login]);
 
-	// デスクトップのログイン画面 (void-login-tsx/LoginScreen.tsx) と同じ構成・配色にしている。
+	// 飾りの箱や色は使わず、ロゴ・見出し・入力欄・ボタンだけを縦に並べる。
 	return (
 		<View style={styles.flex}>
 			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -48,8 +48,8 @@ export const LoginScreen = () => {
 					<View style={styles.panel}>
 						<View style={styles.hero}>
 							<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-							<Text accessibilityRole='header' style={styles.headline}>Welcome to Orchestra</Text>
-							<Text style={styles.heroDetail}>デスクトップと同じ Division アカウントでログインすると、手元から Orchestra につながります。</Text>
+							<Text accessibilityRole='header' style={styles.headline}>Orchestra にログイン</Text>
+							<Text style={styles.heroDetail}>デスクトップと同じ Division アカウントを使います。</Text>
 						</View>
 
 						<View style={styles.form}>
@@ -67,8 +67,6 @@ export const LoginScreen = () => {
 								returnKeyType='next'
 								onSubmitEditing={() => passwordRef.current?.focus()}
 								blurOnSubmit={false}
-								focusColor={colors.brand}
-								style={styles.field}
 							/>
 							<Text style={styles.label}>パスワード</Text>
 							<View style={styles.passwordRow}>
@@ -85,8 +83,7 @@ export const LoginScreen = () => {
 									textContentType='password'
 									returnKeyType='go'
 									onSubmitEditing={() => { void onSubmit(); }}
-									focusColor={colors.brand}
-									style={[styles.field, styles.flex]}
+										style={styles.flex}
 								/>
 								<IconButton
 									icon={showPassword ? 'eye-off' : 'eye'}
@@ -103,15 +100,10 @@ export const LoginScreen = () => {
 								onPress={() => { void onSubmit(); }}
 								style={({ pressed }) => [styles.loginButton, pressed && styles.loginButtonPressed, busy && styles.loginButtonBusy]}
 							>
-								{busy
-									? <ActivityIndicator color='#ffffff' size='small' />
-									: <Icon name='log-in' size={17} color='#ffffff' />}
+								{busy ? <ActivityIndicator color={colors.bg} size='small' /> : null}
 								<Text style={styles.loginText}>{busy ? 'ログインしています…' : 'ログイン'}</Text>
 							</Pressable>
-							<View style={styles.note}>
-								<Icon name='key' size={11} color={colors.fgFaint} />
-								<Text style={styles.noteText}>アカウントの作成はデスクトップの Orchestra から</Text>
-							</View>
+							<Text style={styles.noteText}>アカウントの作成はデスクトップの Orchestra から</Text>
 						</View>
 					</View>
 				</ScrollView>
@@ -130,49 +122,27 @@ const styles = StyleSheet.create({
 		alignSelf: 'center',
 		padding: spacing.lg,
 	},
-	panel: {
-		backgroundColor: colors.bgInput,
-		borderWidth: 1,
-		borderColor: withAlpha(colors.accentText, '66'),
-		borderRadius: radius.lg,
-		paddingHorizontal: spacing.xl,
-		paddingVertical: spacing.xl + 8,
-		gap: spacing.xl,
-		shadowColor: '#000000',
-		shadowOpacity: 0.5,
-		shadowRadius: 24,
-		shadowOffset: { width: 0, height: 12 },
-		elevation: 12,
-	},
-	hero: {
-		alignItems: 'center',
-		gap: spacing.sm,
-	},
-	heroMark: {
-		width: 80,
-		height: 80,
-		opacity: 0.85,
-	},
-	headline: { color: colors.brand, fontSize: 24, fontWeight: '700', textAlign: 'center' },
-	heroDetail: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, textAlign: 'center' },
+	panel: { gap: spacing.xl },
+	hero: { alignItems: 'flex-start', gap: spacing.sm },
+	heroMark: { width: 44, height: 44, marginBottom: spacing.sm },
+	headline: { color: colors.fgStrong, fontSize: 24, fontWeight: '600' },
+	heroDetail: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21 },
 	form: { gap: spacing.sm },
 	label: { color: colors.fgMuted, fontSize: fontSize.xs, marginTop: spacing.xs },
-	field: { backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: radius.sm },
 	passwordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	bannerFlush: { margin: 0 },
 	loginButton: {
-		marginTop: spacing.sm,
+		marginTop: spacing.md,
 		flexDirection: 'row',
 		alignItems: 'center',
 		justifyContent: 'center',
 		gap: spacing.sm,
 		minHeight: 48,
 		borderRadius: radius.md,
-		backgroundColor: colors.brand,
+		backgroundColor: colors.fg,
 	},
-	loginButtonPressed: { backgroundColor: colors.brandPressed },
+	loginButtonPressed: { backgroundColor: colors.fgMuted },
 	loginButtonBusy: { opacity: 0.6 },
-	loginText: { color: '#ffffff', fontSize: fontSize.sm - 1, fontWeight: '600' },
-	note: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: spacing.xs },
-	noteText: { color: colors.fgFaint, fontSize: fontSize.xs - 1 },
+	loginText: { color: colors.bg, fontSize: fontSize.sm - 1, fontWeight: '600' },
+	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, textAlign: 'center', marginTop: spacing.sm },
 });

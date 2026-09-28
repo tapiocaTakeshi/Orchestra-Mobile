@@ -74,13 +74,16 @@ type ButtonProps = {
 	accessibilityLabel?: string;
 };
 
-/** デスクトップと同じく、危険な操作は赤い塗りではなく「副ボタン + 赤い文字」で出す。 */
+/**
+ * 主ボタンは明るい塗りに暗い文字 (色を足さない)、それ以外は枠だけか文字だけ。
+ * 危険な操作は赤い塗りではなく、赤い文字で出す。
+ */
 const buttonTextColor = (variant: ButtonProps['variant']) => {
 	switch (variant) {
-		case 'ghost': return colors.accentText;
+		case 'ghost': return colors.fgMuted;
 		case 'secondary': return colors.fg;
 		case 'danger': return colors.danger;
-		default: return colors.accentFg;
+		default: return colors.bg;
 	}
 };
 
@@ -143,7 +146,7 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 			disabled && styles.buttonDisabled,
 		]}
 	>
-		<Icon name={icon} size={20} color={active ? colors.accentText : color} />
+		<Icon name={icon} size={20} color={active ? colors.fgStrong : color} />
 		{badge ? (
 			<View style={styles.iconBadge}>
 				<Text style={styles.iconBadgeText}>{badge > 99 ? '99+' : badge}</Text>
@@ -152,12 +155,7 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 	</Pressable>
 );
 
-type InputProps = TextInputProps & {
-	/** フォーカス中の枠の色。既定はテーマのゴールド (ログイン画面だけデスクトップに合わせて赤)。 */
-	focusColor?: string;
-};
-
-export const Input = forwardRef<TextInput, InputProps>(({ focusColor, ...props }, ref) => {
+export const Input = forwardRef<TextInput, TextInputProps>((props, ref) => {
 	const [focused, setFocused] = useState(false);
 	return (
 		<TextInput
@@ -172,16 +170,16 @@ export const Input = forwardRef<TextInput, InputProps>(({ focusColor, ...props }
 				styles.input,
 				props.multiline && styles.inputMultiline,
 				props.style,
-				focused && (focusColor ? { borderColor: focusColor } : styles.inputFocused),
+				focused && styles.inputFocused,
 			]}
 		/>
 	);
 });
 Input.displayName = 'Input';
 
-/** デスクトップのカンバンのチップと同じく、文字色を薄く敷いた地と枠で出す。 */
+/** 状態や件数の小さな表示。枠や地は付けず、アイコンと文字色だけで伝える。 */
 export const Badge = ({ label, color = colors.fgFaint, icon }: { label: string; color?: string; icon?: IconName }) => (
-	<View style={[styles.badge, { backgroundColor: withAlpha(color, '22'), borderColor: withAlpha(color, '44') }]}>
+	<View style={styles.badge}>
 		{icon ? <Icon name={icon} size={12} color={color} /> : null}
 		<Text style={[styles.badgeText, { color }]}>{label}</Text>
 	</View>
@@ -203,7 +201,7 @@ export const Toggle = ({ value, onValueChange, accessibilityLabel, disabled }: {
 		onValueChange={onValueChange}
 		disabled={disabled}
 		accessibilityLabel={accessibilityLabel}
-		trackColor={{ true: colors.accent, false: colors.borderStrong }}
+		trackColor={{ true: colors.accentText, false: colors.borderStrong }}
 		thumbColor={value ? colors.fgStrong : colors.fgMuted}
 		ios_backgroundColor={colors.borderStrong}
 		{...(Platform.OS === 'web' ? { activeThumbColor: colors.fgStrong } : {})}
@@ -223,7 +221,7 @@ export const EmptyState = ({ title, detail, icon = 'inbox', action }: {
 	action?: React.ReactNode;
 }) => (
 	<View style={styles.empty}>
-		<View style={styles.emptyIcon}><Icon name={icon} size={24} /></View>
+		<View style={styles.emptyIcon}><Icon name={icon} size={24} color={colors.fgFaint} /></View>
 		<Text style={styles.emptyTitle}>{title}</Text>
 		{detail ? <Text style={styles.emptyDetail}>{detail}</Text> : null}
 		{action ? <View style={styles.emptyAction}>{action}</View> : null}
@@ -266,11 +264,11 @@ export const ChipGroup = <T extends string>({ options, value, onChange }: {
 					style={[
 						styles.chip,
 						selected && (opt.color
-							? { borderColor: withAlpha(opt.color, '99'), backgroundColor: withAlpha(opt.color, '22') }
+							? { borderColor: withAlpha(opt.color, '66'), backgroundColor: withAlpha(opt.color, '1a') }
 							: styles.chipSelected),
 					]}
 				>
-					<Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+					<Text style={[styles.chipText, selected && (opt.color ? { color: opt.color } : styles.chipTextSelected)]}>{opt.label}</Text>
 				</Pressable>
 			);
 		})}
@@ -467,46 +465,32 @@ export const Sheet = ({ title, eyebrow, onClose, headerRight, children }: {
 
 export const Loading = ({ label }: { label?: string }) => (
 	<View style={styles.loading}>
-		<ActivityIndicator color={colors.accentText} />
+		<ActivityIndicator color={colors.fgMuted} />
 		{label ? <Text style={styles.loadingText}>{label}</Text> : null}
 	</View>
 );
 
 const styles = StyleSheet.create({
-	// 見出しはデスクトップのタイトルバーと同じ一段明るい地に置く
 	screenHeader: {
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.lg,
 		paddingBottom: spacing.md,
 		gap: 2,
-		backgroundColor: colors.bgElevated,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
-	inputFocused: { borderColor: colors.focus },
-	emptyIcon: {
-		width: 48,
-		height: 48,
-		borderRadius: radius.lg,
-		backgroundColor: colors.bgInput,
-		borderWidth: 1,
-		borderColor: colors.border,
-		alignItems: 'center',
-		justifyContent: 'center',
-		marginBottom: spacing.sm,
-	},
+	inputFocused: { borderColor: colors.fgFaint },
+	emptyIcon: { marginBottom: spacing.xs },
 	screen: {
 		flex: 1,
 		backgroundColor: colors.bg,
 	},
-	// デスクトップはカードに影を付けず、枠線だけで区切る
 	card: {
-		backgroundColor: colors.bgElevated,
-		borderColor: colors.border,
-		borderWidth: 1,
-		borderRadius: radius.lg,
-		padding: spacing.lg,
+		// 箱で囲まず、細い線で区切るだけの平らな区画にする
+		paddingVertical: spacing.lg,
 		gap: spacing.md,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
 	sectionTitleRow: {
 		flexDirection: 'row',
@@ -514,19 +498,16 @@ const styles = StyleSheet.create({
 		justifyContent: 'space-between',
 		gap: spacing.sm,
 	},
-	// デスクトップの見出しラベル (小さめ・太字・字間広め・控えめな色)
 	sectionTitle: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs + 1,
 		fontWeight: '600',
-		letterSpacing: 0.8,
 		flexShrink: 1,
 	},
 	title: {
 		color: colors.fgStrong,
 		fontSize: fontSize.lg - 2,
 		fontWeight: '600',
-		letterSpacing: 0.1,
 	},
 	body: {
 		color: colors.fg,
@@ -551,15 +532,15 @@ const styles = StyleSheet.create({
 	},
 	buttonSmall: { minHeight: 38, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs },
 	buttonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs + 2, flexShrink: 1 },
-	buttonPrimary: { backgroundColor: colors.accent, borderColor: withAlpha(colors.accentText, '33') },
-	buttonPrimaryPressed: { backgroundColor: colors.accentPressed },
-	buttonSecondary: { backgroundColor: colors.bgHover, borderColor: colors.borderStrong },
-	buttonDanger: { backgroundColor: colors.bgHover, borderColor: withAlpha(colors.danger, '44') },
+	buttonPrimary: { backgroundColor: colors.fg },
+	buttonPrimaryPressed: { backgroundColor: colors.fgMuted },
+	buttonSecondary: { backgroundColor: 'transparent', borderColor: colors.borderStrong },
+	buttonDanger: { backgroundColor: 'transparent', borderColor: withAlpha(colors.danger, '44') },
 	buttonGhost: { backgroundColor: 'transparent', borderColor: 'transparent' },
-	buttonPressed: { backgroundColor: colors.border },
+	buttonPressed: { backgroundColor: colors.bgHover },
 	buttonDisabled: { opacity: 0.4 },
 	buttonText: {
-		color: colors.accentFg,
+		color: colors.fg,
 		fontSize: fontSize.sm - 1,
 		fontWeight: '600',
 		textAlign: 'center',
@@ -573,7 +554,7 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	iconButtonActive: { backgroundColor: colors.accentSoft },
+	iconButtonActive: { backgroundColor: colors.bgHover },
 	iconButtonPressed: { backgroundColor: colors.bgHover },
 	iconBadge: {
 		position: 'absolute',
@@ -583,16 +564,16 @@ const styles = StyleSheet.create({
 		height: 16,
 		borderRadius: 8,
 		paddingHorizontal: 3,
-		backgroundColor: colors.accent,
+		backgroundColor: colors.fg,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	iconBadgeText: { color: colors.accentFg, fontSize: 10, fontWeight: '700' },
+	iconBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '700' },
 	input: {
 		minHeight: 46,
 		minWidth: 0,
 		backgroundColor: colors.bgInput,
-		borderColor: colors.borderStrong,
+		borderColor: colors.border,
 		borderWidth: 1,
 		borderRadius: radius.md,
 		paddingHorizontal: spacing.md,
@@ -608,16 +589,12 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: 4,
-		borderWidth: 1,
-		borderRadius: 10,
-		paddingHorizontal: spacing.sm,
-		paddingVertical: 3,
 		alignSelf: 'flex-start',
 		flexShrink: 1,
 	},
 	badgeText: {
 		fontSize: fontSize.xs,
-		fontWeight: '600',
+		fontWeight: '500',
 	},
 	dot: {
 		width: 8,
@@ -630,8 +607,8 @@ const styles = StyleSheet.create({
 		gap: spacing.sm,
 	},
 	divider: {
-		height: 1,
-		backgroundColor: colors.border,
+		height: StyleSheet.hairlineWidth,
+		backgroundColor: colors.borderStrong,
 		marginVertical: spacing.sm,
 	},
 	empty: {
@@ -640,9 +617,10 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	emptyTitle: {
-		color: colors.fg,
+		color: colors.fgMuted,
 		fontSize: fontSize.sm,
-		fontWeight: '600',
+		fontWeight: '500',
+		textAlign: 'center',
 	},
 	emptyDetail: {
 		color: colors.fgFaint,
@@ -673,27 +651,22 @@ const styles = StyleSheet.create({
 	},
 	warningBanner: { backgroundColor: withAlpha(colors.warning, '1a'), borderColor: withAlpha(colors.warning, '4d') },
 	warningText: { color: colors.warning },
-	// デスクトップのテーマ切り替えと同じ形: 暗い地の上で、選んだものだけ一段沈める
 	segmented: {
 		flexDirection: 'row',
 		backgroundColor: colors.bgElevated,
-		borderWidth: 1,
-		borderColor: colors.border,
 		borderRadius: radius.md,
 		padding: 3,
 		gap: 3,
 	},
 	segment: {
 		flex: 1,
-		minHeight: 36,
+		minHeight: 34,
 		borderRadius: radius.sm,
-		borderWidth: 1,
-		borderColor: 'transparent',
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: spacing.xs,
 	},
-	segmentActive: { backgroundColor: colors.bg, borderColor: colors.borderStrong },
+	segmentActive: { backgroundColor: colors.bgHover },
 	segmentText: { color: colors.fgFaint, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	segmentTextActive: { color: colors.fgStrong },
 	toastWrap: {
@@ -728,9 +701,8 @@ const styles = StyleSheet.create({
 		paddingLeft: spacing.lg,
 		paddingRight: spacing.sm,
 		paddingVertical: spacing.sm,
-		backgroundColor: colors.bgElevated,
-		borderBottomWidth: 1,
-		borderBottomColor: colors.border,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
 	},
 	sheetTitle: { flex: 1, gap: 2, paddingVertical: spacing.xs },
 	sheetBody: { flex: 1 },
@@ -740,16 +712,14 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	chip: {
-		minHeight: 40,
+		minHeight: 36,
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
-		borderRadius: radius.sm,
+		borderRadius: 999,
 		paddingHorizontal: spacing.md,
-		paddingVertical: spacing.xs + 2,
 	},
-	// VS Code の inputOption.active (ゴールドの薄い地 + 枠)
-	chipSelected: { backgroundColor: colors.accentSoft, borderColor: colors.selectedBorder },
+	chipSelected: { backgroundColor: colors.bgHover, borderColor: colors.borderStrong },
 	chipText: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs,
