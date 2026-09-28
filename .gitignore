@@ -12,3 +12,8 @@ web-build/
 *.orig.*
 .env
 coverage/
+
+# iOS のネイティブプロジェクトは expo prebuild で作る (Xcode Cloud でも毎回生成)。
+# Xcode Cloud のスクリプトだけはワークスペースと同じ ios/ に置く決まりなのでコミットする。
+/ios/*
+!/ios/ci_scripts/

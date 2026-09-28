@@ -152,11 +152,61 @@ Set ascAppId in the submit profile (eas.json) or re-run this command in interact
 `eas.json` の `submit.production.ios.ascAppId` に設定済みです。別アプリに使い回す場合は
 この値を書き換えてください。
 
+### Xcode Cloud でビルドする
+
+EAS の代わりに、Apple の Xcode Cloud でも iOS 版をビルド・TestFlight 配信できます。
+`ios/` はコミットしていない (Expo の managed workflow のまま) ので、Xcode Cloud が
+リポジトリを clone した直後に `ios/ci_scripts/ci_post_clone.sh` が毎回ネイティブプロジェクトを作ります。
+
+1. Homebrew で Node (既定は `node@22`) を入れる。CocoaPods が無ければそれも入れる
+2. `npm ci`
+3. `npx expo prebuild --platform ios` (チーム ID とビルド番号をここで差し込む)
+4. `pod install`
+
+`app.json` を変えても、次のビルドの prebuild でそのまま反映されます。
+
+#### 初回のセットアップ (Mac で一度だけ)
+
+ワークフローは Xcode から作るので、手元で一度だけ iOS プロジェクトを生成します
+(`ios/` は `.gitignore` 済みで、`ios/ci_scripts/` だけがコミット対象です)。
+
+```bash
+npm ci
+APPLE_TEAM_ID=<チーム ID> npx expo prebuild --platform ios
+open ios/OrchestraMobile.xcworkspace
+```
+
+Xcode で Xcode Cloud のワークフローを作成し、次のように設定します。
+
+| 項目 | 値 |
+| --- | --- |
+| ワークスペース / スキーム | `ios/OrchestraMobile.xcworkspace` / `OrchestraMobile` |
+| Environment → Environment Variables | `APPLE_TEAM_ID` = チーム ID (developer.apple.com → Membership details の 10 文字) |
+| Actions | Archive (iOS)。配信するなら Deployment Preparation を TestFlight / App Store に |
+
+App Store Connect には、バンドル ID `com.hero.orchestra` のアプリ (`eas.json` の `ascAppId` と同じもの) が
+登録済みである必要があります。
+
+任意の環境変数:
+
+| 変数 | 用途 |
+| --- | --- |
+| `NODE_FORMULA` | Homebrew の Node フォーミュラを変える (例: `node@24`) |
+
+#### ビルド番号
+
+`CFBundleVersion` には Xcode Cloud の `CI_BUILD_NUMBER` を使います (`app.config.ts` が
+`IOS_BUILD_NUMBER` として受け取る)。EAS (`appVersionSource: remote`) で同じバージョンを
+アップロード済みの場合、それ以下の番号は App Store Connect に弾かれるので、Xcode Cloud の設定で
+次のビルド番号を EAS の最新より大きくしておいてください。EAS 側のビルドはこれまで通りで、
+環境変数を渡さない限り `app.config.ts` は何も上書きしません。
+
 ### ディレクトリ構成
 
 ```
-app.config.ts                  app.json に EAS のプロジェクト ID / アカウントを差し込む
+app.config.ts                  app.json に EAS のプロジェクト ID / アカウント、Xcode Cloud のチーム ID / ビルド番号を差し込む
 scripts/eas-preflight.js       ビルド前に EAS のプロジェクト ID が揃っているか確認
+ios/ci_scripts/ci_post_clone.sh  Xcode Cloud: clone 直後に prebuild と pod install を行う
 App.tsx                        ルート。ログイン/検出/手動接続/タブの切り替え
 src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
