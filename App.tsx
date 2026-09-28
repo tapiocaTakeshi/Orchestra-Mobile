@@ -64,10 +64,12 @@ const TabBar = ({ tabs, active, onChange, remoteStatus }: {
 					accessibilityState={{ selected }}
 					onPress={() => onChange(tab.key)}
 					accessibilityLabel={`${tab.label}${statusLabel}`}
-					style={({ pressed }) => [styles.tab, pressed && { opacity: 0.7 }]}
+					style={({ pressed }) => [styles.tab, pressed && { backgroundColor: colors.bgHover }]}
 				>
-					<View style={[styles.tabIcon, selected && styles.tabIconActive]}>
-						<Icon name={tab.icon} size={20} color={selected ? colors.accentText : colors.fgFaint} />
+					{/* デスクトップのタブ (tab.activeBorderTop) と同じ、上端のゴールドの線で選択中を示す */}
+					{selected ? <View style={styles.tabIndicator} /> : null}
+					<View style={styles.tabIcon}>
+						<Icon name={tab.icon} size={20} color={selected ? colors.fgStrong : colors.fgFaint} />
 						{status !== 'idle' ? (
 							<View style={[styles.busyDot, { backgroundColor: status === 'approval' ? colors.warning : colors.running }]} />
 						) : null}
@@ -196,20 +198,29 @@ const styles = StyleSheet.create({
 		minHeight: 60,
 		gap: 4,
 	},
-	tabIcon: { width: 52, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-	tabIconActive: { backgroundColor: colors.accentSoft },
+	tabIndicator: {
+		position: 'absolute',
+		top: 0,
+		left: '22%',
+		right: '22%',
+		height: 2,
+		borderBottomLeftRadius: 2,
+		borderBottomRightRadius: 2,
+		backgroundColor: colors.accentText,
+	},
+	tabIcon: { width: 44, height: 28, alignItems: 'center', justifyContent: 'center' },
 	tabLabel: {
 		color: colors.fgFaint,
 		fontSize: fontSize.xs - 1,
 		fontWeight: '600',
 	},
 	tabLabelActive: {
-		color: colors.accentText,
+		color: colors.fgStrong,
 	},
 	busyDot: {
 		position: 'absolute',
-		top: 3,
-		right: 10,
+		top: 1,
+		right: 6,
 		width: 9,
 		height: 9,
 		borderRadius: 5,

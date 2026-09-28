@@ -158,10 +158,10 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 					</Card>
 
 					{connections.length > 0 ? (
-						<View>
+						<View style={styles.list}>
 							<SectionTitle>保存済みの接続</SectionTitle>
 							{connections.map(c => (
-								<Card key={c.url} style={styles.savedCard}>
+								<Card key={c.url}>
 									<Row>
 										<View style={styles.deviceIcon}>
 											<Icon name='monitor' size={20} color={colors.accentText} />
@@ -215,9 +215,7 @@ const styles = StyleSheet.create({
 	},
 	back: { alignSelf: 'flex-start' },
 	bannerFlush: { margin: 0 },
-	savedCard: {
-		marginBottom: spacing.sm,
-	},
+	list: { gap: spacing.sm },
 	deviceIcon: {
 		width: 40,
 		height: 40,

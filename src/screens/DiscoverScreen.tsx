@@ -102,7 +102,7 @@ export const DiscoverScreen = ({
 		<Screen>
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.accentText} />}
 			>
 				<View style={styles.hero}>
 					<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
@@ -122,12 +122,12 @@ export const DiscoverScreen = ({
 						detail='IDE 側でリモートコントロールを有効にし、同じ Division アカウントでログインしてください。見つかると自動でここに表示されます。'
 					/>
 				) : (
-					<View>
+					<View style={styles.list}>
 						<SectionTitle right={<Muted>自動で更新中</Muted>}>見つかったデバイス</SectionTitle>
 						{sessions.map(row => {
 							const isNew = newSessionIds.includes(row.id);
 							return (
-								<Card key={row.id} style={styles.deviceCard}>
+								<Card key={row.id}>
 									<Row>
 										<View style={styles.deviceIcon}>
 											<Icon name='monitor' size={20} color={colors.accentText} />
@@ -180,9 +180,7 @@ const styles = StyleSheet.create({
 		width: 64,
 		height: 64,
 	},
-	deviceCard: {
-		marginBottom: spacing.sm,
-	},
+	list: { gap: spacing.sm },
 	deviceIcon: {
 		width: 40,
 		height: 40,

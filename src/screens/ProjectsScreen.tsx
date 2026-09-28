@@ -400,7 +400,7 @@ export const ProjectsScreen = () => {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
 			>
 				<Card>
 					<SectionTitle right={<Badge label={`${division.projects.length} 件`} />}>Division プロジェクト</SectionTitle>
@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
 	spread: { justifyContent: 'space-between' },
 	centered: { alignSelf: 'center' },
 	bannerFlush: { margin: 0 },
-	activeCard: { borderColor: '#1c5a45' },
+	activeCard: { borderColor: colors.selectedBorder, borderLeftWidth: 3, borderLeftColor: colors.accentText },
 	roleChips: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',
@@ -614,7 +614,7 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.xs,
 	},
 	modelChipSelected: {
-		borderColor: colors.accent,
+		borderColor: colors.selectedBorder,
 		backgroundColor: colors.accentSoft,
 	},
 	modelChipText: {

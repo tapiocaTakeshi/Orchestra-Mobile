@@ -10,6 +10,7 @@ import {
 	Platform,
 	Pressable,
 	StyleSheet,
+	Switch,
 	Text,
 	TextInput,
 	TextInputProps,
@@ -18,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, fontSize, radius, spacing } from '../theme';
+import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 export type IconName = React.ComponentProps<typeof Feather>['name'];
 
@@ -73,11 +74,13 @@ type ButtonProps = {
 	accessibilityLabel?: string;
 };
 
+/** デスクトップと同じく、危険な操作は赤い塗りではなく「副ボタン + 赤い文字」で出す。 */
 const buttonTextColor = (variant: ButtonProps['variant']) => {
 	switch (variant) {
 		case 'ghost': return colors.accentText;
 		case 'secondary': return colors.fg;
-		default: return '#ffffff';
+		case 'danger': return colors.danger;
+		default: return colors.accentFg;
 	}
 };
 
@@ -98,8 +101,7 @@ export const Button = ({ title, onPress, variant = 'primary', size = 'md', icon,
 				variant === 'secondary' && styles.buttonSecondary,
 				variant === 'danger' && styles.buttonDanger,
 				variant === 'ghost' && styles.buttonGhost,
-				pressed && !isDisabled && styles.buttonPressed,
-				pressed && !isDisabled && variant === 'primary' && { backgroundColor: colors.accentPressed },
+				pressed && !isDisabled && (variant === 'primary' ? styles.buttonPrimaryPressed : styles.buttonPressed),
 				isDisabled && styles.buttonDisabled,
 				style,
 			]}
@@ -137,7 +139,7 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 		style={({ pressed }) => [
 			styles.iconButton,
 			active && styles.iconButtonActive,
-			pressed && { backgroundColor: colors.border },
+			pressed && styles.iconButtonPressed,
 			disabled && styles.buttonDisabled,
 		]}
 	>
@@ -150,7 +152,12 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 	</Pressable>
 );
 
-export const Input = forwardRef<TextInput, TextInputProps>((props, ref) => {
+type InputProps = TextInputProps & {
+	/** フォーカス中の枠の色。既定はテーマのゴールド (ログイン画面だけデスクトップに合わせて赤)。 */
+	focusColor?: string;
+};
+
+export const Input = forwardRef<TextInput, InputProps>(({ focusColor, ...props }, ref) => {
 	const [focused, setFocused] = useState(false);
 	return (
 		<TextInput
@@ -161,14 +168,20 @@ export const Input = forwardRef<TextInput, TextInputProps>((props, ref) => {
 			{...props}
 			onFocus={event => { setFocused(true); props.onFocus?.(event); }}
 			onBlur={event => { setFocused(false); props.onBlur?.(event); }}
-			style={[styles.input, props.multiline && styles.inputMultiline, props.style, focused && styles.inputFocused]}
+			style={[
+				styles.input,
+				props.multiline && styles.inputMultiline,
+				props.style,
+				focused && (focusColor ? { borderColor: focusColor } : styles.inputFocused),
+			]}
 		/>
 	);
 });
 Input.displayName = 'Input';
 
+/** デスクトップのカンバンのチップと同じく、文字色を薄く敷いた地と枠で出す。 */
 export const Badge = ({ label, color = colors.fgFaint, icon }: { label: string; color?: string; icon?: IconName }) => (
-	<View style={[styles.badge, { borderColor: color }]}>
+	<View style={[styles.badge, { backgroundColor: withAlpha(color, '22'), borderColor: withAlpha(color, '44') }]}>
 		{icon ? <Icon name={icon} size={12} color={color} /> : null}
 		<Text style={[styles.badgeText, { color }]}>{label}</Text>
 	</View>
@@ -176,6 +189,25 @@ export const Badge = ({ label, color = colors.fgFaint, icon }: { label: string; 
 
 export const Dot = ({ color }: { color: string }) => (
 	<View style={[styles.dot, { backgroundColor: color }]} />
+);
+
+/** オン/オフ。つまみの色を端末任せにすると Android や Web で緑になるので、テーマの色で揃える。 */
+export const Toggle = ({ value, onValueChange, accessibilityLabel, disabled }: {
+	value: boolean;
+	onValueChange: (next: boolean) => void;
+	accessibilityLabel?: string;
+	disabled?: boolean;
+}) => (
+	<Switch
+		value={value}
+		onValueChange={onValueChange}
+		disabled={disabled}
+		accessibilityLabel={accessibilityLabel}
+		trackColor={{ true: colors.accent, false: colors.borderStrong }}
+		thumbColor={value ? colors.fgStrong : colors.fgMuted}
+		ios_backgroundColor={colors.borderStrong}
+		{...(Platform.OS === 'web' ? { activeThumbColor: colors.fgStrong } : {})}
+	/>
 );
 
 export const Row = ({ children, style }: { children: React.ReactNode; style?: ViewStyle }) => (
@@ -233,10 +265,12 @@ export const ChipGroup = <T extends string>({ options, value, onChange }: {
 					onPress={() => onChange(opt.value)}
 					style={[
 						styles.chip,
-						selected && { borderColor: opt.color ?? colors.accent, backgroundColor: `${opt.color ?? colors.accent}22` },
+						selected && (opt.color
+							? { borderColor: withAlpha(opt.color, '99'), backgroundColor: withAlpha(opt.color, '22') }
+							: styles.chipSelected),
 					]}
 				>
-					<Text style={[styles.chipText, selected && { color: colors.fg }]}>{opt.label}</Text>
+					<Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
 				</Pressable>
 			);
 		})}
@@ -433,19 +467,39 @@ export const Sheet = ({ title, eyebrow, onClose, headerRight, children }: {
 
 export const Loading = ({ label }: { label?: string }) => (
 	<View style={styles.loading}>
-		<ActivityIndicator color={colors.accent} />
+		<ActivityIndicator color={colors.accentText} />
 		{label ? <Text style={styles.loadingText}>{label}</Text> : null}
 	</View>
 );
 
 const styles = StyleSheet.create({
-	screenHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.md, gap: spacing.xs, borderBottomWidth: 1, borderBottomColor: colors.border },
-	inputFocused: { borderColor: colors.accentText },
-	emptyIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: colors.bgElevated, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
+	// 見出しはデスクトップのタイトルバーと同じ一段明るい地に置く
+	screenHeader: {
+		paddingHorizontal: spacing.lg,
+		paddingTop: spacing.lg,
+		paddingBottom: spacing.md,
+		gap: 2,
+		backgroundColor: colors.bgElevated,
+		borderBottomWidth: 1,
+		borderBottomColor: colors.border,
+	},
+	inputFocused: { borderColor: colors.focus },
+	emptyIcon: {
+		width: 48,
+		height: 48,
+		borderRadius: radius.lg,
+		backgroundColor: colors.bgInput,
+		borderWidth: 1,
+		borderColor: colors.border,
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: spacing.sm,
+	},
 	screen: {
 		flex: 1,
 		backgroundColor: colors.bg,
 	},
+	// デスクトップはカードに影を付けず、枠線だけで区切る
 	card: {
 		backgroundColor: colors.bgElevated,
 		borderColor: colors.border,
@@ -453,28 +507,26 @@ const styles = StyleSheet.create({
 		borderRadius: radius.lg,
 		padding: spacing.lg,
 		gap: spacing.md,
-		shadowColor: '#000000',
-		shadowOpacity: 0.22,
-		shadowRadius: 12,
-		shadowOffset: { width: 0, height: 4 },
-		elevation: 3,
 	},
 	sectionTitleRow: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		justifyContent: 'space-between',
-		marginBottom: spacing.sm,
+		gap: spacing.sm,
 	},
+	// デスクトップの見出しラベル (小さめ・太字・字間広め・控えめな色)
 	sectionTitle: {
-		color: colors.fg,
-		fontSize: fontSize.md,
+		color: colors.fgMuted,
+		fontSize: fontSize.xs + 1,
 		fontWeight: '600',
+		letterSpacing: 0.8,
+		flexShrink: 1,
 	},
 	title: {
-		color: colors.fg,
-		fontSize: fontSize.lg,
-		fontWeight: '700',
-		letterSpacing: -0.3,
+		color: colors.fgStrong,
+		fontSize: fontSize.lg - 2,
+		fontWeight: '600',
+		letterSpacing: 0.1,
 	},
 	body: {
 		color: colors.fg,
@@ -494,20 +546,21 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: 'transparent',
-		minHeight: 48,
+		minHeight: 46,
 		flexShrink: 1,
 	},
-	buttonSmall: { minHeight: 40, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs },
+	buttonSmall: { minHeight: 38, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs },
 	buttonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs + 2, flexShrink: 1 },
-	buttonPrimary: { backgroundColor: colors.accent },
-	buttonSecondary: { backgroundColor: colors.bgInput, borderColor: colors.borderStrong },
-	buttonDanger: { backgroundColor: colors.danger },
+	buttonPrimary: { backgroundColor: colors.accent, borderColor: withAlpha(colors.accentText, '33') },
+	buttonPrimaryPressed: { backgroundColor: colors.accentPressed },
+	buttonSecondary: { backgroundColor: colors.bgHover, borderColor: colors.borderStrong },
+	buttonDanger: { backgroundColor: colors.bgHover, borderColor: withAlpha(colors.danger, '44') },
 	buttonGhost: { backgroundColor: 'transparent', borderColor: 'transparent' },
-	buttonPressed: { opacity: 0.75 },
+	buttonPressed: { backgroundColor: colors.border },
 	buttonDisabled: { opacity: 0.4 },
 	buttonText: {
-		color: '#ffffff',
-		fontSize: fontSize.sm,
+		color: colors.accentFg,
+		fontSize: fontSize.sm - 1,
 		fontWeight: '600',
 		textAlign: 'center',
 		flexShrink: 1,
@@ -516,11 +569,12 @@ const styles = StyleSheet.create({
 	iconButton: {
 		width: 44,
 		height: 44,
-		borderRadius: radius.md,
+		borderRadius: radius.sm,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
 	iconButtonActive: { backgroundColor: colors.accentSoft },
+	iconButtonPressed: { backgroundColor: colors.bgHover },
 	iconBadge: {
 		position: 'absolute',
 		top: 4,
@@ -533,12 +587,12 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	iconBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '700' },
+	iconBadgeText: { color: colors.accentFg, fontSize: 10, fontWeight: '700' },
 	input: {
-		minHeight: 48,
+		minHeight: 46,
 		minWidth: 0,
 		backgroundColor: colors.bgInput,
-		borderColor: colors.border,
+		borderColor: colors.borderStrong,
 		borderWidth: 1,
 		borderRadius: radius.md,
 		paddingHorizontal: spacing.md,
@@ -555,9 +609,9 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		gap: 4,
 		borderWidth: 1,
-		borderRadius: radius.lg,
+		borderRadius: 10,
 		paddingHorizontal: spacing.sm,
-		paddingVertical: 4,
+		paddingVertical: 3,
 		alignSelf: 'flex-start',
 		flexShrink: 1,
 	},
@@ -586,24 +640,25 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	emptyTitle: {
-		color: colors.fgMuted,
+		color: colors.fg,
 		fontSize: fontSize.sm,
 		fontWeight: '600',
 	},
 	emptyDetail: {
-		color: colors.fgMuted,
-		fontSize: fontSize.sm,
-		lineHeight: 23,
+		color: colors.fgFaint,
+		fontSize: fontSize.xs + 1,
+		lineHeight: 21,
 		textAlign: 'center',
 	},
 	emptyAction: { marginTop: spacing.sm, alignSelf: 'stretch', alignItems: 'center' },
+	// デスクトップのログイン画面のエラー表示と同じ、薄い赤の地 + 赤の枠
 	errorBanner: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		justifyContent: 'space-between',
 		gap: spacing.sm,
-		backgroundColor: '#3b1418',
-		borderColor: colors.danger,
+		backgroundColor: withAlpha(colors.danger, '1a'),
+		borderColor: withAlpha(colors.danger, '4d'),
 		borderWidth: 1,
 		borderRadius: radius.sm,
 		paddingHorizontal: spacing.md,
@@ -611,16 +666,17 @@ const styles = StyleSheet.create({
 		margin: spacing.md,
 	},
 	errorText: {
-		color: '#fecdd3',
+		color: colors.danger,
 		fontSize: fontSize.xs,
 		lineHeight: 18,
 		flex: 1,
 	},
-	warningBanner: { backgroundColor: '#33260c', borderColor: colors.warning },
-	warningText: { color: '#fde68a' },
+	warningBanner: { backgroundColor: withAlpha(colors.warning, '1a'), borderColor: withAlpha(colors.warning, '4d') },
+	warningText: { color: colors.warning },
+	// デスクトップのテーマ切り替えと同じ形: 暗い地の上で、選んだものだけ一段沈める
 	segmented: {
 		flexDirection: 'row',
-		backgroundColor: colors.bgInput,
+		backgroundColor: colors.bgElevated,
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: radius.md,
@@ -629,15 +685,17 @@ const styles = StyleSheet.create({
 	},
 	segment: {
 		flex: 1,
-		minHeight: 38,
+		minHeight: 36,
 		borderRadius: radius.sm,
+		borderWidth: 1,
+		borderColor: 'transparent',
 		alignItems: 'center',
 		justifyContent: 'center',
 		paddingHorizontal: spacing.xs,
 	},
-	segmentActive: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accent },
-	segmentText: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
-	segmentTextActive: { color: colors.fg },
+	segmentActive: { backgroundColor: colors.bg, borderColor: colors.borderStrong },
+	segmentText: { color: colors.fgFaint, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	segmentTextActive: { color: colors.fgStrong },
 	toastWrap: {
 		position: 'absolute',
 		top: spacing.sm,
@@ -651,13 +709,13 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		gap: spacing.sm,
 		maxWidth: 480,
-		backgroundColor: '#1b2338',
+		backgroundColor: colors.bgInput,
 		borderWidth: 1,
 		borderRadius: radius.md,
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.sm + 2,
 		shadowColor: '#000000',
-		shadowOpacity: 0.35,
+		shadowOpacity: 0.5,
 		shadowRadius: 16,
 		shadowOffset: { width: 0, height: 6 },
 		elevation: 8,
@@ -670,6 +728,7 @@ const styles = StyleSheet.create({
 		paddingLeft: spacing.lg,
 		paddingRight: spacing.sm,
 		paddingVertical: spacing.sm,
+		backgroundColor: colors.bgElevated,
 		borderBottomWidth: 1,
 		borderBottomColor: colors.border,
 	},
@@ -681,19 +740,22 @@ const styles = StyleSheet.create({
 		gap: spacing.xs,
 	},
 	chip: {
-		minHeight: 44,
+		minHeight: 40,
 		justifyContent: 'center',
 		borderWidth: 1,
 		borderColor: colors.border,
-		borderRadius: radius.lg,
+		borderRadius: radius.sm,
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.xs + 2,
 	},
+	// VS Code の inputOption.active (ゴールドの薄い地 + 枠)
+	chipSelected: { backgroundColor: colors.accentSoft, borderColor: colors.selectedBorder },
 	chipText: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
+	chipTextSelected: { color: colors.fgStrong },
 	loading: {
 		padding: spacing.xl,
 		alignItems: 'center',
@@ -704,4 +766,3 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 	},
 });
-

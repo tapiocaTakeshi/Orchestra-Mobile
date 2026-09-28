@@ -7,11 +7,11 @@
  */
 
 import React, { useCallback, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { Button, Card, ErrorBanner, IconButton, Input, Muted, SectionTitle } from '../components/ui';
+import { ErrorBanner, Icon, IconButton, Input } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, fontSize, spacing } from '../theme';
+import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 export const LoginScreen = () => {
 	const { login } = useDivisionAuth();
@@ -40,65 +40,80 @@ export const LoginScreen = () => {
 		}
 	}, [busy, email, password, login]);
 
+	// デスクトップのログイン画面 (void-login-tsx/LoginScreen.tsx) と同じ構成・配色にしている。
 	return (
 		<View style={styles.flex}>
 			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+					<View style={styles.panel}>
+						<View style={styles.hero}>
+							<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
+							<Text accessibilityRole='header' style={styles.headline}>Welcome to Orchestra</Text>
+							<Text style={styles.heroDetail}>デスクトップと同じ Division アカウントでログインすると、手元から Orchestra につながります。</Text>
+						</View>
 
-					<View style={styles.hero}>
-						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-						<Text style={styles.eyebrow}>ORCHESTRA MOBILE</Text>
-						<Text accessibilityRole='header' style={styles.headline}>創る時間を、{ '\n' }どこからでも。</Text>
-						<Muted style={styles.heroDetail}>エージェントへの指示も、タスクの確認も。{ '\n' }手元から Orchestra につながります。</Muted>
-					</View>
-
-					<Card>
-						<SectionTitle>ログイン</SectionTitle>
-						<Muted>デスクトップと同じ Division アカウントを使います。</Muted>
-						<Muted>メールアドレス</Muted>
-						<Input
-							accessibilityLabel='メールアドレス'
-							value={email}
-							onChangeText={text => { setEmail(text); setStatus(null); }}
-							placeholder='you@example.com'
-							autoCapitalize='none'
-							autoCorrect={false}
-							keyboardType='email-address'
-							autoComplete='email'
-							textContentType='username'
-							returnKeyType='next'
-							onSubmitEditing={() => passwordRef.current?.focus()}
-							blurOnSubmit={false}
-						/>
-						<Muted>パスワード</Muted>
-						<View style={styles.passwordRow}>
+						<View style={styles.form}>
+							<Text style={styles.label}>メールアドレス</Text>
 							<Input
-								ref={passwordRef}
-								accessibilityLabel='パスワード'
-								value={password}
-								onChangeText={text => { setPassword(text); setStatus(null); }}
-								placeholder='パスワード'
+								accessibilityLabel='メールアドレス'
+								value={email}
+								onChangeText={text => { setEmail(text); setStatus(null); }}
+								placeholder='you@example.com'
 								autoCapitalize='none'
 								autoCorrect={false}
-								secureTextEntry={!showPassword}
-								autoComplete='password'
-								textContentType='password'
-								returnKeyType='go'
-								onSubmitEditing={() => { void onSubmit(); }}
-								style={styles.flex}
+								keyboardType='email-address'
+								autoComplete='email'
+								textContentType='username'
+								returnKeyType='next'
+								onSubmitEditing={() => passwordRef.current?.focus()}
+								blurOnSubmit={false}
+								focusColor={colors.brand}
+								style={styles.field}
 							/>
-							<IconButton
-								icon={showPassword ? 'eye-off' : 'eye'}
-								accessibilityLabel={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
-								onPress={() => setShowPassword(v => !v)}
-							/>
+							<Text style={styles.label}>パスワード</Text>
+							<View style={styles.passwordRow}>
+								<Input
+									ref={passwordRef}
+									accessibilityLabel='パスワード'
+									value={password}
+									onChangeText={text => { setPassword(text); setStatus(null); }}
+									placeholder='パスワード'
+									autoCapitalize='none'
+									autoCorrect={false}
+									secureTextEntry={!showPassword}
+									autoComplete='password'
+									textContentType='password'
+									returnKeyType='go'
+									onSubmitEditing={() => { void onSubmit(); }}
+									focusColor={colors.brand}
+									style={[styles.field, styles.flex]}
+								/>
+								<IconButton
+									icon={showPassword ? 'eye-off' : 'eye'}
+									accessibilityLabel={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+									onPress={() => setShowPassword(v => !v)}
+								/>
+							</View>
+							{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
+							<Pressable
+								accessibilityRole='button'
+								accessibilityLabel='ログイン'
+								accessibilityState={{ disabled: busy, busy }}
+								disabled={busy}
+								onPress={() => { void onSubmit(); }}
+								style={({ pressed }) => [styles.loginButton, pressed && styles.loginButtonPressed, busy && styles.loginButtonBusy]}
+							>
+								{busy
+									? <ActivityIndicator color='#ffffff' size='small' />
+									: <Icon name='log-in' size={17} color='#ffffff' />}
+								<Text style={styles.loginText}>{busy ? 'ログインしています…' : 'ログイン'}</Text>
+							</Pressable>
+							<View style={styles.note}>
+								<Icon name='key' size={11} color={colors.fgFaint} />
+								<Text style={styles.noteText}>アカウントの作成はデスクトップの Orchestra から</Text>
+							</View>
 						</View>
-						{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
-						<Button title='ログイン' icon='log-in' onPress={() => { void onSubmit(); }} loading={busy} />
-					</Card>
-
-					<Muted style={{ textAlign: 'center' }}>アカウントの作成はデスクトップの Orchestra から。</Muted>
-
+					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
 		</View>
@@ -114,22 +129,50 @@ const styles = StyleSheet.create({
 		maxWidth: 480,
 		alignSelf: 'center',
 		padding: spacing.lg,
-		gap: spacing.lg,
+	},
+	panel: {
+		backgroundColor: colors.bgInput,
+		borderWidth: 1,
+		borderColor: withAlpha(colors.accentText, '66'),
+		borderRadius: radius.lg,
+		paddingHorizontal: spacing.xl,
+		paddingVertical: spacing.xl + 8,
+		gap: spacing.xl,
+		shadowColor: '#000000',
+		shadowOpacity: 0.5,
+		shadowRadius: 24,
+		shadowOffset: { width: 0, height: 12 },
+		elevation: 12,
 	},
 	hero: {
 		alignItems: 'center',
-		gap: spacing.md,
-		paddingBottom: spacing.lg,
-		paddingTop: spacing.xl,
+		gap: spacing.sm,
 	},
-	eyebrow: { color: colors.accentText, fontSize: fontSize.xs, fontWeight: '700', letterSpacing: 2 },
-	headline: { color: colors.fg, fontSize: 32, fontWeight: '700', lineHeight: 44, textAlign: 'center' },
-	heroDetail: { textAlign: 'center', lineHeight: 22 },
 	heroMark: {
-		width: 64,
-		height: 64,
+		width: 80,
+		height: 80,
+		opacity: 0.85,
 	},
+	headline: { color: colors.brand, fontSize: 24, fontWeight: '700', textAlign: 'center' },
+	heroDetail: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, textAlign: 'center' },
+	form: { gap: spacing.sm },
+	label: { color: colors.fgMuted, fontSize: fontSize.xs, marginTop: spacing.xs },
+	field: { backgroundColor: colors.bgElevated, borderColor: colors.border, borderRadius: radius.sm },
 	passwordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	bannerFlush: { margin: 0 },
+	loginButton: {
+		marginTop: spacing.sm,
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: spacing.sm,
+		minHeight: 48,
+		borderRadius: radius.md,
+		backgroundColor: colors.brand,
+	},
+	loginButtonPressed: { backgroundColor: colors.brandPressed },
+	loginButtonBusy: { opacity: 0.6 },
+	loginText: { color: '#ffffff', fontSize: fontSize.sm - 1, fontWeight: '600' },
+	note: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, marginTop: spacing.xs },
+	noteText: { color: colors.fgFaint, fontSize: fontSize.xs - 1 },
 });
-

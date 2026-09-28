@@ -8,6 +8,7 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
+	ActivityIndicator,
 	KeyboardAvoidingView,
 	NativeScrollEvent,
 	NativeSyntheticEvent,
@@ -16,7 +17,6 @@ import {
 	RefreshControl,
 	ScrollView,
 	StyleSheet,
-	Switch,
 	Text,
 	View,
 	useWindowDimensions,
@@ -43,6 +43,7 @@ import {
 	SectionTitle,
 	Sheet,
 	Title,
+	Toggle,
 	confirmAction,
 	useToast,
 } from '../components/ui';
@@ -54,6 +55,7 @@ import {
 	checklistProgress,
 	columnWithRole,
 	isOverdue,
+	labelColor,
 	latestRun,
 	moveTargets,
 	priorityColor,
@@ -61,7 +63,7 @@ import {
 	todayString,
 } from '../lib/kanban';
 import { useApp } from '../state/AppContext';
-import { colors, fontSize, radius, spacing } from '../theme';
+import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 const COLUMN_ROLES: { value: KanbanColumnRole; label: string }[] = [
 	{ value: 'none', label: '指定なし' },
@@ -71,13 +73,14 @@ const COLUMN_ROLES: { value: KanbanColumnRole; label: string }[] = [
 	{ value: 'error', label: 'エラー' },
 ];
 
+/** 実行結果の表示名と色はデスクトップのボード (kanban-tsx/shared.tsx) と同じにする。 */
 const runStatusLabel = (status: string): string => {
 	switch (status) {
 		case 'done': return '完了';
 		case 'error': return 'エラー';
 		case 'timeout': return 'タイムアウト';
-		case 'canceled': return 'キャンセル';
-		case 'dry-run': return '試行';
+		case 'canceled': return '中断';
+		case 'dry-run': return 'ドライラン';
 		default: return status;
 	}
 };
@@ -101,14 +104,33 @@ const useAction = () => {
 
 const runStatusColor = (status: string): string => {
 	switch (status) {
-		case 'done': return colors.success;
-		case 'error':
-		case 'timeout': return colors.danger;
-		case 'canceled': return colors.fgFaint;
-		default: return colors.warning;
+		case 'done': return '#10b981';
+		case 'error': return '#ef4444';
+		case 'timeout': return '#f59e0b';
+		case 'canceled': return '#8b95a5';
+		default: return '#60a5fa';
 	}
 };
 
+const ROLE_TAG: Partial<Record<KanbanColumnRole, string>> = {
+	'todo': 'TO DO',
+	'in-progress': '進行中',
+	'done': '完了',
+	'error': 'エラー',
+};
+
+/** カード下段の小さな情報 (アイコン + 文字)。 */
+const Meta = ({ icon, label, color }: { icon?: React.ComponentProps<typeof Icon>['name']; label: string; color?: string }) => (
+	<View style={styles.meta}>
+		{icon ? <Icon name={icon} size={12} color={color ?? colors.fgFaint} /> : null}
+		<Text style={[styles.metaText, color ? { color } : null]}>{label}</Text>
+	</View>
+);
+
+/**
+ * デスクトップのボードと同じカード: 左端の帯が優先度、ラベルは色付きのチップ、
+ * 下段に優先度・期限・チェックリスト・コメント・担当・最後の実行結果を小さく並べる。
+ */
 const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: boolean; onPress: () => void }) => {
 	const progress = checklistProgress(task);
 	const run = latestRun(task);
@@ -121,45 +143,40 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 			accessibilityHint='タップで詳細を開きます'
 			onPress={onPress}
 			style={({ pressed }) => [
-			styles.taskCard,
-			isRunning && styles.taskCardRunning,
-			pressed && { opacity: 0.8 },
-		]}>
-			<Row style={styles.spread}>
-				<View style={[styles.priorityBar, { backgroundColor: priorityColor(task.priority) }]} />
-				<View style={styles.flex}>
-					<Text style={styles.taskTitle} numberOfLines={2}>{task.title}</Text>
-					{task.description ? <Muted numberOfLines={2}>{oneLine(task.description, 90)}</Muted> : null}
-				</View>
-			</Row>
+				styles.taskCard,
+				isRunning && styles.taskCardRunning,
+				!task.agentEnabled && styles.taskCardMuted,
+				pressed && styles.taskCardPressed,
+			]}
+		>
+			<View style={[styles.priorityBar, { backgroundColor: priorityColor(task.priority) }]} />
 
-			<View style={styles.taskMetaRow}>
-				{isRunning ? <Badge label='実行中' icon='loader' color={colors.running} /> : null}
-				{task.dueDate ? (
-					<Badge
-						label={overdue ? `期限切れ ${task.dueDate}` : task.dueDate}
-						icon='calendar'
-						color={overdue ? colors.danger : colors.fgMuted}
-					/>
-				) : null}
-				{progress.total > 0 ? (
-					<Badge
-						label={`${progress.done}/${progress.total}`}
-						icon='check-square'
-						color={progress.done === progress.total ? colors.success : colors.fgFaint}
-					/>
-				) : null}
-				{task.comments.length > 0 ? <Badge label={`${task.comments.length}`} icon='message-circle' /> : null}
-				{task.assignee ? <Badge label={task.assignee} icon='user' /> : null}
-				{!task.agentEnabled ? <Badge label='自動実行しない' icon='slash' /> : null}
-				{run ? <Badge label={runStatusLabel(run.status)} color={runStatusColor(run.status)} /> : null}
+			<View style={styles.taskTitleRow}>
+				<Text style={styles.taskTitle} numberOfLines={3}>{task.title}</Text>
+				{isRunning ? <ActivityIndicator size='small' color='#f59e0b' /> : null}
 			</View>
 
 			{task.labels.length > 0 ? (
 				<View style={styles.taskMetaRow}>
-					{task.labels.slice(0, 3).map(l => <Badge key={l} label={l} color={colors.fgMuted} />)}
+					{task.labels.map(l => <Badge key={l} label={l} color={labelColor(l)} />)}
 				</View>
 			) : null}
+
+			<View style={styles.taskMetaRow}>
+				<Text style={[styles.metaText, styles.metaStrong, { color: priorityColor(task.priority) }]}>{priorityLabel(task.priority)}</Text>
+				{task.dueDate ? <Meta icon='clock' label={task.dueDate} color={overdue ? '#ef4444' : undefined} /> : null}
+				{progress.total > 0 ? (
+					<Meta icon='check-square' label={`${progress.done}/${progress.total}`} color={progress.done === progress.total ? '#10b981' : undefined} />
+				) : null}
+				{task.comments.length > 0 ? <Meta icon='message-square' label={`${task.comments.length}`} /> : null}
+				{task.assignee ? <Meta label={`@${task.assignee}`} /> : null}
+				{!task.agentEnabled ? <Meta icon='slash' label='自動実行しない' /> : null}
+				{run ? (
+					<Text style={[styles.metaText, styles.metaStrong, styles.metaEnd, { color: runStatusColor(run.status) }]}>
+						{runStatusLabel(run.status)}
+					</Text>
+				) : null}
+			</View>
 		</Pressable>
 	);
 };
@@ -275,10 +292,10 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 
 						<Row style={styles.spread}>
 							<Muted>自動実行の対象にする</Muted>
-							<Switch
+							<Toggle
 								value={task.agentEnabled}
 								onValueChange={v => void act(() => client.updateTask(task.id, { agentEnabled: v }))}
-								trackColor={{ true: colors.accent, false: colors.border }}
+								accessibilityLabel='自動実行の対象にする'
 							/>
 						</Row>
 
@@ -698,10 +715,9 @@ export const KanbanScreen = () => {
 				<View style={styles.runBar}>
 					<Icon name='repeat' size={16} color={runtime.autoRunEnabled ? colors.accentText : colors.fgFaint} />
 					<Text style={styles.runBarLabel}>自動実行</Text>
-					<Switch
+					<Toggle
 						value={runtime.autoRunEnabled}
 						onValueChange={v => void act(() => client.setAutoRun(v), v ? '自動実行を開始しました' : '自動実行を停止しました')}
-						trackColor={{ true: colors.accent, false: colors.border }}
 						accessibilityLabel='自動実行'
 					/>
 					<View style={styles.flex} />
@@ -773,10 +789,10 @@ export const KanbanScreen = () => {
 
 						<Row style={styles.spread}>
 							<Muted>期限切れだけ表示</Muted>
-							<Switch
+							<Toggle
 								value={overdueOnly}
 								onValueChange={setOverdueOnly}
-								trackColor={{ true: colors.accent, false: colors.border }}
+								accessibilityLabel='期限切れだけ表示'
 							/>
 						</Row>
 						{filterCount > 0 ? (
@@ -834,23 +850,26 @@ export const KanbanScreen = () => {
 				scrollEventThrottle={32}
 				onScroll={onBoardScroll}
 				contentContainerStyle={styles.boardScroll}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
 			>
 				{views.map(view => (
 					<View key={view.column.id} style={[styles.column, { width: columnWidth }]}>
-						<Row style={styles.spread}>
-							<Row>
-								<View style={[styles.columnDot, { backgroundColor: view.column.color || colors.fgFaint }]} />
-								<Text style={styles.columnTitle}>{view.column.title}</Text>
-							</Row>
-							<Muted>
+						{/* デスクトップのカラム見出し: 色の点・名前・件数 (/WIP 上限)・役割 */}
+						<View style={styles.columnHeader}>
+							<View style={[styles.columnDot, { backgroundColor: view.column.color || colors.fgFaint }]} />
+							<Text style={styles.columnTitle} numberOfLines={1}>{view.column.title}</Text>
+							<Text
+								style={[styles.columnCount, view.overWipLimit && styles.columnCountOver]}
+								accessibilityLabel={view.overWipLimit ? `${view.totalCount} 件、WIP 上限を超えています` : `${view.totalCount} 件`}
+							>
 								{view.tasks.length === view.totalCount ? `${view.totalCount}` : `${view.tasks.length}/${view.totalCount}`}
-								{view.column.wipLimit > 0 ? ` / 上限 ${view.column.wipLimit}` : ''}
-							</Muted>
-						</Row>
-						{view.overWipLimit ? <Badge label='WIP 上限を超えています' icon='alert-triangle' color={colors.warning} /> : null}
-
-						<Divider />
+								{view.column.wipLimit > 0 ? `/${view.column.wipLimit}` : ''}
+							</Text>
+							{/* 役割がカラム名と同じ (To Do 列の「TO DO」など) なら重ねて出さない */}
+							{ROLE_TAG[view.column.role] && ROLE_TAG[view.column.role]!.toLowerCase() !== view.column.title.trim().toLowerCase()
+								? <Text style={styles.roleTag}>{ROLE_TAG[view.column.role]}</Text>
+								: null}
+						</View>
 
 						<ScrollView nestedScrollEnabled contentContainerStyle={styles.columnScroll} showsVerticalScrollIndicator={false}>
 							{view.tasks.length === 0
@@ -895,6 +914,7 @@ const styles = StyleSheet.create({
 	boardHeader: {
 		padding: spacing.md,
 		gap: spacing.sm,
+		backgroundColor: colors.bgElevated,
 		borderBottomWidth: 1,
 		borderBottomColor: colors.border,
 	},
@@ -909,7 +929,7 @@ const styles = StyleSheet.create({
 		borderRadius: radius.md,
 		borderWidth: 1,
 		borderColor: colors.border,
-		backgroundColor: colors.bgElevated,
+		backgroundColor: colors.bgInput,
 	},
 	runBarLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	inlineBanner: { margin: 0 },
@@ -926,9 +946,9 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderColor: colors.border,
 	},
-	columnTabActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+	columnTabActive: { borderColor: colors.selectedBorder, backgroundColor: colors.accentSoft },
 	columnTabText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', flexShrink: 1 },
-	columnTabTextActive: { color: colors.fg },
+	columnTabTextActive: { color: colors.fgStrong },
 	columnTabCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	boardScroll: {
 		padding: spacing.md,
@@ -939,11 +959,12 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: radius.md,
-		padding: spacing.sm,
 		maxHeight: '100%',
+		overflow: 'hidden',
 	},
 	columnScroll: {
-		gap: spacing.sm,
+		gap: spacing.sm - 2,
+		padding: spacing.sm,
 		paddingBottom: spacing.md,
 	},
 	columnDot: {
@@ -952,37 +973,86 @@ const styles = StyleSheet.create({
 		borderRadius: 5,
 	},
 	columnTitle: {
-		color: colors.fg,
-		fontSize: fontSize.md,
-		fontWeight: '600',
+		color: colors.fgStrong,
+		fontSize: fontSize.sm - 1,
+		fontWeight: '700',
+		flexShrink: 1,
 	},
 	taskCard: {
-		backgroundColor: colors.bg,
+		position: 'relative',
+		backgroundColor: colors.bgInput,
 		borderWidth: 1,
 		borderColor: colors.border,
 		borderRadius: radius.sm,
-		padding: spacing.md,
-		gap: spacing.sm,
+		paddingTop: spacing.sm + 2,
+		paddingBottom: spacing.sm + 2,
+		paddingLeft: spacing.md + 2,
+		paddingRight: spacing.md,
+		gap: spacing.sm - 2,
+		overflow: 'hidden',
+	},
+	taskCardMuted: { opacity: 0.72 },
+	taskCardPressed: { borderColor: colors.borderStrong, backgroundColor: colors.bgHover },
+	taskTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	meta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+	metaText: { color: colors.fgFaint, fontSize: fontSize.xs - 1 },
+	metaStrong: { fontWeight: '600' },
+	metaEnd: { marginLeft: 'auto' },
+	columnHeader: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.sm - 2,
+		paddingHorizontal: spacing.md - 2,
+		paddingVertical: spacing.sm + 2,
+		borderBottomWidth: 1,
+		borderBottomColor: colors.border,
+	},
+	columnCount: {
+		color: colors.fgFaint,
+		fontSize: fontSize.xs - 1,
+		fontWeight: '600',
+		fontVariant: ['tabular-nums'],
+		paddingHorizontal: 6,
+		paddingVertical: 1,
+		borderRadius: 8,
+		overflow: 'hidden',
+		backgroundColor: colors.bgInput,
+	},
+	columnCountOver: { color: '#ef4444' },
+	roleTag: {
+		color: colors.fgMuted,
+		fontSize: 10,
+		fontWeight: '700',
+		letterSpacing: 0.4,
+		paddingHorizontal: 5,
+		paddingVertical: 1,
+		borderRadius: 3,
+		overflow: 'hidden',
+		backgroundColor: colors.bgInput,
 	},
 	taskCardRunning: {
-		borderColor: colors.running,
+		borderColor: withAlpha('#f59e0b', '99'),
 	},
 	priorityBar: {
+		position: 'absolute',
+		left: 0,
+		top: 0,
+		bottom: 0,
 		width: 3,
-		alignSelf: 'stretch',
-		borderRadius: 2,
-		marginRight: spacing.xs,
 	},
 	taskTitle: {
+		flex: 1,
 		color: colors.fg,
-		fontSize: fontSize.sm,
-		lineHeight: 23,
-		fontWeight: '600',
+		fontSize: fontSize.sm - 1,
+		lineHeight: 21,
+		fontWeight: '500',
 	},
 	taskMetaRow: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',
-		gap: spacing.xs,
+		alignItems: 'center',
+		columnGap: spacing.sm + 2,
+		rowGap: spacing.xs,
 	},
 	composer: {
 		borderTopWidth: 1,
@@ -1076,7 +1146,7 @@ const styles = StyleSheet.create({
 		paddingHorizontal: spacing.md,
 	},
 	filterChipOn: {
-		borderColor: colors.accent,
+		borderColor: colors.selectedBorder,
 		backgroundColor: colors.accentSoft,
 	},
 	filterChipText: {

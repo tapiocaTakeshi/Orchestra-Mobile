@@ -227,6 +227,7 @@ src/state/DivisionAuthContext.tsx  Division ログイン状態 + 新規セッシ
 src/state/storage.ts           AsyncStorage への保存 (接続情報のみ)
 src/state/tuningStorage.ts     ルーティング方針の保存
 src/components/ui.tsx          共通の UI 部品
+src/theme.ts                   色・余白・角丸 (デスクトップの既定テーマ Orchestra Dark と同じ色)
 src/screens/                   各画面 (ログイン / 検出 / 手動接続 / 各タブ)
 ```
 

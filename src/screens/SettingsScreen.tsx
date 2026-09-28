@@ -124,7 +124,7 @@ export const SettingsScreen = () => {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
 			>
 				<Card>
 					<SectionTitle right={<Badge label='接続中' color={colors.success} />}>接続先</SectionTitle>
@@ -143,7 +143,7 @@ export const SettingsScreen = () => {
 				</Card>
 
 				<Card>
-					<SectionTitle right={loadingFiles ? <ActivityIndicator color={colors.accent} size='small' /> : null}>
+					<SectionTitle right={loadingFiles ? <ActivityIndicator color={colors.accentText} size='small' /> : null}>
 						ワークスペースのファイル
 					</SectionTitle>
 					<Muted>ファイルをタップすると IDE 側で開きます。</Muted>

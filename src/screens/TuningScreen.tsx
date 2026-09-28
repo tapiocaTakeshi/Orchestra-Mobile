@@ -16,7 +16,6 @@ import {
 	RefreshControl,
 	ScrollView,
 	StyleSheet,
-	Switch,
 	Text,
 	View,
 } from 'react-native';
@@ -37,6 +36,7 @@ import {
 	ScreenHeader,
 	SectionTitle,
 	SegmentedControl,
+	Toggle,
 	useToast,
 } from '../components/ui';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
@@ -388,7 +388,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 
 			<ScrollView
 				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
 			>
 				{missingOAuthSession && section !== 'policy' ? (
 					<Card>
@@ -522,7 +522,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 								{plan ? <>
 									<Muted>モデル推論 {formatUsd(plan.inferenceEstimateUsd)} + Jev {formatUsd(plan.allocatorCostUsd)}</Muted>
 									<Row>
-										<Badge label={`全体性能 ${plan.overallPerformance.score.toFixed(1)}`} color={colors.accent} />
+										<Badge label={`全体性能 ${plan.overallPerformance.score.toFixed(1)}`} color={colors.accentText} />
 										<Badge label={`最低 ${plan.overallPerformance.minimum.toFixed(1)}`} />
 									</Row>
 									<Muted>性能は分野内順位の参考値で、実際の完成品質を保証する値ではありません。</Muted>
@@ -697,10 +697,10 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 								<Muted>残高がしきい値を下回ったときに、登録済みの支払い方法で自動的にチャージします。</Muted>
 								<Row style={styles.spread}>
 									<Muted>自動チャージを使う</Muted>
-									<Switch
+									<Toggle
 										value={autoChargeDraft.enabled}
 										onValueChange={value => setAutoChargeDraft(d => ({ ...d, enabled: value }))}
-										trackColor={{ true: colors.accent, false: colors.border }}
+										accessibilityLabel='自動チャージを使う'
 									/>
 								</Row>
 								<NumberField

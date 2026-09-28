@@ -125,3 +125,14 @@ export const priorityColor = (priority: KanbanPriority): string => {
 		case 'low': return '#8b95a5';
 	}
 };
+
+/**
+ * ラベル文字列から安定した色を決める (デスクトップの kanban-tsx/shared.tsx と同じ計算)。
+ * 同じラベルは IDE でもスマホでも同じ色で出る。
+ */
+export const labelColor = (label: string): string => {
+	const palette = ['#3b82f6', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#06b6d4', '#f43f5e', '#84cc16'];
+	let hash = 0;
+	for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) | 0;
+	return palette[Math.abs(hash) % palette.length];
+};

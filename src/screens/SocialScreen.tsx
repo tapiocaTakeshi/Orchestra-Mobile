@@ -566,7 +566,7 @@ export const SocialScreen = () => {
 			) : (
 				<ScrollView
 					contentContainerStyle={styles.content}
-					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accent} />}
+					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.accentText} />}
 				>
 					{!canUseProjects ? (
 						<View style={styles.hint}>
@@ -687,7 +687,7 @@ const styles = StyleSheet.create({
 		minHeight: 56,
 	},
 	selectRowActive: {
-		borderColor: colors.accent,
+		borderColor: colors.selectedBorder,
 		backgroundColor: colors.accentSoft,
 	},
 });
