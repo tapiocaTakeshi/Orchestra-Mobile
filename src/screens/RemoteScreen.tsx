@@ -214,7 +214,9 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 						<Text style={styles.workspaceName} numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Text>
 						<View style={styles.statusRow} accessibilityLabel={`状態: ${status.label}`}>
 							<View style={[styles.statusDot, { backgroundColor: status.color }]} />
-							<Text style={styles.statusText} numberOfLines={1}>{status.label} · {ide?.appName} {ide?.version}</Text>
+							<Text style={styles.statusText} numberOfLines={1}>
+								{status.label} · {snapshot.remoteSession ? 'PC と同期中' : `${ide?.appName} ${ide?.version}`}
+							</Text>
 						</View>
 					</View>
 					<IconButton icon='edit' accessibilityLabel='新しいチャット' onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />

@@ -73,6 +73,17 @@ PC 側も、アプリが送る Division の JWT のユーザーが PC のアカ�
 通信を止め (同じアカウントでログインし直せば復帰します)、別のアカウントでログインすると接続を切ります。
 PC 側のアカウントが途中で変わった場合も、その場で切断します。
 
+### PC のチャットをスマホで続ける (`/remote-control`)
+
+PC のチャット欄で `/remote-control` と送ると、そのチャットがスマホと同期されます。
+接続中ならチャット画面がそのチャットに切り替わり、「PC のセッションを同期しました」と通知が出ます
+(ヘッダーの状態表示は「PC と同期中」になります)。未接続なら、PC がすぐに「見つかったデバイス」に
+出るので、選べばそのチャットが開きます。
+
+同期中は PC で別のチャットを開いても、スマホには同期したチャットが出続けます。やめるときは
+PC で `/remote-control off` と送ります。詳しくは Orchestra の
+[`docs/REMOTE-CONTROL.md`](https://github.com/tapiocaTakeshi/Orchestra/blob/main2/docs/REMOTE-CONTROL.md) を参照してください。
+
 ### USB 接続で使う (Wi-Fi が使えない場合)
 
 Android なら IDE 側の「LAN からの接続を許可」をオフのままでも、ポート転送で繋がります。
@@ -227,6 +238,7 @@ src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
 src/lib/pairing.ts             ペアリングリンク / 手入力の解釈
 src/lib/connect.ts             接続候補の検証 (ping→state→connect) の共通ロジック
+src/lib/remoteSession.ts       PC の /remote-control で同期されたセッションの通知判定
 src/lib/divisionAuthConfig.ts  Division (Supabase / Division API) の公開設定
 src/lib/divisionAuth.ts        Division ログイン・RemoteSession 一覧取得・購読
 src/lib/divisionSession.ts     Division セッションの secure-store 永続化

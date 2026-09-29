@@ -27,6 +27,7 @@ import { Connection, Snapshot } from '../api/types';
 import { useToast } from '../components/ui';
 import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
+import { remoteSessionNotice } from '../lib/remoteSession';
 import { useDivisionAuth } from './DivisionAuthContext';
 import {
 	loadActiveUrl,
@@ -175,6 +176,11 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 				if (previous.chat.isRunning && !next.chat.isRunning && !next.chat.awaitingApproval) {
 					void notifyRemoteEvent('処理が完了しました', 'Orchestra のエージェント処理が完了しました。', 'agent-completed');
 				}
+			}
+			const syncNotice = remoteSessionNotice(previous, next);
+			if (syncNotice) {
+				toast.show(`${syncNotice.title}: ${syncNotice.body}`, 'success');
+				if (syncNotice.notify) void notifyRemoteEvent(syncNotice.title, syncNotice.body, 'session-synced');
 			}
 			snapshotRef.current = next;
 			// revision が同じなら中身も同じ。参照を保って無駄な再描画を避ける。
