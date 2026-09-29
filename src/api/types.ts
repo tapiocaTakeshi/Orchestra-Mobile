@@ -156,6 +156,17 @@ export type ThreadSummary = {
 	messageCount: number;
 };
 
+/**
+ * PC のチャットで `/remote-control` と打って同期されたスレッド。
+ * 同期中は chat がこのスレッドになり、PC で別のチャットを開いても変わらない。
+ */
+export type RemoteSessionInfo = {
+	threadId: string;
+	title: string;
+	/** 同期した時刻 (ms)。変わったら「同期された」と知らせる */
+	syncedAt: number;
+};
+
 /** GET /api/state */
 export type Snapshot = {
 	ide: IdeInfo;
@@ -163,6 +174,8 @@ export type Snapshot = {
 	kanban: KanbanState;
 	chat: ChatState;
 	threads: ThreadSummary[];
+	/** 同期中のスレッド。同期していなければ null。古い IDE は返さない */
+	remoteSession?: RemoteSessionInfo | null;
 	revision: number;
 	generatedAt: number;
 };
