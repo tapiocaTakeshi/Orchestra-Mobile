@@ -394,48 +394,39 @@ export const ProjectsScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='Division' subtitle='プロジェクトとエージェントの役割を管理' />
+			<ScreenHeader
+				title='Division'
+				right={(
+					<>
+						<IconButton
+							icon='download-cloud'
+							accessibilityLabel='クラウドから取得'
+							disabled={syncing !== null}
+							onPress={() => {
+								setSyncing('pull');
+								void act(() => client.pullProjectsFromSupabase(), 'クラウドから取得しました').finally(() => setSyncing(null));
+							}}
+						/>
+						<IconButton
+							icon='upload-cloud'
+							accessibilityLabel='クラウドへ保存'
+							disabled={syncing !== null}
+							onPress={() => {
+								setSyncing('push');
+								void act(() => client.pushProjectsToSupabase(), 'クラウドへ保存しました').finally(() => setSyncing(null));
+							}}
+						/>
+					</>
+				)}
+			/>
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
-				<Card>
-					<SectionTitle right={<Badge label={`${division.projects.length} 件`} />}>Division プロジェクト</SectionTitle>
-					<Muted numberOfLines={1}>{division.configPath ?? 'ワークスペースが開かれていません'}</Muted>
-					<Row>
-						<Button
-							title='クラウドから取得'
-							icon='download-cloud'
-							variant='secondary'
-							size='sm'
-							loading={syncing === 'pull'}
-							disabled={syncing !== null}
-							onPress={() => {
-								setSyncing('pull');
-								void act(() => client.pullProjectsFromSupabase(), 'クラウドから取得しました').finally(() => setSyncing(null));
-							}}
-							style={styles.flex}
-						/>
-						<Button
-							title='クラウドへ保存'
-							icon='upload-cloud'
-							variant='secondary'
-							size='sm'
-							loading={syncing === 'push'}
-							disabled={syncing !== null}
-							onPress={() => {
-								setSyncing('push');
-								void act(() => client.pushProjectsToSupabase(), 'クラウドへ保存しました').finally(() => setSyncing(null));
-							}}
-							style={styles.flex}
-						/>
-					</Row>
-				</Card>
-
 				{division.projects.length === 0 ? (
-					<EmptyState icon='layers' title='プロジェクトがありません' detail='下の「プロジェクトを追加」から作成できます。' />
+					<EmptyState icon='layers' title='プロジェクトがありません' />
 				) : null}
 
 				{division.projects.map(project => (

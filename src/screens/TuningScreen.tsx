@@ -372,15 +372,12 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 		);
 	}
 
-	const missingOAuthSession = !session;
-
 	return (
 		<Screen>
-			{embedded ? null : <ScreenHeader title='コスト' subtitle='コストと性能の条件でモデルの選ばれ方を調整する' />}
+			{embedded ? null : <ScreenHeader title='コスト' />}
 
 			<View style={styles.toolbar}>
 				<SegmentedControl<Section> options={SECTIONS} value={section} onChange={setSection} />
-				{embedded ? <Muted>ここでの条件は見積もり用です。接続先 PC の実行条件は PC 側の Division 設定を使います。</Muted> : null}
 			</View>
 
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
@@ -389,16 +386,6 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
-				{missingOAuthSession && section !== 'policy' ? (
-					<Card>
-						<SectionTitle>DivisionのJWT認証が必要です</SectionTitle>
-						<Muted>
-							見積もりと利用履歴は、Divisionにログイン中のSupabase JWTで認証します。
-							もう一度ログインしてから利用してください。
-						</Muted>
-					</Card>
-				) : null}
-
 				{/* ------------------------------------------------------------- 方針 */}
 				{section === 'policy' ? (
 					<>
@@ -407,28 +394,23 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 								<SectionTitle>自動割り当ての方針</SectionTitle>
 								<Badge label={enabled ? '有効' : '無効'} color={enabled ? colors.success : colors.fgFaint} />
 							</Row>
-							<Muted>
-								Jev がSupabaseに保存した料金・分野別性能を見て、役割ごとの分野と出力トークン予算を決めます。
-								上限は役割ごとの1回のモデル呼び出しに適用され、合計見積もりにはJevの料金も含まれます。
-							</Muted>
-
 							<NumberField
 								label='最低性能スコア (0〜100)'
-								hint={issueFor('minPerformance') ?? '保存済みランキングの分野内パーセンタイル。低くするほど候補が増えます。'}
+								hint={issueFor('minPerformance') ?? '低くするほど候補が増えます。'}
 								value={draft.minPerformance}
 								invalid={!!issueFor('minPerformance')}
 								onChange={text => { setDraft(d => ({ ...d, minPerformance: text })); setQuotes([]); setPlan(null); }}
 							/>
 							<NumberField
 								label='1 回のモデル呼び出しの上限 (USD)'
-								hint={issueFor('maxCostUsd') ?? '料金 = 入力トークン × 入力単価 + 出力トークン × 出力単価 + 固定料金。'}
+								hint={issueFor('maxCostUsd')}
 								value={draft.maxCostUsd}
 								invalid={!!issueFor('maxCostUsd')}
 								onChange={text => { setDraft(d => ({ ...d, maxCostUsd: text })); setQuotes([]); setPlan(null); }}
 							/>
 							<NumberField
 								label='割り当て可能な最大出力トークン'
-								hint={issueFor('maxOutputTokens') ?? '256〜32768。長い出力を許すほど料金が上がります。'}
+								hint={issueFor('maxOutputTokens') ?? '256〜32768'}
 								value={draft.maxOutputTokens}
 								invalid={!!issueFor('maxOutputTokens')}
 								onChange={text => { setDraft(d => ({ ...d, maxOutputTokens: text })); setQuotes([]); setPlan(null); }}
@@ -441,7 +423,6 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 								disabled={!hasOAuthSession}
 								onPress={() => void refreshModels()}
 							/>
-							<Muted>更新時だけOpenRouterから料金とベンチマークを取得し、以後のチューニングは保存データを使います。</Muted>
 							<Row>
 								<Button
 									title='保存して有効にする'
@@ -458,16 +439,6 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 							</Row>
 						</Card>
 
-						<Card>
-							<SectionTitle>いま保存されている方針</SectionTitle>
-							<Row style={styles.spread}><Muted>最低性能スコア</Muted><Body>{policy.minPerformance}</Body></Row>
-							<Row style={styles.spread}><Muted>1 回あたりの上限</Muted><Body>{formatUsd(policy.maxCostUsd)}</Body></Row>
-							<Row style={styles.spread}><Muted>最大出力トークン</Muted><Body>{formatTokens(policy.maxOutputTokens)}</Body></Row>
-							<Muted>
-								この方針はこの端末に保存され、見積もりの条件として使われます。
-								IDE 側の設定 (設定 → Division) は別管理です。
-							</Muted>
-						</Card>
 					</>
 				) : null}
 
@@ -476,10 +447,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 					<>
 						<Card>
 							<SectionTitle>依頼を見積もる</SectionTitle>
-							<Muted>
-								Jev に出力トークン予算を判定させ、リーダー / コーダー / レビューの 3 役割について
-								想定コストを出します。判定のたびに料金が発生します。
-							</Muted>
+							<Muted>判定のたびに料金が発生します。</Muted>
 							{composerPrompt === undefined ? <Input
 								value={promptText}
 								onChangeText={text => {
@@ -524,10 +492,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 										<Badge label={`全体性能 ${plan.overallPerformance.score.toFixed(1)}`} color={colors.accentText} />
 										<Badge label={`最低 ${plan.overallPerformance.minimum.toFixed(1)}`} />
 									</Row>
-									<Muted>性能は分野内順位の参考値で、実際の完成品質を保証する値ではありません。</Muted>
-									<Muted>データ更新: {relativeTimeFromIso(plan.catalogUpdatedAt)} · {plan.snapshotId.slice(0, 8)}</Muted>
 								</> : null}
-								<Muted>実行時は実際の各役割で再判定されるため、結果は前後します。</Muted>
 								{quotes.map(quote => (
 									<View key={quote.role} style={styles.quoteRow}>
 										<Row style={styles.spread}>

@@ -1,46 +1,68 @@
 /**
- * ログイン済み & 未接続のときに出る画面。
+ * ログイン済み & 未接続のときの最初の画面。
  *
  * ログイン中の Division アカウントに紐づくデスクトップセッション (RemoteSession) を
- * 一定間隔でポーリングして一覧表示する。タップするだけで接続できる。
- * 見つからない/繋がらない場合のために、手動ペアリング画面への導線も残す。
+ * 一定間隔でポーリングして一覧表示する。行をタップするだけで接続できる。
+ * 見つからない/繋がらない場合のための手入力と、未接続でも使えるページ (共有・コスト) への導線も置く。
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Image, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
-	Badge,
-	Body,
-	Button,
-	Card,
-	EmptyState,
 	ErrorBanner,
 	Icon,
+	IconName,
 	Loading,
 	Muted,
-	Row,
 	Screen,
-	SectionTitle,
-	Title,
+	ScreenHeader,
 	confirmAction,
 } from '../components/ui';
 import { RemoteSessionRow, listRemoteSessions } from '../lib/divisionAuth';
 import { verifyAndConnect } from '../lib/connect';
 import { relativeTimeFromIso } from '../lib/format';
+import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, radius, spacing } from '../theme';
+import { colors, fontSize, spacing } from '../theme';
 
 const POLL_INTERVAL_MS = 5_000;
 
+/** 一覧の 1 行 (アイコン・題名・補足・右端)。 */
+const ListRow = ({ icon, title, detail, right, onPress, disabled, accessibilityLabel }: {
+	icon: IconName;
+	title: string;
+	detail?: string;
+	right?: React.ReactNode;
+	onPress: () => void;
+	disabled?: boolean;
+	accessibilityLabel?: string;
+}) => (
+	<Pressable
+		accessibilityRole='button'
+		accessibilityLabel={accessibilityLabel}
+		accessibilityState={{ disabled: !!disabled }}
+		disabled={disabled}
+		onPress={onPress}
+		style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+	>
+		<Icon name={icon} size={18} color={colors.fgMuted} />
+		<View style={styles.flex}>
+			<Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
+			{detail ? <Muted numberOfLines={1}>{detail}</Muted> : null}
+		</View>
+		{right ?? <Icon name='chevron-right' size={16} color={colors.fgFaint} />}
+	</Pressable>
+);
+
 export const DiscoverScreen = ({
 	onManualConnect,
-	onBrowseOffline,
+	onOpenPage,
 }: {
 	onManualConnect: () => void;
-	/** PC に繋がずに、ソーシャル / チューニングだけ見たいときの導線。 */
-	onBrowseOffline?: () => void;
+	/** 未接続でも開けるページ (共有・コスト) を開く */
+	onOpenPage: (page: PageKey) => void;
 }) => {
 	const { connect } = useApp();
 	const { session, logout, newSessionIds, dismissNewSession } = useDivisionAuth();
@@ -105,65 +127,49 @@ export const DiscoverScreen = ({
 
 	return (
 		<Screen>
+			<ScreenHeader title='接続先' />
 			<ScrollView
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.fgMuted} />}
 			>
-				<View style={styles.hero}>
-					<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-					<Title>接続先を選ぶ</Title>
-					<Muted>{session.email} でログイン中</Muted>
-				</View>
-
-				{error ? <ErrorBanner message={error} onRetry={() => { void refresh(); }} style={styles.bannerFlush} /> : null}
-				{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
+				{error ? <ErrorBanner message={error} onRetry={() => { void refresh(); }} style={styles.banner} /> : null}
+				{status ? <ErrorBanner message={status} style={styles.banner} /> : null}
 
 				{loading ? (
-					<Loading label='同じアカウントの PC を探しています…' />
+					<Loading label='PC を探しています…' />
 				) : sessions.length === 0 ? (
-					<EmptyState
-						icon='monitor'
-						title='デバイスが見つかりません'
-						detail='IDE 側でリモートコントロールを有効にし、同じ Division アカウントでログインしてください。見つかると自動でここに表示されます。'
-					/>
+					<Text style={styles.empty}>
+						同じアカウントでログインしている PC が見つかりません。PC 側でリモートコントロールを有効にすると、ここに出ます。
+					</Text>
 				) : (
-					<View style={styles.list}>
-						<SectionTitle right={<Muted>自動で更新中</Muted>}>見つかったデバイス</SectionTitle>
-						{sessions.map(row => {
-							const isNew = newSessionIds.includes(row.id);
-							return (
-								<Card key={row.id}>
-									<Row>
-										<View style={styles.deviceIcon}>
-											<Icon name='monitor' size={20} color={colors.fgMuted} />
-										</View>
-										<View style={styles.flex}>
-											<Row>
-												<Body numberOfLines={1}>{row.deviceLabel || row.lanUrl}</Body>
-												{isNew ? <Badge label='NEW' color={colors.accentText} /> : null}
-											</Row>
-											<Muted numberOfLines={1}>{row.lanUrl} · {relativeTimeFromIso(row.lastSeenAt)}</Muted>
-										</View>
-									</Row>
-									<Button
-										title='接続'
-										icon='link'
-										onPress={() => { void onConnect(row); }}
-										loading={connectingId === row.id}
-										disabled={connectingId !== null && connectingId !== row.id}
-									/>
-								</Card>
-							);
-						})}
+					<View>
+						{sessions.map(row => (
+							<ListRow
+								key={row.id}
+								icon='monitor'
+								title={row.deviceLabel || row.lanUrl}
+								detail={`${newSessionIds.includes(row.id) ? 'NEW · ' : ''}${relativeTimeFromIso(row.lastSeenAt)}`}
+								accessibilityLabel={`${row.deviceLabel || row.lanUrl} に接続`}
+								disabled={connectingId !== null}
+								right={connectingId === row.id ? <ActivityIndicator size='small' color={colors.fgMuted} /> : undefined}
+								onPress={() => { void onConnect(row); }}
+							/>
+						))}
 					</View>
 				)}
 
-				<View style={styles.links}>
-					<Button title='手入力・ペアリングリンクで接続' icon='edit-3' variant='ghost' onPress={onManualConnect} />
-					{onBrowseOffline ? (
-						<Button title='接続せずに共有 / コストを見る' icon='compass' variant='ghost' onPress={onBrowseOffline} />
-					) : null}
-					<Button title='ログアウト' icon='log-out' variant='ghost' onPress={() => { void onLogout(); }} />
+				<View style={styles.more}>
+					<ListRow icon='edit-3' title='手入力で接続' onPress={onManualConnect} />
+					{pagesFor(false).map(page => (
+						<ListRow key={page.key} icon={page.icon} title={page.label} onPress={() => onOpenPage(page.key)} />
+					))}
+					<ListRow
+						icon='log-out'
+						title='ログアウト'
+						detail={session.email}
+						right={<View />}
+						onPress={() => { void onLogout(); }}
+					/>
 				</View>
 			</ScrollView>
 		</Screen>
@@ -173,27 +179,21 @@ export const DiscoverScreen = ({
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: {
-		padding: spacing.lg,
-		gap: spacing.lg,
+		paddingHorizontal: spacing.lg,
+		paddingBottom: spacing.xl,
 	},
-	hero: {
+	banner: { marginHorizontal: 0 },
+	empty: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, paddingVertical: spacing.lg },
+	row: {
+		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.xs,
-		paddingTop: spacing.xl,
+		gap: spacing.md,
+		minHeight: 60,
+		paddingVertical: spacing.sm,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
 	},
-	heroMark: {
-		width: 64,
-		height: 64,
-	},
-	list: { gap: spacing.sm },
-	deviceIcon: {
-		width: 40,
-		height: 40,
-		borderRadius: radius.md,
-		backgroundColor: colors.bgHover,
-		alignItems: 'center',
-		justifyContent: 'center',
-	},
-	links: { gap: spacing.xs, alignItems: 'center' },
-	bannerFlush: { margin: 0 },
+	rowPressed: { opacity: 0.6 },
+	rowTitle: { color: colors.fg, fontSize: fontSize.sm },
+	more: { marginTop: spacing.xl },
 });

@@ -27,7 +27,6 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
-import { relativeTime } from '../lib/format';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
@@ -118,7 +117,7 @@ export const SettingsScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='接続とワークスペース' subtitle='デバイスとファイルを手元から管理' />
+			<ScreenHeader title='接続' />
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView
@@ -128,10 +127,7 @@ export const SettingsScreen = () => {
 				<Card>
 					<SectionTitle right={<Badge label='接続中' color={colors.success} />}>接続先</SectionTitle>
 					<Body>{connection.label}</Body>
-					<Muted>{connection.url}</Muted>
-					<Muted>{snapshot.ide.appName} {snapshot.ide.version}</Muted>
-					<Muted>ワークスペース: {snapshot.ide.workspaceName || '(未オープン)'}</Muted>
-					<Muted>最終更新: {relativeTime(snapshot.generatedAt)} · rev {snapshot.revision}</Muted>
+					<Muted numberOfLines={1}>{connection.url} · {snapshot.ide.appName} {snapshot.ide.version}</Muted>
 					{snapshot.ide.protocolVersion !== PROTOCOL_VERSION ? (
 						<Text style={styles.warnText}>
 							プロトコルが違います (IDE v{snapshot.ide.protocolVersion} / アプリ v{PROTOCOL_VERSION})。どちらかを更新してください。
@@ -144,7 +140,6 @@ export const SettingsScreen = () => {
 					<SectionTitle right={loadingFiles ? <ActivityIndicator color={colors.fgMuted} size='small' /> : null}>
 						ワークスペースのファイル
 					</SectionTitle>
-					<Muted>ファイルをタップすると IDE 側で開きます。</Muted>
 					<View style={styles.breadcrumb}>
 						<Icon name='folder' size={14} color={colors.fgFaint} />
 						<Text style={styles.breadcrumbText} numberOfLines={1} ellipsizeMode='head'>
@@ -200,26 +195,15 @@ export const SettingsScreen = () => {
 
 				{session ? (
 					<Card>
-						<SectionTitle>Division アカウント</SectionTitle>
 						<Row>
-							<View style={styles.avatar}>
-								<Icon name='user' size={18} color={colors.fgMuted} />
-							</View>
 							<View style={styles.flex}>
-								<Body numberOfLines={1}>{session.email}</Body>
-								<Muted>このアカウントでログインしている PC にだけ繋ぎます</Muted>
+								<SectionTitle>アカウント</SectionTitle>
+								<Muted numberOfLines={1}>{session.email}</Muted>
 							</View>
+							<Button title='ログアウト' variant='secondary' size='sm' onPress={() => void onLogout()} />
 						</Row>
-						<Button title='ログアウト' variant='secondary' size='sm' onPress={() => void onLogout()} style={styles.start} />
 					</Card>
 				) : null}
-
-				<Card>
-					<SectionTitle>このアプリについて</SectionTitle>
-					<Muted>Orchestra Mobile — Orchestra IDE のリモートコントローラー</Muted>
-					<Muted>プロトコル v{PROTOCOL_VERSION}</Muted>
-					<Muted>通信は同一 LAN 内の IDE と直接やり取りします。外部サーバーは経由しません。</Muted>
-				</Card>
 
 			</ScrollView>
 		</Screen>
@@ -254,14 +238,6 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgInput,
 	},
 	breadcrumbText: { color: colors.fgMuted, fontSize: fontSize.xs, flex: 1 },
-	avatar: {
-		width: 36,
-		height: 36,
-		borderRadius: 18,
-		backgroundColor: colors.bgHover,
-		alignItems: 'center',
-		justifyContent: 'center',
-	},
 	savedRow: {
 		flexDirection: 'row',
 		alignItems: 'center',

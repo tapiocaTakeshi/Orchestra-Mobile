@@ -1,15 +1,13 @@
 /**
- * リモートコントロールのタブ。
+ * チャット。PC に繋いでいるときの最初の画面。
  *
  * ここでできること:
  *   - エージェントに指示を出す / 中断する
  *   - ツール実行の承認・却下 (無人だと止まったままになるので、外出先から進められる)
- *   - スレッドの切り替え
- *   - よく使うエディタ操作 (保存・ウィンドウ再読み込みなど) をワンタップで実行
+ *   - 左上のメニューから、スレッドの切り替えと各ページ (カンバンなど) への移動
  *
  * 見た目は Claude Code のように飾りを減らしている: エージェントの返答は枠なしの本文、
  * ツールの実行は 1 行 (押すと出力を開く)、承認の確認は入力欄のすぐ上に出す。
- * 履歴とクイック操作は会話の上に広げず、シートで開く。
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,7 +34,6 @@ import {
 	ErrorBanner,
 	Icon,
 	IconButton,
-	IconName,
 	Loading,
 	Muted,
 	Screen,
@@ -45,22 +42,12 @@ import {
 	useToast,
 } from '../components/ui';
 import { oneLine, relativeTimeFromIso } from '../lib/format';
+import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { colors, fontSize, radius, spacing } from '../theme';
 
-/** ワンタップで出せるエディタ操作。allowCommands がオフでも通るものを先に置く。 */
-const QUICK_COMMANDS: { id: string; label: string; icon: IconName }[] = [
-	{ id: 'workbench.action.files.saveAll', label: 'すべて保存', icon: 'save' },
-	{ id: 'void.kanban.runNext', label: 'カンバンの次のタスクを実行', icon: 'play' },
-	{ id: 'void.kanban.toggleAutoRun', label: 'カンバン自動実行の切替', icon: 'repeat' },
-	{ id: 'workbench.action.terminal.new', label: 'ターミナルを開く', icon: 'terminal' },
-	{ id: 'workbench.action.reloadWindow', label: 'ウィンドウを再読み込み', icon: 'refresh-cw' },
-];
-
 /** 下端からこれ以上離れたら「最新へ」ボタンを出す。 */
 const JUMP_THRESHOLD = 240;
-/** 最初の画面に並べる過去のスレッドの数。 */
-const PAST_THREADS_ON_LANDING = 5;
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
 
@@ -136,12 +123,12 @@ const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?
 	</Pressable>
 );
 
-export const RemoteScreen = () => {
+export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => void }) => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
 	const toast = useToast();
 	const [draft, setDraft] = useState('');
-	const [sheet, setSheet] = useState<'threads' | 'actions' | 'cost' | null>(null);
+	const [sheet, setSheet] = useState<'menu' | 'cost' | null>(null);
 	const [sending, setSending] = useState(false);
 	const [showJump, setShowJump] = useState(false);
 	const insets = useSafeAreaInsets();
@@ -200,7 +187,6 @@ export const RemoteScreen = () => {
 	const isRunning = !!chat?.isRunning;
 	const isAwaiting = !!chat?.awaitingApproval;
 	const hasMessages = !!chat && chat.messages.length > 0;
-	const pastThreads = snapshot.threads.filter(t => t.threadId !== chat?.threadId).slice(0, PAST_THREADS_ON_LANDING);
 	const canSend = !!draft.trim() && !sending;
 	const status = isAwaiting
 		? { label: '確認待ち', color: colors.warning }
@@ -223,6 +209,7 @@ export const RemoteScreen = () => {
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 				<View style={styles.header}>
+					<IconButton icon='menu' accessibilityLabel='メニュー' onPress={() => setSheet('menu')} />
 					<View style={styles.flex}>
 						<Text style={styles.workspaceName} numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Text>
 						<View style={styles.statusRow} accessibilityLabel={`状態: ${status.label}`}>
@@ -230,8 +217,6 @@ export const RemoteScreen = () => {
 							<Text style={styles.statusText} numberOfLines={1}>{status.label} · {ide?.appName} {ide?.version}</Text>
 						</View>
 					</View>
-					<IconButton icon='clock' accessibilityLabel='履歴' onPress={() => setSheet('threads')} />
-					<IconButton icon='zap' accessibilityLabel='クイック操作' onPress={() => setSheet('actions')} />
 					<IconButton icon='edit' accessibilityLabel='新しいチャット' onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
 				</View>
 
@@ -270,17 +255,6 @@ export const RemoteScreen = () => {
 						) : (
 							<View style={styles.greeting}>
 								<Text accessibilityRole='header' style={styles.greetingTitle}>エージェントに何をさせますか？</Text>
-								<Text style={styles.greetingHint}>
-									やってほしいことを書いてください。ファイル編集・コマンド実行・結果の確認まで、エージェントが自分で進めます。
-								</Text>
-								{pastThreads.length > 0 ? (
-									<View style={styles.pastThreads}>
-										<SectionTitle>最近のチャット</SectionTitle>
-										<View>
-											{pastThreads.map(t => <ThreadRow key={t.threadId} thread={t} onPress={() => switchThread(t.threadId)} />)}
-										</View>
-									</View>
-								) : null}
 							</View>
 						)}
 					</ScrollView>
@@ -357,34 +331,31 @@ export const RemoteScreen = () => {
 					</View>
 				</View>
 
-				{sheet === 'threads' ? (
-					<Sheet title='履歴' onClose={() => setSheet(null)}>
+				{sheet === 'menu' ? (
+					<Sheet title='メニュー' onClose={() => setSheet(null)}>
 						<ScrollView contentContainerStyle={styles.sheetContent}>
-							{snapshot.threads.length === 0 ? <Muted>スレッドがありません。</Muted> : null}
-							{snapshot.threads.map(t => (
-								<ThreadRow key={t.threadId} thread={t} active={t.threadId === chat?.threadId} onPress={() => switchThread(t.threadId)} />
-							))}
-						</ScrollView>
-					</Sheet>
-				) : null}
-
-				{sheet === 'actions' ? (
-					<Sheet title='クイック操作' onClose={() => setSheet(null)}>
-						<ScrollView contentContainerStyle={styles.sheetContent}>
-							{QUICK_COMMANDS.map(cmd => (
+							{pagesFor(true).map(page => (
 								<Pressable
-									key={cmd.id}
+									key={page.key}
 									accessibilityRole='button'
-									onPress={() => {
-										setSheet(null);
-										void act(() => client.runCommand(cmd.id), `${cmd.label} を実行しました`);
-									}}
+									onPress={() => { setSheet(null); onOpenPage(page.key); }}
 									style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
 								>
-									<Icon name={cmd.icon} size={18} color={colors.fgMuted} />
-									<Text style={[styles.listTitle, styles.flex]}>{cmd.label}</Text>
+									<Icon name={page.icon} size={18} color={colors.fgMuted} />
+									<Text style={[styles.listTitle, styles.flex]}>{page.label}</Text>
+									<Icon name='chevron-right' size={16} color={colors.fgFaint} />
 								</Pressable>
 							))}
+							{snapshot.threads.length > 0 ? (
+								<View style={styles.menuSection}>
+									<SectionTitle>最近のチャット</SectionTitle>
+									<View>
+										{snapshot.threads.map(t => (
+											<ThreadRow key={t.threadId} thread={t} active={t.threadId === chat?.threadId} onPress={() => switchThread(t.threadId)} />
+										))}
+									</View>
+								</View>
+							) : null}
 						</ScrollView>
 					</Sheet>
 				) : null}
@@ -405,8 +376,7 @@ const styles = StyleSheet.create({
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: 2,
-		paddingLeft: spacing.lg,
-		paddingRight: spacing.xs,
+		paddingHorizontal: spacing.xs,
 		paddingVertical: spacing.sm,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.borderStrong,
@@ -450,10 +420,9 @@ const styles = StyleSheet.create({
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18 },
 	working: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	workingText: { color: colors.fgFaint, fontSize: fontSize.xs + 1 },
-	greeting: { flexGrow: 1, justifyContent: 'center', gap: spacing.sm, paddingBottom: spacing.xl },
-	greetingTitle: { color: colors.fgStrong, fontSize: fontSize.lg - 2, fontWeight: '600' },
-	greetingHint: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21 },
-	pastThreads: { marginTop: spacing.xl, gap: spacing.xs },
+	greeting: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: spacing.xl },
+	greetingTitle: { color: colors.fgMuted, fontSize: fontSize.md, fontWeight: '500' },
+	menuSection: { marginTop: spacing.xl, gap: spacing.xs },
 	listRow: {
 		flexDirection: 'row',
 		alignItems: 'center',

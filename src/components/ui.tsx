@@ -27,12 +27,22 @@ export const Icon = ({ name, color = colors.fgMuted, size = 20 }: { name: IconNa
 	<Feather name={name} color={color} size={size} accessible={false} />
 );
 
-export const ScreenHeader = ({ title, subtitle }: { title: string; subtitle?: string }) => (
-	<View style={styles.screenHeader}>
-		<Text accessibilityRole='header' style={styles.title}>{title}</Text>
-		{subtitle ? <Muted>{subtitle}</Muted> : null}
-	</View>
-);
+/** メニューから開いたページのときだけ入る「戻る」。見出しに戻るボタンを出すのに使う。 */
+const BackContext = createContext<(() => void) | null>(null);
+export const BackProvider = BackContext.Provider;
+export const useBack = () => useContext(BackContext);
+
+/** 1 行の見出し。ページとして開いたときは左に戻るボタン、右に操作を置ける。 */
+export const ScreenHeader = ({ title, right }: { title: string; right?: React.ReactNode }) => {
+	const back = useBack();
+	return (
+		<View style={[styles.screenHeader, back && styles.screenHeaderWithBack]}>
+			{back ? <IconButton icon='chevron-left' accessibilityLabel='戻る' onPress={back} /> : null}
+			<Text accessibilityRole='header' style={[styles.title, styles.screenHeaderTitle]} numberOfLines={1}>{title}</Text>
+			{right}
+		</View>
+	);
+};
 
 export const Screen = ({ children, style }: { children: React.ReactNode; style?: ViewStyle }) => (
 	<View style={[styles.screen, style]}>{children}</View>
@@ -472,13 +482,16 @@ export const Loading = ({ label }: { label?: string }) => (
 
 const styles = StyleSheet.create({
 	screenHeader: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		minHeight: 56,
 		paddingHorizontal: spacing.lg,
-		paddingTop: spacing.lg,
-		paddingBottom: spacing.md,
-		gap: 2,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.borderStrong,
 	},
+	screenHeaderWithBack: { paddingLeft: spacing.xs, paddingRight: spacing.sm },
+	screenHeaderTitle: { flex: 1 },
 	inputFocused: { borderColor: colors.fgFaint },
 	emptyIcon: { marginBottom: spacing.xs },
 	screen: {
@@ -506,7 +519,7 @@ const styles = StyleSheet.create({
 	},
 	title: {
 		color: colors.fgStrong,
-		fontSize: fontSize.lg - 2,
+		fontSize: fontSize.md,
 		fontWeight: '600',
 	},
 	body: {
