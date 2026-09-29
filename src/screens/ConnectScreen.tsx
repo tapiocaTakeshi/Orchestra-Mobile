@@ -6,7 +6,7 @@
  */
 
 import React, { useCallback, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { Connection } from '../api/types';
 import {
@@ -20,9 +20,9 @@ import {
 	Muted,
 	Row,
 	Screen,
+	ScreenHeader,
 	SectionTitle,
 	SegmentedControl,
-	Title,
 	confirmAction,
 } from '../components/ui';
 import { verifyAndConnect } from '../lib/connect';
@@ -34,7 +34,7 @@ import { colors, radius, spacing } from '../theme';
 
 type Mode = 'link' | 'manual';
 
-export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
+export const ConnectScreen = () => {
 	const { connect, connections, forget } = useApp();
 	const { session } = useDivisionAuth();
 
@@ -104,16 +104,10 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 
 	return (
 		<Screen>
+			<ScreenHeader title='手入力で接続' />
 			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-
-					{onBack ? <Button title='戻る' icon='chevron-left' variant='ghost' size='sm' onPress={onBack} style={styles.back} /> : null}
-
-					<View style={styles.hero}>
-						<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-						<Title>Orchestra に接続</Title>
-						<Muted>繋げるのは、このアカウント ({session?.email}) でログインしている PC だけです。PC 側の Orchestra でも同じアカウントでログインし、設定 → リモートコントロールを有効にしてください。</Muted>
-					</View>
+					<Muted style={styles.note}>{session?.email} でログインしている PC にだけ繋げます。</Muted>
 
 					<Card>
 						<SegmentedControl<Mode>
@@ -195,14 +189,6 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 						</View>
 					) : null}
 
-					<Card>
-						<SectionTitle>繋がらないときは</SectionTitle>
-						<Muted>・スマホと PC が同じ Wi-Fi にあるか確認する</Muted>
-						<Muted>・IDE 側の「LAN からの接続を許可」がオンか確認する</Muted>
-						<Muted>・PC のファイアウォールが 39231 番ポートを塞いでいないか確認する</Muted>
-						<Muted>・USB 接続なら adb reverse tcp:39231 tcp:39231 でも繋がります</Muted>
-					</Card>
-
 				</ScrollView>
 			</KeyboardAvoidingView>
 		</Screen>
@@ -212,19 +198,11 @@ export const ConnectScreen = ({ onBack }: { onBack?: () => void }) => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	content: {
-		padding: spacing.lg,
-		gap: spacing.lg,
-	},
-	hero: {
-		alignItems: 'center',
+		paddingHorizontal: spacing.lg,
+		paddingBottom: spacing.xl,
 		gap: spacing.xs,
-		paddingTop: spacing.xl,
 	},
-	heroMark: {
-		width: 64,
-		height: 64,
-	},
-	back: { alignSelf: 'flex-start' },
+	note: { paddingTop: spacing.md },
 	bannerFlush: { margin: 0 },
 	list: { gap: spacing.sm },
 	deviceIcon: {

@@ -39,6 +39,7 @@ import {
 	Muted,
 	Row,
 	Screen,
+	ScreenHeader,
 	SectionTitle,
 	Sheet,
 	Title,
@@ -49,7 +50,6 @@ import {
 import { oneLine, relativeTime } from '../lib/format';
 import {
 	allLabels,
-	boardSummary,
 	buildColumnViews,
 	checklistProgress,
 	columnWithRole,
@@ -556,6 +556,20 @@ const BoardSettings = ({ onClose }: { onClose: () => void }) => {
 		<Sheet title='ボードの設定' onClose={onClose}>
 			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
 				<Card>
+					<Row style={styles.spread}>
+						<View style={styles.flex}>
+							<Body>自動実行</Body>
+							<Muted>To Do のタスクを、エージェントが順に実行します。</Muted>
+						</View>
+						<Toggle
+							value={!!runtime?.autoRunEnabled}
+							onValueChange={v => void act(() => client.setAutoRun(v), v ? '自動実行を開始しました' : '自動実行を停止しました')}
+							accessibilityLabel='自動実行'
+						/>
+					</Row>
+				</Card>
+
+				<Card>
 					<SectionTitle>ボード名</SectionTitle>
 					<Input
 						value={boardTitle ?? board.title}
@@ -641,7 +655,6 @@ export const KanbanScreen = () => {
 			: []),
 		[board, filterText, priorityFilter, labelFilter, overdueOnly],
 	);
-	const summary = useMemo(() => (board ? boardSummary(board) : null), [board]);
 	const labels = useMemo(() => (board ? allLabels(board) : []), [board]);
 	const filterCount = priorityFilter.length + labelFilter.length + (overdueOnly ? 1 : 0);
 
@@ -663,7 +676,7 @@ export const KanbanScreen = () => {
 		boardRef.current?.scrollTo({ x: index * columnStride, animated: true });
 	}, [columnStride]);
 
-	if (!snapshot || !client || !board || !runtime || !summary) {
+	if (!snapshot || !client || !board || !runtime) {
 		return (
 			<Screen>
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
@@ -685,39 +698,26 @@ export const KanbanScreen = () => {
 		<Screen>
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
+			<ScreenHeader
+				title={board.title}
+				right={(
+					<>
+						{runtime.isRunning
+							? <IconButton icon='square' accessibilityLabel='実行を中断' color={colors.danger} onPress={() => void act(() => client.cancelKanbanRun(), '中断しました')} />
+							: <IconButton icon='play' accessibilityLabel='今すぐ実行' onPress={() => void act(() => client.runPendingTasks(), '実行を開始しました')} />}
+						<IconButton
+							icon='filter'
+							accessibilityLabel='絞り込み'
+							active={showFilters || filterCount > 0}
+							badge={filterCount}
+							onPress={() => setShowFilters(v => !v)}
+						/>
+						<IconButton icon='more-horizontal' accessibilityLabel='ボードの設定' onPress={() => setShowSettings(true)} />
+					</>
+				)}
+			/>
+
 			<View style={styles.boardHeader}>
-				<Row style={styles.spread}>
-					<View style={styles.flex}>
-						<Title>{board.title}</Title>
-						<Muted numberOfLines={1}>
-							{summary.total} 件 · 完了 {summary.done}
-							{summary.blocked > 0 ? ` · 停滞 ${summary.blocked}` : ''}
-							{summary.overdue > 0 ? ` · 期限切れ ${summary.overdue}` : ''}
-						</Muted>
-					</View>
-					<IconButton
-						icon='filter'
-						accessibilityLabel='絞り込み'
-						active={showFilters || filterCount > 0}
-						badge={filterCount}
-						onPress={() => setShowFilters(v => !v)}
-					/>
-					<IconButton icon='settings' accessibilityLabel='ボードの設定' onPress={() => setShowSettings(true)} />
-				</Row>
-
-				<View style={styles.runBar}>
-					<Text style={styles.runBarLabel}>自動実行</Text>
-					<Toggle
-						value={runtime.autoRunEnabled}
-						onValueChange={v => void act(() => client.setAutoRun(v), v ? '自動実行を開始しました' : '自動実行を停止しました')}
-						accessibilityLabel='自動実行'
-					/>
-					<View style={styles.flex} />
-					{runtime.isRunning
-						? <Button title='中断' icon='square' size='sm' variant='danger' onPress={() => void act(() => client.cancelKanbanRun(), '中断しました')} />
-						: <Button title='今すぐ実行' icon='play' size='sm' variant='secondary' onPress={() => void act(() => client.runPendingTasks(), '実行を開始しました')} />}
-				</View>
-
 				<Input
 					value={filterText}
 					onChangeText={setFilterText}
@@ -891,17 +891,9 @@ const styles = StyleSheet.create({
 	boardHeader: {
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.md,
-		paddingBottom: spacing.md,
-		gap: spacing.sm,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
-	},
-	runBar: {
-		flexDirection: 'row',
-		alignItems: 'center',
+		paddingBottom: spacing.xs,
 		gap: spacing.sm,
 	},
-	runBarLabel: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	inlineBanner: { margin: 0 },
 	columnTabsBar: {
 		flexGrow: 0,

@@ -1,24 +1,26 @@
 /**
  * アプリのルート。
  *
- * ナビゲーションライブラリを足さずに自前のタブバーで切り替える。
- * タブは 2 種類ある:
- *   - PC に接続しているとき  … リモート / カンバン / Division / 共有 / コスト / 接続
- *   - 接続していないとき      … 共有 / コスト / 接続 (ソーシャルとチューニングは
- *                                Division 直結なので PC なしでも使える)
+ * タブバーは置かない。最初の画面は 1 つだけで、
+ *   - PC に接続しているとき  … チャット
+ *   - 接続していないとき      … 接続先の一覧
+ * それ以外 (カンバン・Division・共有・コスト・クイック操作・接続) はメニューからページとして開き、
+ * 「戻る」(Android は戻るキーも) で最初の画面に戻る。
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
+import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
+import { PageKey, canOpenPage } from './src/navigation';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
+import { QuickActionsScreen } from './src/screens/QuickActionsScreen';
 import { RemoteScreen } from './src/screens/RemoteScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SocialScreen } from './src/screens/SocialScreen';
@@ -27,80 +29,39 @@ import { AppProvider, useApp } from './src/state/AppContext';
 import { DivisionAuthProvider, useDivisionAuth } from './src/state/DivisionAuthContext';
 import { colors, fontSize, spacing } from './src/theme';
 
-type TabKey = 'remote' | 'kanban' | 'projects' | 'social' | 'tuning' | 'settings';
-
-type Tab = { key: TabKey; label: string; icon: React.ComponentProps<typeof Icon>['name'] };
-
-const TABS: Tab[] = [
-	{ key: 'remote', label: 'リモート', icon: 'message-square' },
-	{ key: 'kanban', label: 'カンバン', icon: 'columns' },
-	{ key: 'projects', label: 'Division', icon: 'layers' },
-	{ key: 'social', label: '共有', icon: 'share-2' },
-	{ key: 'tuning', label: 'コスト', icon: 'bar-chart-2' },
-	{ key: 'settings', label: '接続', icon: 'link' },
-];
-
-/** 未接続でも使えるタブ。接続タブは接続先を選ぶ画面になる。 */
-const OFFLINE_TAB_KEYS: TabKey[] = ['social', 'tuning', 'settings'];
-
-/** リモートタブに付ける印。承認待ちは急ぎなので稼働中と色を分ける。 */
-type RemoteStatus = 'idle' | 'running' | 'approval';
-
-const TabBar = ({ tabs, active, onChange, remoteStatus }: {
-	tabs: Tab[];
-	active: TabKey;
-	onChange: (t: TabKey) => void;
-	remoteStatus: RemoteStatus;
-}) => (
-	<View accessibilityRole='tablist' style={styles.tabBar}>
-		{tabs.map(tab => {
-			const selected = tab.key === active;
-			const status = tab.key === 'remote' ? remoteStatus : 'idle';
-			const statusLabel = status === 'approval' ? '、承認待ち' : status === 'running' ? '、エージェント稼働中' : '';
-			return (
-				<Pressable
-					key={tab.key}
-					accessibilityRole='tab'
-					accessibilityState={{ selected }}
-					onPress={() => onChange(tab.key)}
-					accessibilityLabel={`${tab.label}${statusLabel}`}
-					style={({ pressed }) => [styles.tab, pressed && { backgroundColor: colors.bgHover }]}
-				>
-					<View style={styles.tabIcon}>
-						<Icon name={tab.icon} size={20} color={selected ? colors.fgStrong : colors.fgFaint} />
-						{status !== 'idle' ? (
-							<View style={[styles.busyDot, { backgroundColor: status === 'approval' ? colors.warning : colors.running }]} />
-						) : null}
-					</View>
-					<Text style={[styles.tabLabel, selected && styles.tabLabelActive]} numberOfLines={1}>{tab.label}</Text>
-				</Pressable>
-			);
-		})}
-	</View>
-);
+const PageContent = ({ page }: { page: PageKey }) => {
+	switch (page) {
+		case 'kanban': return <KanbanScreen />;
+		case 'projects': return <ProjectsScreen />;
+		case 'social': return <SocialScreen />;
+		case 'tuning': return <TuningScreen />;
+		case 'actions': return <QuickActionsScreen />;
+		case 'settings': return <SettingsScreen />;
+	}
+};
 
 const Shell = () => {
 	const { connection, isRestoring, snapshot } = useApp();
 	const { session, isRestoring: isRestoringAuth } = useDivisionAuth();
-	const [tab, setTab] = useState<TabKey>('remote');
-	// ログイン中でも、手動ペアリング画面へ抜けたい場合があるので明示的に切り替える。
+	const [page, setPage] = useState<PageKey | null>(null);
 	const [showManualConnect, setShowManualConnect] = useState(false);
-	// 「接続せずに使う」を選んだあとは、未接続のままタブを出す。
-	const [browseOffline, setBrowseOffline] = useState(false);
 
-	// アカウントが替わったら、前のアカウントで選んでいた画面の状態を持ち越さない。
+	// アカウントが替わったら、前のアカウントで開いていた画面を持ち越さない。
 	useEffect(() => {
-		setBrowseOffline(false);
+		setPage(null);
 		setShowManualConnect(false);
 	}, [session?.userId]);
 
-	const isOffline = !connection;
-	const tabs = useMemo(
-		() => (isOffline ? TABS.filter(t => OFFLINE_TAB_KEYS.includes(t.key)) : TABS),
-		[isOffline],
-	);
-	// 接続が切れたときに、繋がっているときにしか無いタブへ取り残されないようにする。
-	const activeTab = tabs.some(t => t.key === tab) ? tab : (tabs[0]?.key ?? 'settings');
+	// 接続が切れたら、繋いでいないと使えないページには留まらない。
+	const openPage = page && canOpenPage(page, !!connection) ? page : null;
+	const goBack = openPage ? () => setPage(null) : showManualConnect ? () => setShowManualConnect(false) : null;
+
+	// Android の戻るキーでも、ページから最初の画面へ戻る。
+	useEffect(() => {
+		if (!goBack) return;
+		const sub = BackHandler.addEventListener('hardwareBackPress', () => { goBack(); return true; });
+		return () => sub.remove();
+	}, [goBack]);
 
 	if (isRestoring || isRestoringAuth) {
 		return (
@@ -120,44 +81,38 @@ const Shell = () => {
 		);
 	}
 
-	if (!connection && !browseOffline) {
-		return (
-			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
-				{showManualConnect ? (
-					<ConnectScreen onBack={() => setShowManualConnect(false)} />
-				) : (
-					<DiscoverScreen
-						onManualConnect={() => setShowManualConnect(true)}
-						onBrowseOffline={() => { setBrowseOffline(true); setTab('social'); }}
-					/>
-				)}
-				<ToastHost />
-			</SafeAreaView>
-		);
-	}
+	const awaitingApproval = !!connection && !!snapshot?.chat.awaitingApproval;
 
-	const remoteStatus: RemoteStatus = !snapshot
-		? 'idle'
-		: snapshot.chat.awaitingApproval ? 'approval' : snapshot.chat.isRunning ? 'running' : 'idle';
+	let content: React.ReactNode;
+	if (openPage) {
+		content = (
+			<BackProvider value={() => setPage(null)}>
+				{/* ページを見ているあいだに承認を求められても気づけるよう、上に細い帯を出す */}
+				{awaitingApproval ? (
+					<Pressable accessibilityRole='button' onPress={() => setPage(null)} style={styles.approvalBar}>
+						<View style={styles.approvalDot} />
+						<Text style={styles.approvalText}>ツールの実行が確認待ちです</Text>
+						<Text style={styles.approvalLink}>チャットへ</Text>
+						<Icon name='chevron-right' size={14} color={colors.fg} />
+					</Pressable>
+				) : null}
+				<PageContent page={openPage} />
+			</BackProvider>
+		);
+	} else if (!connection) {
+		content = showManualConnect
+			? <BackProvider value={() => setShowManualConnect(false)}><ConnectScreen /></BackProvider>
+			: <DiscoverScreen onManualConnect={() => setShowManualConnect(true)} onOpenPage={setPage} />;
+	} else {
+		content = <RemoteScreen onOpenPage={setPage} />;
+	}
 
 	return (
 		<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 			<View style={styles.body}>
-				{activeTab === 'remote' ? <RemoteScreen /> : null}
-				{activeTab === 'kanban' ? <KanbanScreen /> : null}
-				{activeTab === 'projects' ? <ProjectsScreen /> : null}
-				{activeTab === 'social' ? <SocialScreen /> : null}
-				{activeTab === 'tuning' ? <TuningScreen /> : null}
-				{activeTab === 'settings' ? (
-					isOffline
-						? <DiscoverScreen
-							onManualConnect={() => { setBrowseOffline(false); setShowManualConnect(true); }}
-						/>
-						: <SettingsScreen />
-				) : null}
+				{content}
 				<ToastHost />
 			</View>
-			<TabBar tabs={tabs} active={activeTab} onChange={setTab} remoteStatus={remoteStatus} />
 		</SafeAreaView>
 	);
 };
@@ -185,39 +140,15 @@ const styles = StyleSheet.create({
 	body: {
 		flex: 1,
 	},
-	tabBar: {
+	approvalBar: {
 		flexDirection: 'row',
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: colors.borderStrong,
-		backgroundColor: colors.bg,
-		paddingHorizontal: spacing.xs,
-	},
-	tab: {
-		flex: 1,
 		alignItems: 'center',
-		paddingTop: spacing.sm,
-		paddingBottom: spacing.xs + 2,
-		paddingHorizontal: 2,
-		minHeight: 60,
-		gap: 4,
+		gap: spacing.sm,
+		minHeight: 40,
+		paddingHorizontal: spacing.lg,
+		backgroundColor: colors.bgHover,
 	},
-	tabIcon: { width: 44, height: 28, alignItems: 'center', justifyContent: 'center' },
-	tabLabel: {
-		color: colors.fgFaint,
-		fontSize: fontSize.xs - 1,
-		fontWeight: '600',
-	},
-	tabLabelActive: {
-		color: colors.fgStrong,
-	},
-	busyDot: {
-		position: 'absolute',
-		top: 1,
-		right: 6,
-		width: 9,
-		height: 9,
-		borderRadius: 5,
-		borderWidth: 1.5,
-		borderColor: colors.bgElevated,
-	},
+	approvalDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
+	approvalText: { flex: 1, color: colors.fg, fontSize: fontSize.xs + 1 },
+	approvalLink: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
 });

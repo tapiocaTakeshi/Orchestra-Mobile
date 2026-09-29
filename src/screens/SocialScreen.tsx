@@ -527,7 +527,17 @@ export const SocialScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='共有' subtitle='役割とモデルの組み合わせを共有・取り込みする' />
+			<ScreenHeader
+				title='共有'
+				right={(
+					<IconButton
+						icon='plus'
+						accessibilityLabel='自分のプロジェクトを共有する'
+						disabled={!canUseProjects || projects.length === 0}
+						onPress={() => setPublishing(true)}
+					/>
+				)}
+			/>
 
 			<View style={styles.toolbar}>
 				<SegmentedControl<'feed' | 'mine'>
@@ -535,23 +545,14 @@ export const SocialScreen = () => {
 					value={tab}
 					onChange={setTab}
 				/>
-				<Row>
-					<Input
-						value={query}
-						onChangeText={setQuery}
-						placeholder='タイトル・モデル名で検索'
-						style={styles.flex}
-						autoCapitalize='none'
-						returnKeyType='search'
-						clearButtonMode='while-editing'
-					/>
-					<Button
-						title='共有'
-						icon='share-2'
-						disabled={!canUseProjects || projects.length === 0}
-						onPress={() => setPublishing(true)}
-					/>
-				</Row>
+				<Input
+					value={query}
+					onChangeText={setQuery}
+					placeholder='タイトル・モデル名で検索'
+					autoCapitalize='none'
+					returnKeyType='search'
+					clearButtonMode='while-editing'
+				/>
 				<ChipGroup<FeedSort> options={FEED_SORTS} value={sort} onChange={setSort} />
 			</View>
 
