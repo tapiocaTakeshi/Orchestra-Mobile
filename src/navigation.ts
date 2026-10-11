@@ -31,3 +31,24 @@ export const pagesFor = (connected: boolean): PageEntry[] =>
 
 export const canOpenPage = (key: PageKey, connected: boolean): boolean =>
 	pagesFor(connected).some(p => p.key === key);
+
+/** ページの中から別のページを開くときのオプション。 */
+export type OpenPageOptions = {
+	/** クラウドのページを開いたら、このセッションの詳細をすぐ開く */
+	cloudSessionId?: string;
+};
+
+/**
+ * ページを開く。最初の画面のメニューから開くとそのページだけになり、ページの中から開くと
+ * 重ねて開く (「戻る」で元のページへ戻る)。
+ */
+export type OpenPage = (page: PageKey, options?: OpenPageOptions) => void;
+
+/**
+ * ページの中から別のページを開いたときの重なり。同じページが既に下にあれば、そこまで戻す
+ * (クラウド → カンバン → 「クラウドで開く」で、クラウドが 2 枚重ならないように)。
+ */
+export const pushPage = (stack: PageKey[], page: PageKey): PageKey[] => {
+	const index = stack.indexOf(page);
+	return index >= 0 ? stack.slice(0, index + 1) : [...stack, page];
+};

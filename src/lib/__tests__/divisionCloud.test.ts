@@ -33,6 +33,7 @@ import {
 	listCloudSessions,
 	listPollInterval,
 	mergeEvents,
+	recentCostedSessions,
 	repoFolderName,
 	repoLabel,
 	repoNameOf,
@@ -41,6 +42,8 @@ import {
 	splitPatch,
 	startCloudSession,
 	stopCloudSession,
+	sumCloudCosts,
+	toCloudSession,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -631,5 +634,85 @@ describe('patch helpers', () => {
 		const lines = Array.from({ length: 10 }, (_, i) => String(i));
 		expect(truncateLines(lines, 20)).toEqual({ lines, truncated: false, hidden: 0 });
 		expect(truncateLines(lines, 4)).toEqual({ lines: ['0', '1', '2', '3'], truncated: true, hidden: 6 });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// プロジェクトと料金 (Addendum 3)
+// ---------------------------------------------------------------------------
+
+describe('projects and cost', () => {
+	it('sends projectId on create (trimmed) and omits it when empty', async () => {
+		mockFetch(() => ({ status: 201, body: { session: rawSession({ projectId: 'p1' }) } }));
+		const created = await createCloudSession(auth, { prompt: 'do it', projectId: ' p1 ' });
+		expect(bodyOf(calls[0])).toEqual({ prompt: 'do it', projectId: 'p1' });
+		expect(created.projectId).toBe('p1');
+
+		await createCloudSession(auth, { prompt: 'x', projectId: '  ' });
+		expect(bodyOf(calls[1])).toEqual({ prompt: 'x' });
+	});
+
+	it('passes projectId through launchSessions and reports each session as soon as it is created', async () => {
+		const order: string[] = [];
+		mockFetch(url => {
+			if (url === BASE) {
+				order.push('create');
+				return { status: 201, body: { session: rawSession({ id: 'c1', status: 'uploading', projectId: 'proj' }) } };
+			}
+			order.push('start');
+			return { status: 200, body: { session: rawSession({ id: 'c1', status: 'running', projectId: 'proj' }) } };
+		});
+		const onCreated = jest.fn((created: CloudSession, _index: number) => { order.push(`created:${created.id}`); });
+		const [result] = await launchSessions(auth, { prompt: 'Task', count: 1, title: 'Card', projectId: 'proj', onCreated });
+
+		expect(bodyOf(calls[0])).toEqual({ prompt: 'Task', title: 'Card', projectId: 'proj' });
+		expect(onCreated).toHaveBeenCalledTimes(1);
+		expect(onCreated.mock.calls[0][1]).toBe(0);
+		expect(order).toEqual(['create', 'created:c1', 'start']);
+		expect(result.session?.status).toBe('running');
+	});
+
+	it('keeps launching when the onCreated callback throws', async () => {
+		mockFetch(url => (url === BASE
+			? { status: 201, body: { session: rawSession({ id: 'c2', status: 'uploading' }) } }
+			: { status: 200, body: { session: rawSession({ id: 'c2' }) } }));
+		const [result] = await launchSessions(auth, { prompt: 'p', count: 1, onCreated: () => { throw new Error('ui'); } });
+		expect(result.error).toBeUndefined();
+		expect(calls).toHaveLength(2);
+	});
+
+	it('reads costUsd only when it is a finite non-negative number', () => {
+		expect(toCloudSession(rawSession({ costUsd: 0.1234 })).costUsd).toBe(0.1234);
+		expect(toCloudSession(rawSession({ costUsd: 0 })).costUsd).toBe(0);
+		expect('costUsd' in toCloudSession(rawSession())).toBe(false);
+		expect('costUsd' in toCloudSession(rawSession({ costUsd: '0.5' }))).toBe(false);
+		expect('costUsd' in toCloudSession(rawSession({ costUsd: -1 }))).toBe(false);
+		expect('costUsd' in toCloudSession(rawSession({ costUsd: Number.NaN }))).toBe(false);
+	});
+
+	it('lists sessions with their cost', async () => {
+		mockFetch(() => ({ status: 200, body: { sessions: [rawSession({ id: 'a', costUsd: 0.5 }), rawSession({ id: 'b' })] } }));
+		const rows = await listCloudSessions(auth, 20);
+		expect(calls[0].url).toBe(`${BASE}?limit=20`);
+		expect(rows.map(r => r.costUsd)).toEqual([0.5, undefined]);
+	});
+
+	it('totals known costs and counts unknown ones', () => {
+		expect(sumCloudCosts([])).toEqual({ totalUsd: 0, known: 0, unknown: 0 });
+		const total = sumCloudCosts([{ costUsd: 0.1 }, { costUsd: 0.25 }, {}, { costUsd: 0 }]);
+		expect(total.totalUsd).toBeCloseTo(0.35);
+		expect(total.known).toBe(3);
+		expect(total.unknown).toBe(1);
+	});
+
+	it('picks the most recently updated sessions that have a cost', () => {
+		const rows = [
+			session({ id: 'old', costUsd: 1, updatedAt: '2026-10-01T00:00:00.000Z' }),
+			session({ id: 'none', updatedAt: '2026-10-05T00:00:00.000Z' }),
+			session({ id: 'new', costUsd: 2, updatedAt: '2026-10-04T00:00:00.000Z' }),
+			session({ id: 'mid', costUsd: 3, updatedAt: '2026-10-02T00:00:00.000Z' }),
+		];
+		expect(recentCostedSessions(rows, 2).map(s => s.id)).toEqual(['new', 'mid']);
+		expect(recentCostedSessions(rows).map(s => s.id)).toEqual(['new', 'mid', 'old']);
 	});
 });

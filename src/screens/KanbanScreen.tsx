@@ -4,9 +4,13 @@
  * IDE の .orchestra/kanban.json をそのまま操作する。スマホでは横スワイプで
  * カラムを送り、カードをタップすると詳細 (チェックリスト・コメント・実行履歴) を開く。
  * ドラッグ&ドロップの代わりに、詳細の「移動」で列を選ばせている。
+ *
+ * 詳細の「クラウドで実行」は、タスクの題名と説明を指示にして Division のクラウドエージェントを起動する
+ * (PC のエージェントではなくサーバーのサンドボックスで動く)。始める場所は空のフォルダか GitHub のリポジトリ。
+ * 起動したらトーストの「クラウドで開く」でクラウドのページに移り、そのセッションを開ける。
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	ActivityIndicator,
 	KeyboardAvoidingView,
@@ -41,19 +45,35 @@ import {
 	Screen,
 	ScreenHeader,
 	SectionTitle,
+	SegmentedControl,
 	Sheet,
 	Title,
 	Toggle,
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { CloudProjectPicker, useCloudProjects } from '../components/CloudProjectPicker';
+import {
+	GitHubAccountRow,
+	GitHubConnectPanel,
+	GitHubRepoPicker,
+	GitHubRepoSelection,
+	useGitHubConnection,
+} from '../components/GitHubRepoPicker';
+import { DivisionSession } from '../lib/divisionAuth';
+import { CloudRepoFullName, cloudErrorText, launchSessions, validateBranch } from '../lib/divisionCloud';
+import { GitHubRepo } from '../lib/divisionGitHub';
+import { singleActiveProjectId } from '../lib/divisionProjects';
 import { oneLine, relativeTime } from '../lib/format';
 import {
 	allLabels,
 	buildColumnViews,
+	buildKanbanCloudPrompt,
 	checklistProgress,
 	columnWithRole,
 	isOverdue,
+	kanbanCloudComment,
+	kanbanCloudTitle,
 	labelColor,
 	latestRun,
 	moveTargets,
@@ -61,7 +81,10 @@ import {
 	priorityLabel,
 	todayString,
 } from '../lib/kanban';
+import { OpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
+import { useDivisionAuth } from '../state/DivisionAuthContext';
+import { loadLastCloudRepo, saveLastCloudRepo } from '../state/cloudStorage';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 const COLUMN_ROLES: { value: KanbanColumnRole; label: string }[] = [
@@ -167,7 +190,12 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 	);
 };
 
-const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }) => {
+const TaskDetail = ({ taskId, onClose, onRunInCloud }: {
+	taskId: string;
+	onClose: () => void;
+	/** 「クラウドで実行」 (Division にログインしていなければ出さない) */
+	onRunInCloud?: (task: KanbanTask) => void;
+}) => {
 	const { snapshot, client } = useApp();
 	const act = useAction();
 	const [comment, setComment] = useState('');
@@ -223,6 +251,15 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 							disabled={isRunning}
 							onPress={() => void act(() => client.runTask(task.id), 'エージェントに投げました')}
 						/>
+						{onRunInCloud ? (
+							<Button
+								title='クラウドで実行'
+								icon='cloud'
+								variant='secondary'
+								onPress={() => onRunInCloud(task)}
+								accessibilityLabel='このタスクをクラウドエージェントで実行'
+							/>
+						) : null}
 						<Muted>移動先</Muted>
 						<View style={styles.chipWrap}>
 							{moveTargets(board, task).map(c => (
@@ -445,6 +482,165 @@ const TaskDetail = ({ taskId, onClose }: { taskId: string; onClose: () => void }
 	);
 };
 
+// ---------------------------------------------------------------------------
+// クラウドで実行
+// ---------------------------------------------------------------------------
+
+export type CloudRunInput = {
+	prompt: string;
+	/** GitHub 連携で選んだリポジトリ。無ければ空のフォルダで始める */
+	repo?: CloudRepoFullName;
+	/** 次回の既定にするため、選んだリポジトリそのもの */
+	pickedRepo?: GitHubRepo;
+	projectId?: string;
+};
+
+/** GitHub のリポジトリを選ぶ欄。「GitHub リポジトリ」を選んだときだけ出す (連携状態の確認もそのときだけ)。 */
+const CloudRepoSource = ({ auth, repo, branch, onRepo, onBranch }: {
+	auth: DivisionSession;
+	repo: GitHubRepo | null;
+	branch: string;
+	onRepo: (repo: GitHubRepo | null, branch?: string) => void;
+	onBranch: (branch: string) => void;
+}) => {
+	const github = useGitHubConnection(auth);
+	const status = github.status;
+	const connected = !!status?.connected;
+
+	// 前回クラウドで選んだリポジトリを既定にする (1 回だけ)。
+	const preselectTried = useRef(false);
+	useEffect(() => {
+		if (!connected || repo || preselectTried.current) return;
+		preselectTried.current = true;
+		void loadLastCloudRepo(auth.userId).then(last => { if (last) onRepo(last.repo, last.branch); });
+	}, [connected, repo, auth.userId, onRepo]);
+
+	const markDisconnected = github.markDisconnected;
+	const onNotConnected = useCallback(() => {
+		markDisconnected();
+		onRepo(null);
+	}, [markDisconnected, onRepo]);
+
+	if (!status) {
+		return github.error ? (
+			<ErrorBanner tone='warning' message={`GitHub の連携状態を確認できませんでした: ${github.error}`} onRetry={() => void github.refresh()} style={styles.inlineBanner} />
+		) : (
+			<Row>
+				<ActivityIndicator size='small' color={colors.fgMuted} />
+				<Muted>GitHub の連携を確認しています…</Muted>
+			</Row>
+		);
+	}
+	if (!status.configured) return <Muted>サーバー側で GitHub 連携が未設定のため、リポジトリを選べません。空のフォルダで始めてください。</Muted>;
+	if (!connected) {
+		return (
+			<GitHubConnectPanel
+				starting={github.starting}
+				waiting={github.waiting}
+				onConnect={() => void github.connect()}
+				onCancel={github.cancelConnect}
+			/>
+		);
+	}
+	return (
+		<>
+			<GitHubAccountRow status={status} disconnecting={github.disconnecting} onDisconnect={() => void github.disconnect().then(ok => { if (ok) onRepo(null); })} />
+			{repo ? (
+				<GitHubRepoSelection
+					auth={auth}
+					repo={repo}
+					branch={branch}
+					onBranch={onBranch}
+					onChange={() => onRepo(null)}
+					onNotConnected={onNotConnected}
+				/>
+			) : (
+				<GitHubRepoPicker auth={auth} onSelect={next => onRepo(next)} onNotConnected={onNotConnected} />
+			)}
+			{github.error ? <ErrorBanner tone='warning' message={github.error} style={styles.inlineBanner} /> : null}
+		</>
+	);
+};
+
+const CloudRunSheet = ({ auth, task, boardTitle, onClose, onLaunch }: {
+	auth: DivisionSession;
+	task: KanbanTask;
+	boardTitle: string;
+	onClose: () => void;
+	onLaunch: (input: CloudRunInput) => void;
+}) => {
+	const projects = useCloudProjects(auth);
+	const [prompt, setPrompt] = useState(() => buildKanbanCloudPrompt(task, boardTitle));
+	const [source, setSource] = useState<'empty' | 'repo'>('empty');
+	const [repo, setRepo] = useState<GitHubRepo | null>(null);
+	const [branch, setBranch] = useState('');
+	const [projectId, setProjectId] = useState<string | null>(null);
+
+	// PC で有効なプロジェクトが 1 つだけなら、それを既定にする (選び直すまで)。
+	const defaultProjectId = singleActiveProjectId(projects.projects);
+	const chosenProjectId = projectId ?? defaultProjectId;
+
+	const onRepo = useCallback((next: GitHubRepo | null, nextBranch?: string) => {
+		setRepo(next);
+		setBranch(nextBranch ?? '');
+	}, []);
+
+	const branchIssue = source === 'repo' ? validateBranch(branch) : null;
+	const ok = !!prompt.trim() && (source === 'empty' || (!!repo && !branchIssue));
+
+	return (
+		<Sheet title='クラウドで実行' eyebrow={oneLine(task.title, 60)} onClose={onClose}>
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.cloudContent} keyboardShouldPersistTaps='handled'>
+					<View style={styles.cloudField}>
+						<SectionTitle>指示</SectionTitle>
+						<Input
+							value={prompt}
+							onChangeText={setPrompt}
+							multiline
+							accessibilityLabel='クラウドエージェントへの指示'
+							style={styles.cloudPrompt}
+						/>
+						<Muted>タスクの題名と説明から作りました。送る前に書き換えられます。</Muted>
+					</View>
+
+					<View style={styles.cloudField}>
+						<SectionTitle>始める場所</SectionTitle>
+						<SegmentedControl<'empty' | 'repo'>
+							options={[{ value: 'empty', label: '空のフォルダ' }, { value: 'repo', label: 'GitHub リポジトリ' }]}
+							value={source}
+							onChange={setSource}
+						/>
+						{source === 'empty' ? <Muted>何も無いフォルダから始めます。</Muted> : (
+							<CloudRepoSource auth={auth} repo={repo} branch={branch} onRepo={onRepo} onBranch={setBranch} />
+						)}
+						{branchIssue ? <Text style={styles.errorText}>{branchIssue}</Text> : null}
+					</View>
+
+					<View style={styles.cloudField}>
+						<SectionTitle>プロジェクト</SectionTitle>
+						<CloudProjectPicker projects={projects} value={chosenProjectId} onChange={setProjectId} />
+					</View>
+
+					<Muted>Orchestra Plus とクレジットが必要です。サンドボックスの用意に数分かかることがあります。</Muted>
+					<Button
+						title='クラウドで実行'
+						icon='play'
+						disabled={!ok}
+						onPress={() => onLaunch({
+							prompt,
+							...(source === 'repo' && repo
+								? { repo: { fullName: repo.fullName, branch: branch.trim() || undefined }, pickedRepo: repo }
+								: {}),
+							projectId: chosenProjectId || undefined,
+						})}
+					/>
+				</ScrollView>
+			</KeyboardAvoidingView>
+		</Sheet>
+	);
+};
+
 const ColumnRow = ({
 	column,
 	taskCount,
@@ -625,8 +821,13 @@ const BoardSettings = ({ onClose }: { onClose: () => void }) => {
 	);
 };
 
-export const KanbanScreen = () => {
-	const { snapshot, error, refresh, isRefreshing, client } = useApp();
+export const KanbanScreen = ({ onOpenPage }: {
+	/** 「クラウドで開く」でクラウドのページに移る */
+	onOpenPage?: OpenPage;
+} = {}) => {
+	const { snapshot, error, refresh, isRefreshing, client, invalidate } = useApp();
+	const { session } = useDivisionAuth();
+	const toast = useToast();
 	const act = useAction();
 	const { width } = useWindowDimensions();
 	const boardRef = useRef<ScrollView | null>(null);
@@ -640,6 +841,10 @@ export const KanbanScreen = () => {
 	const [priorityFilter, setPriorityFilter] = useState<KanbanPriority[]>([]);
 	const [labelFilter, setLabelFilter] = useState<string[]>([]);
 	const [overdueOnly, setOverdueOnly] = useState(false);
+	/** 「クラウドで実行」のシートを開いているタスク */
+	const [cloudTask, setCloudTask] = useState<KanbanTask | null>(null);
+	/** クラウドで起動中 (作成と開始を待っている) の数 */
+	const [cloudLaunching, setCloudLaunching] = useState(0);
 
 	const board = snapshot?.kanban.board ?? null;
 	const runtime = snapshot?.kanban.runtime ?? null;
@@ -675,6 +880,45 @@ export const KanbanScreen = () => {
 		setActiveColumn(index);
 		boardRef.current?.scrollTo({ x: index * columnStride, animated: true });
 	}, [columnStride]);
+
+	/**
+	 * タスクをクラウドエージェントで動かす。作成できた時点でトーストに「クラウドで開く」を出し、
+	 * カードにもコメントを残す。開始 (clone など) はそのあと裏で続く。
+	 */
+	const runInCloud = useCallback(async (task: KanbanTask, input: CloudRunInput) => {
+		if (!session) return;
+		setCloudTask(null);
+		setCloudLaunching(n => n + 1);
+		toast.show('クラウドエージェントを起動しています…', 'info');
+		if (input.repo && input.pickedRepo) {
+			void saveLastCloudRepo(session.userId, { repo: input.pickedRepo, branch: input.repo.branch ?? '' });
+		}
+		const openAction = (id: string) => (onOpenPage
+			? { label: 'クラウドで開く', onPress: () => onOpenPage('cloud', { cloudSessionId: id }) }
+			: undefined);
+		try {
+			const [result] = await launchSessions(session, {
+				prompt: input.prompt,
+				count: 1,
+				repo: input.repo,
+				title: kanbanCloudTitle(task),
+				projectId: input.projectId,
+				onCreated: created => {
+					toast.show(`「${oneLine(created.title, 40)}」をクラウドで起動しました`, 'success', openAction(created.id));
+					if (client) {
+						void client.addComment(task.id, kanbanCloudComment(created.title)).then(() => invalidate()).catch(() => undefined);
+					}
+				},
+			});
+			if (result?.error) {
+				toast.show(`クラウドで起動できませんでした: ${result.error}`, 'error', result.session ? openAction(result.session.id) : undefined);
+			}
+		} catch (e) {
+			toast.show(`クラウドで起動できませんでした: ${cloudErrorText(e)}`, 'error');
+		} finally {
+			setCloudLaunching(n => Math.max(0, n - 1));
+		}
+	}, [session, client, invalidate, onOpenPage, toast]);
 
 	if (!snapshot || !client || !board || !runtime) {
 		return (
@@ -791,6 +1035,12 @@ export const KanbanScreen = () => {
 					<ErrorBanner tone='warning' message='エージェントがツールの承認待ちです。「リモート」タブから承認してください。' style={styles.inlineBanner} />
 				) : null}
 				{runtime.lastError ? <ErrorBanner message={runtime.lastError} style={styles.inlineBanner} /> : null}
+				{cloudLaunching > 0 ? (
+					<View style={styles.cloudLaunching} accessibilityLiveRegion='polite'>
+						<ActivityIndicator size='small' color={colors.running} />
+						<Muted style={styles.flex}>クラウドエージェントを起動しています… (サンドボックスの用意に数分かかることがあります)</Muted>
+					</View>
+				) : null}
 			</View>
 
 			{views.length > 1 ? (
@@ -879,7 +1129,26 @@ export const KanbanScreen = () => {
 				</Row>
 			</View>
 
-			{openTaskId ? <TaskDetail taskId={openTaskId} onClose={() => setOpenTaskId(null)} /> : null}
+			{openTaskId ? (
+				<TaskDetail
+					taskId={openTaskId}
+					onClose={() => setOpenTaskId(null)}
+					onRunInCloud={session ? task => {
+						setOpenTaskId(null);
+						// iOS は閉じかけのシートがあると次のシートを出せないので、閉じ終わるのを少し待つ
+						setTimeout(() => setCloudTask(task), Platform.OS === 'ios' ? 450 : 0);
+					} : undefined}
+				/>
+			) : null}
+			{cloudTask && session ? (
+				<CloudRunSheet
+					auth={session}
+					task={cloudTask}
+					boardTitle={board.title}
+					onClose={() => setCloudTask(null)}
+					onLaunch={input => void runInCloud(cloudTask, input)}
+				/>
+			) : null}
 			{showSettings ? <BoardSettings onClose={() => setShowSettings(false)} /> : null}
 		</Screen>
 	);
@@ -895,6 +1164,10 @@ const styles = StyleSheet.create({
 		gap: spacing.sm,
 	},
 	inlineBanner: { margin: 0 },
+	cloudLaunching: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+	cloudContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
+	cloudField: { gap: spacing.sm },
+	cloudPrompt: { minHeight: 160 },
 	columnTabsBar: {
 		flexGrow: 0,
 		flexShrink: 0,

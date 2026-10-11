@@ -70,6 +70,17 @@ export const formatUsd = (value: number, digits = 6): string => {
 /** 残高など、桁が大きいものは 2 桁で十分。 */
 export const formatUsdShort = (value: number): string => formatUsd(value, 2);
 
+/**
+ * セッション単位の料金など、一覧に並べる金額。1 セント以上は 2 桁 ($0.12)、
+ * それ未満は 0 に丸めて見えなくならないよう 4 桁 ($0.0042) にする。
+ */
+export const formatUsdCompact = (value: number): string => {
+	if (!Number.isFinite(value)) return '—';
+	if (value === 0) return formatUsd(0, 2);
+	if (value > 0 && value < 0.0001) return '<$0.0001';
+	return Math.abs(value) >= 0.01 ? formatUsd(value, 2) : formatUsd(value, 4);
+};
+
 export const formatTokens = (value: number): string =>
 	Number.isFinite(value) ? Math.round(value).toLocaleString('en-US') : '—';
 

@@ -347,10 +347,12 @@ export const confirmAction = ({ title, message, confirmLabel = 'OK', destructive
 // ---------------------------------------------------------------------------
 
 type ToastTone = 'info' | 'success' | 'error';
-type ToastState = { id: number; message: string; tone: ToastTone };
+/** トーストに付けるボタン (例: 「クラウドで開く」)。押すとトーストも閉じる。 */
+export type ToastAction = { label: string; onPress: () => void };
+type ToastState = { id: number; message: string; tone: ToastTone; action?: ToastAction };
 
 type ToastApi = {
-	show: (message: string, tone?: ToastTone) => void;
+	show: (message: string, tone?: ToastTone, action?: ToastAction) => void;
 	hide: () => void;
 };
 
@@ -374,12 +376,12 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
 		setToast(null);
 	}, []);
 
-	const show = useCallback((message: string, tone: ToastTone = 'info') => {
+	const show = useCallback((message: string, tone: ToastTone = 'info', action?: ToastAction) => {
 		if (timer.current) clearTimeout(timer.current);
 		seq.current += 1;
-		setToast({ id: seq.current, message, tone });
-		// エラーは読み切れるように少し長く出す。
-		timer.current = setTimeout(() => setToast(null), tone === 'error' ? 5_000 : 2_600);
+		setToast({ id: seq.current, message, tone, action });
+		// エラーとボタン付きは、読んで押せるように少し長く出す。
+		timer.current = setTimeout(() => setToast(null), action ? 7_000 : tone === 'error' ? 5_000 : 2_600);
 	}, []);
 
 	useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -435,6 +437,17 @@ export const ToastHost = () => {
 			>
 				<Icon name={TOAST_ICON[toast.tone]} size={18} color={color} />
 				<Text style={styles.toastText}>{toast.message}</Text>
+				{toast.action ? (
+					<Pressable
+						accessibilityRole='button'
+						accessibilityLabel={toast.action.label}
+						hitSlop={8}
+						onPress={() => { const action = toast.action; hide(); action?.onPress(); }}
+						style={styles.toastAction}
+					>
+						<Text style={styles.toastActionText}>{toast.action.label}</Text>
+					</Pressable>
+				) : null}
 			</Pressable>
 		</Animated.View>
 	);
@@ -707,6 +720,14 @@ const styles = StyleSheet.create({
 		elevation: 8,
 	},
 	toastText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 19, flexShrink: 1 },
+	toastAction: {
+		minHeight: 32,
+		justifyContent: 'center',
+		paddingHorizontal: spacing.sm,
+		borderRadius: radius.sm,
+		backgroundColor: colors.bgHover,
+	},
+	toastActionText: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	sheetHeader: {
 		flexDirection: 'row',
 		alignItems: 'center',

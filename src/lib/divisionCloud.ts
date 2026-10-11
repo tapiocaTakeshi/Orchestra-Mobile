@@ -69,6 +69,8 @@ export type CloudSession = {
 	updatedAt: string;
 	startedAt: string | null;
 	completedAt: string | null;
+	/** これまでにかかったモデルの料金 (USD)。一覧と詳細の API だけが返す。無ければ不明 */
+	costUsd?: number;
 };
 
 export type CloudSessionEventType = 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done';
@@ -286,6 +288,7 @@ export const toCloudSession = (raw: unknown): CloudSession => {
 		updatedAt: str(s.updatedAt) || str(s.createdAt),
 		startedAt: strOrNull(s.startedAt),
 		completedAt: strOrNull(s.completedAt),
+		...(typeof s.costUsd === 'number' && Number.isFinite(s.costUsd) && s.costUsd >= 0 ? { costUsd: s.costUsd } : {}),
 	};
 };
 
@@ -586,6 +589,10 @@ export type LaunchInput = {
 	repo?: CloudRepo;
 	model?: string;
 	title?: string;
+	/** Division のプロジェクト ID。指定するとそのプロジェクトの「コーダー」のモデルで動く (model が優先) */
+	projectId?: string;
+	/** 作成できた時点 (開始の前) で呼ぶ。開始は clone などで数分かかるので、先にセッションを開けるようにする */
+	onCreated?: (created: CloudSession, index: number) => void;
 };
 
 export type LaunchResult = {
@@ -636,7 +643,8 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 	return Promise.all(titles.map(async (title, index): Promise<LaunchResult> => {
 		let created: CloudSession | undefined;
 		try {
-			created = await createCloudSession(session, { prompt, title, model: input.model, workspaceName });
+			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName });
+			try { input.onCreated?.(created, index); } catch { /* 通知側の失敗で起動は止めない */ }
 			const started = await startCloudSession(session, created.id, { repo });
 			return { index, title, session: started };
 		} catch (e) {
@@ -644,6 +652,34 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 		}
 	}));
 };
+
+// ---------------------------------------------------------------------------
+// 料金
+// ---------------------------------------------------------------------------
+
+export type CloudCostTotal = {
+	/** 料金が分かっているセッションの合計 (USD) */
+	totalUsd: number;
+	/** 料金が分かっているセッション数 */
+	known: number;
+	/** 料金が返ってこなかった (古いサーバーなど) セッション数 */
+	unknown: number;
+};
+
+/** 一覧のセッションの料金を合計する。costUsd が無いものは数えずに unknown に入れる。 */
+export const sumCloudCosts = (sessions: Pick<CloudSession, 'costUsd'>[]): CloudCostTotal =>
+	sessions.reduce<CloudCostTotal>((acc, s) => (
+		typeof s.costUsd === 'number' && Number.isFinite(s.costUsd)
+			? { ...acc, totalUsd: acc.totalUsd + s.costUsd, known: acc.known + 1 }
+			: { ...acc, unknown: acc.unknown + 1 }
+	), { totalUsd: 0, known: 0, unknown: 0 });
+
+/** 料金の分かっているセッションを新しい順に最大 limit 件。コストページの「クラウドエージェント」に出す。 */
+export const recentCostedSessions = (sessions: CloudSession[], limit = 5): CloudSession[] =>
+	sessions
+		.filter(s => typeof s.costUsd === 'number')
+		.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+		.slice(0, limit);
 
 // ---------------------------------------------------------------------------
 // 差分の表示
