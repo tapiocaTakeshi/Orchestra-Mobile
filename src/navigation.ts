@@ -5,13 +5,13 @@
 
 import type { IconName } from './components/ui';
 
-export type PageKey = 'kanban' | 'projects' | 'social' | 'tuning' | 'actions' | 'settings';
+export type PageKey = 'kanban' | 'projects' | 'cloud' | 'social' | 'tuning' | 'actions' | 'settings';
 
 export type PageEntry = {
 	key: PageKey;
 	label: string;
 	icon: IconName;
-	/** PC に繋いでいないと開けないページ (共有とコストは Division 直結なので未接続でも開ける) */
+	/** PC に繋いでいないと開けないページ (クラウド・共有・コストは Division 直結なので未接続でも開ける) */
 	needsConnection: boolean;
 };
 
@@ -19,6 +19,7 @@ export type PageEntry = {
 export const PAGES: PageEntry[] = [
 	{ key: 'kanban', label: 'カンバン', icon: 'columns', needsConnection: true },
 	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: true },
+	{ key: 'cloud', label: 'クラウド', icon: 'cloud', needsConnection: false },
 	{ key: 'social', label: '共有', icon: 'share-2', needsConnection: false },
 	{ key: 'tuning', label: 'コスト', icon: 'bar-chart-2', needsConnection: false },
 	{ key: 'actions', label: 'クイック操作', icon: 'zap', needsConnection: true },
