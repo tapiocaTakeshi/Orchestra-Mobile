@@ -2,10 +2,13 @@ import { KanbanBoard, KanbanTask } from '../../api/types';
 import {
 	allLabels,
 	boardSummary,
+	buildKanbanCloudPrompt,
 	buildColumnViews,
 	checklistProgress,
 	columnWithRole,
 	isOverdue,
+	kanbanCloudComment,
+	kanbanCloudTitle,
 	labelColor,
 	matchesFilter,
 	moveTargets,
@@ -141,5 +144,59 @@ describe('labelColor', () => {
 
 	it('is stable across calls', () => {
 		expect(labelColor('feature')).toBe(labelColor('feature'));
+	});
+});
+
+describe('cloud prompt', () => {
+	it('builds a concise Japanese prompt from the title, description and open checklist items', () => {
+		const prompt = buildKanbanCloudPrompt(task({
+			id: 'x',
+			columnId: 'todo',
+			title: ' Fix login ',
+			description: 'Safari でログインできない。\nCookie を確認する。',
+			priority: 'urgent',
+			labels: ['bug', 'auth'],
+			dueDate: '2026-10-20',
+			checklist: [
+				{ id: '1', text: '再現手順を書く', done: true },
+				{ id: '2', text: '修正する', done: false },
+				{ id: '3', text: '  ', done: false },
+			],
+		}), 'Orchestra');
+		expect(prompt).toBe([
+			'カンバン「Orchestra」のタスクを実行してください。',
+			'',
+			'# Fix login',
+			'',
+			'Safari でログインできない。\nCookie を確認する。',
+			'',
+			'## やること',
+			'- [ ] 修正する',
+			'',
+			'優先度: 最優先 / ラベル: bug, auth / 期限: 2026-10-20',
+			'',
+			'終わったら、変更した内容と残っている課題を短くまとめてください。',
+		].join('\n'));
+	});
+
+	it('skips empty sections', () => {
+		const prompt = buildKanbanCloudPrompt(task({ id: 'y', columnId: 'todo', title: 'Write docs' }));
+		expect(prompt).toBe([
+			'カンバンのタスクを実行してください。',
+			'',
+			'# Write docs',
+			'',
+			'終わったら、変更した内容と残っている課題を短くまとめてください。',
+		].join('\n'));
+		expect(buildKanbanCloudPrompt(task({ id: 'z', columnId: 'todo', title: '  ' }))).toContain('# (無題のタスク)');
+	});
+
+	it('makes a one-line title of at most 80 characters and a comment', () => {
+		expect(kanbanCloudTitle(task({ id: 'a', columnId: 'todo', title: 'Fix\n  login' }))).toBe('Fix login');
+		expect(kanbanCloudTitle(task({ id: 'b', columnId: 'todo', title: '' }))).toBe('カンバンのタスク');
+		const long = kanbanCloudTitle(task({ id: 'c', columnId: 'todo', title: 'あ'.repeat(100) }));
+		expect(long).toHaveLength(80);
+		expect(long.endsWith('…')).toBe(true);
+		expect(kanbanCloudComment('Fix login')).toBe('クラウドエージェントで実行を開始しました: Fix login');
 	});
 });

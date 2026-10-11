@@ -9,6 +9,7 @@ import {
 	estimateInputTokens,
 	formatTokens,
 	formatUsd,
+	formatUsdCompact,
 	isInputTokensValid,
 	quoteTotalUsd,
 	quoteViolations,
@@ -161,5 +162,17 @@ describe('表示の整形', () => {
 
 	it('トークン数は桁区切り', () => {
 		expect(formatTokens(1234567)).toBe('1,234,567');
+	});
+});
+
+describe('formatUsdCompact', () => {
+	it('uses 2 digits from one cent and 4 digits below it', () => {
+		expect(formatUsdCompact(0.1234)).toBe('$0.12');
+		expect(formatUsdCompact(12.5)).toBe('$12.50');
+		expect(formatUsdCompact(0.01)).toBe('$0.01');
+		expect(formatUsdCompact(0.0042)).toBe('$0.0042');
+		expect(formatUsdCompact(0)).toBe('$0.00');
+		expect(formatUsdCompact(0.00001)).toBe('<$0.0001');
+		expect(formatUsdCompact(Number.NaN)).toBe('—');
 	});
 });

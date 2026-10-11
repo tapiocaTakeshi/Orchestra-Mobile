@@ -9,6 +9,10 @@
  *   - 新規      … 指示・並列数 (1〜10)・出どころ (Git リポジトリ / 空のフォルダ)・モデル。
  *                 リポジトリは GitHub と連携していれば一覧から選べる (非公開も可)。URL の直接入力も残してある
  *   - 詳細      … ログ (指示・返答・ツール実行・状態) を 2 秒ごとに差分取得、変更ファイルと差分 (読むだけ)
+ *   - 上の段    … 「プロジェクト」「コスト」「カンバン」へのショートカット (デスクトップと同じくクラウドから辿れる)。
+ *                 カンバンと Division のプロジェクトは PC 接続が必要なので、未接続なら押せない
+ *   - プロジェクト … 新規のシートで Division のプロジェクトを選ぶと、そのプロジェクトのコーダーのモデルで動く
+ *   - 料金      … 各セッションの料金 (costUsd) と、一覧の合計
  *
  * 変更を手元のワークスペースに取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
  * Division API 直結なので、PC に接続していなくても使える。
@@ -56,6 +60,7 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { CloudProjectPicker, CloudProjects, useCloudProjects } from '../components/CloudProjectPicker';
 import {
 	CloudChange,
 	CloudChanges,
@@ -88,6 +93,7 @@ import {
 	sendCloudMessage,
 	splitPatch,
 	stopCloudSession,
+	sumCloudCosts,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -95,7 +101,10 @@ import {
 } from '../lib/divisionCloud';
 import { DivisionSession } from '../lib/divisionAuth';
 import { GitHubRepo } from '../lib/divisionGitHub';
+import { CloudProjectOption, projectLabel } from '../lib/divisionProjects';
 import { durationText, relativeTimeFromIso } from '../lib/format';
+import { formatUsdCompact } from '../lib/tuning';
+import { OpenPage, PageKey, canOpenPage } from '../navigation';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import {
 	GitHubAccountRow,
@@ -104,6 +113,7 @@ import {
 	GitHubRepoSelection,
 	useGitHubConnection,
 } from '../components/GitHubRepoPicker';
+import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { clearLastCloudRepo, loadLastCloudRepo, saveLastCloudRepo } from '../state/cloudStorage';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
@@ -139,11 +149,54 @@ const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
 );
 
 // ---------------------------------------------------------------------------
+// ショートカット (プロジェクト / コスト / カンバン)
+// ---------------------------------------------------------------------------
+
+type Shortcut = { page: PageKey; label: string; icon: IconName; detail: string | null };
+
+const ShortcutRow = ({ items, connected, onOpen }: {
+	items: Shortcut[];
+	connected: boolean;
+	onOpen: (page: PageKey) => void;
+}) => {
+	const toast = useToast();
+	const locked = items.filter(item => !canOpenPage(item.page, connected));
+	return (
+		<View style={styles.shortcuts}>
+			<View style={styles.shortcutRow}>
+				{items.map(item => {
+					const enabled = canOpenPage(item.page, connected);
+					return (
+						<Pressable
+							key={item.page}
+							accessibilityRole='button'
+							accessibilityState={{ disabled: !enabled }}
+							accessibilityLabel={enabled ? `${item.label}を開く` : `${item.label}。PC に接続すると使えます`}
+							onPress={() => (enabled ? onOpen(item.page) : toast.show('PC に接続すると使えます', 'info'))}
+							style={({ pressed }) => [styles.shortcut, !enabled && styles.shortcutDisabled, pressed && enabled && styles.rowPressed]}
+						>
+							<Icon name={enabled ? item.icon : 'lock'} size={18} color={enabled ? colors.fg : colors.fgFaint} />
+							<Text style={[styles.shortcutLabel, !enabled && { color: colors.fgFaint }]} numberOfLines={1}>{item.label}</Text>
+							<Text style={styles.shortcutDetail} numberOfLines={1}>{enabled ? item.detail ?? ' ' : 'PC 接続が必要'}</Text>
+						</Pressable>
+					);
+				})}
+			</View>
+			{locked.length > 0 ? (
+				<Muted>{locked.map(item => item.label).join('と')}は PC に接続すると使えます。</Muted>
+			) : null}
+		</View>
+	);
+};
+
+// ---------------------------------------------------------------------------
 // 一覧の行
 // ---------------------------------------------------------------------------
 
-const SessionRow = ({ item, onPress, onStop, stopping }: {
+const SessionRow = ({ item, projectName, onPress, onStop, stopping }: {
 	item: CloudSession;
+	/** プロジェクトを指定して起動したセッションなら、その名前 */
+	projectName: string | null;
 	onPress: () => void;
 	onStop: () => void;
 	stopping: boolean;
@@ -153,6 +206,7 @@ const SessionRow = ({ item, onPress, onStop, stopping }: {
 		cloudStatusLabel(item.status),
 		relativeTimeFromIso(item.updatedAt),
 		item.changedFiles > 0 ? `${item.changedFiles} ファイル変更` : null,
+		typeof item.costUsd === 'number' ? formatUsdCompact(item.costUsd) : null,
 	].filter(Boolean).join(' · ');
 	return (
 		<Pressable
@@ -168,6 +222,7 @@ const SessionRow = ({ item, onPress, onStop, stopping }: {
 				<Row style={styles.rowBadges}>
 					<Badge label={cloudModelLabel(item)} icon='cpu' />
 					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
+					{projectName ? <Badge label={projectName} icon='layers' /> : null}
 				</Row>
 			</View>
 			{isActive(item.status)
@@ -195,6 +250,8 @@ type Draft = {
 	branch: string;
 	model: string;
 	title: string;
+	/** Division のプロジェクト ID (空なら指定なし) */
+	projectId: string;
 	showAdvanced: boolean;
 };
 
@@ -209,6 +266,7 @@ const EMPTY_DRAFT: Draft = {
 	branch: '',
 	model: '',
 	title: '',
+	projectId: '',
 	showAdvanced: false,
 };
 
@@ -246,8 +304,9 @@ const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
 	return { url: draft.repoUrl, branch: draft.branch.trim() || undefined };
 };
 
-const NewSessionSheet = ({ auth, draft, onChange, onClose, onLaunch }: {
+const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }: {
 	auth: DivisionSession;
+	projects: CloudProjects;
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
 	onClose: () => void;
@@ -405,6 +464,11 @@ const NewSessionSheet = ({ auth, draft, onChange, onClose, onLaunch }: {
 					{draft.source === 'empty' ? (
 						<Muted>何も無いフォルダから始めます。新しく作らせたいときに使います。</Muted>
 					) : null}
+				</View>
+
+				<View style={styles.field}>
+					<SectionTitle>プロジェクト</SectionTitle>
+					<CloudProjectPicker projects={projects} value={draft.projectId} onChange={value => set('projectId', value)} />
 				</View>
 
 				<Pressable
@@ -665,11 +729,13 @@ const ChangesView = ({ data, loading, error, onReload }: {
 // 詳細
 // ---------------------------------------------------------------------------
 
-const sessionKey = (s: CloudSession): string => `${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}`;
+const sessionKey = (s: CloudSession): string => `${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}`;
 
-const SessionDetail = ({ auth, initial, foreground, onSessionChange, onArchived }: {
+const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, onArchived }: {
 	auth: DivisionSession;
 	initial: CloudSession;
+	/** プロジェクト名の引き当てに使う一覧 */
+	projects: CloudProjectOption[];
 	foreground: boolean;
 	onSessionChange: (next: CloudSession) => void;
 	onArchived: (id: string) => void;
@@ -829,6 +895,10 @@ const SessionDetail = ({ auth, initial, foreground, onSessionChange, onArchived 
 					</View>
 					<Badge label={cloudModelLabel(current)} icon='cpu' />
 					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
+					{current.projectId ? <Badge label={projectLabel(projects, current.projectId) ?? ''} icon='layers' /> : null}
+					{typeof current.costUsd === 'number' ? (
+						<Badge label={formatUsdCompact(current.costUsd)} icon='dollar-sign' color={colors.fgMuted} />
+					) : null}
 				</Row>
 				{current.status === 'failed' && current.errorMsg ? (
 					<Text selectable style={styles.errorText} numberOfLines={4}>{current.errorMsg}</Text>
@@ -909,16 +979,24 @@ const SessionDetail = ({ auth, initial, foreground, onSessionChange, onArchived 
 // ページ本体
 // ---------------------------------------------------------------------------
 
-export const CloudAgentsScreen = () => {
+export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
+	/** 「プロジェクト」「コスト」「カンバン」を開く (App のページの重なりに積む) */
+	onOpenPage?: OpenPage;
+	/** 開いたらすぐ詳細を出すセッション (カンバンの「クラウドで開く」から) */
+	initialSessionId?: string | null;
+} = {}) => {
 	const { session } = useDivisionAuth();
+	const { connection, snapshot } = useApp();
 	const toast = useToast();
 	const foreground = useForeground();
+	const connected = !!connection;
+	const projects = useCloudProjects(session);
 
 	const [sessions, setSessions] = useState<CloudSession[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [refreshing, setRefreshing] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [selectedId, setSelectedId] = useState<string | null>(null);
+	const [selectedId, setSelectedId] = useState<string | null>(initialSessionId ?? null);
 	const [showNew, setShowNew] = useState(false);
 	const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
 	const [launching, setLaunching] = useState(0);
@@ -933,13 +1011,16 @@ export const CloudAgentsScreen = () => {
 	useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 	useEffect(() => { launchingRef.current = launching; }, [launching]);
 
-	// アカウントが替わったら前のアカウントの一覧を持ち越さない。
+	// アカウントが替わったら前のアカウントの一覧を持ち越さない (開いた直後は何もしない)。
+	const lastUserId = useRef(session?.userId);
 	useEffect(() => {
+		if (lastUserId.current === session?.userId) return;
+		lastUserId.current = session?.userId;
 		previousStatus.current = null;
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '' }));
+		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '' }));
 	}, [session?.userId]);
 
 	const loadList = useCallback(async () => {
@@ -980,12 +1061,6 @@ export const CloudAgentsScreen = () => {
 		return () => { cancelled = true; if (timer) clearTimeout(timer); };
 	}, [session, foreground, loadList]);
 
-	// 詳細を開いているあいだは、Android の戻るキーで一覧に戻る。
-	useEffect(() => {
-		if (!selectedId) return;
-		const sub = BackHandler.addEventListener('hardwareBackPress', () => { setSelectedId(null); return true; });
-		return () => sub.remove();
-	}, [selectedId]);
 
 	const onPull = useCallback(async () => {
 		setRefreshing(true);
@@ -1031,6 +1106,7 @@ export const CloudAgentsScreen = () => {
 				repo,
 				model: draft.model || undefined,
 				title: draft.title || undefined,
+				projectId: draft.projectId || undefined,
 			});
 			const failed = results.filter(r => r.error);
 			const succeeded = results.length - failed.length;
@@ -1056,7 +1132,33 @@ export const CloudAgentsScreen = () => {
 	useEffect(() => {
 		if (selectedId && !selected && !loading) setSelectedId(null);
 	}, [selectedId, selected, loading]);
+	// 詳細を開いているあいだは、Android の戻るキーで一覧に戻る。
+	// 詳細が実際に出てから登録する (カンバンから開いたとき、App 側の戻るキーより後に登録されて先に呼ばれるように)。
+	const detailOpen = !!(selectedId && selected);
+	useEffect(() => {
+		if (!detailOpen) return;
+		const sub = BackHandler.addEventListener('hardwareBackPress', () => { setSelectedId(null); return true; });
+		return () => sub.remove();
+	}, [detailOpen]);
 	const activeCount = useMemo(() => sessions.filter(s => isActive(s.status)).length, [sessions]);
+	const cost = useMemo(() => sumCloudCosts(sessions), [sessions]);
+	// 一覧の行には、名前が分かるときだけプロジェクトを出す (詳細では ID の先頭でも出す)
+	const projectNameOf = useCallback(
+		(s: CloudSession) => (s.projectId ? projects.projects.find(p => p.id === s.projectId)?.name ?? null : null),
+		[projects.projects],
+	);
+
+	const kanbanTasks = snapshot?.kanban?.board.tasks.length;
+	const shortcuts: Shortcut[] = [
+		{
+			page: 'projects',
+			label: 'プロジェクト',
+			icon: 'layers',
+			detail: projects.source === 'pc' && projects.projects.length > 0 ? `${projects.projects.length} 件` : 'Division',
+		},
+		{ page: 'tuning', label: 'コスト', icon: 'bar-chart-2', detail: cost.known > 0 ? `${formatUsdCompact(cost.totalUsd)}` : '料金と残高' },
+		{ page: 'kanban', label: 'カンバン', icon: 'columns', detail: typeof kanbanTasks === 'number' ? `${kanbanTasks} タスク` : null },
+	];
 
 	if (!session) {
 		return (
@@ -1079,6 +1181,7 @@ export const CloudAgentsScreen = () => {
 						key={selected.id}
 						auth={session}
 						initial={selected}
+						projects={projects.projects}
 						foreground={foreground}
 						onSessionChange={patchSession}
 						onArchived={onArchived}
@@ -1102,6 +1205,8 @@ export const CloudAgentsScreen = () => {
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onPull()} tintColor={colors.fgMuted} />}
 			>
+				{onOpenPage ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
+
 				{launching > 0 ? (
 					<View style={styles.launching} accessibilityLiveRegion='polite'>
 						<ActivityIndicator size='small' color={colors.running} />
@@ -1128,12 +1233,30 @@ export const CloudAgentsScreen = () => {
 								<Muted>{sessions.length} 件{activeCount > 0 ? ` · ${activeCount} 件が動いています` : ''}</Muted>
 								<Button title='新しいセッション' icon='plus' variant='secondary' size='sm' onPress={() => setShowNew(true)} />
 							</Row>
+							{cost.known > 0 ? (
+								<Pressable
+									accessibilityRole='button'
+									accessibilityLabel={`表示中のセッションの料金 合計 ${formatUsdCompact(cost.totalUsd)}${onOpenPage ? '。コストを開く' : ''}`}
+									disabled={!onOpenPage}
+									onPress={() => onOpenPage?.('tuning')}
+									style={({ pressed }) => [styles.costRow, pressed && styles.rowPressed]}
+								>
+									<Icon name='dollar-sign' size={14} color={colors.fgMuted} />
+									<Text style={styles.costLabel}>
+										料金の合計{cost.unknown > 0 ? ` (${cost.known} 件分)` : ''}
+									</Text>
+									<Text style={styles.costValue}>{formatUsdCompact(cost.totalUsd)}</Text>
+									{onOpenPage ? <Text style={styles.linkText}>コスト</Text> : null}
+									{onOpenPage ? <Icon name='chevron-right' size={14} color={colors.accentText} /> : null}
+								</Pressable>
+							) : null}
 						</Card>
 						<View>
 							{sessions.map(item => (
 								<SessionRow
 									key={item.id}
 									item={item}
+									projectName={projectNameOf(item)}
 									stopping={stoppingId === item.id}
 									onPress={() => setSelectedId(item.id)}
 									onStop={() => void stopFromList(item)}
@@ -1150,6 +1273,7 @@ export const CloudAgentsScreen = () => {
 			{showNew ? (
 				<NewSessionSheet
 					auth={session}
+					projects={projects}
 					draft={draft}
 					onChange={setDraft}
 					onClose={() => setShowNew(false)}
@@ -1170,6 +1294,30 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.xl,
 	},
 	summaryCard: { paddingVertical: spacing.sm },
+	costRow: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		minHeight: 32,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: colors.border,
+		paddingTop: spacing.xs,
+	},
+	costLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
+	costValue: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '600', fontVariant: ['tabular-nums'] },
+	shortcuts: { gap: spacing.xs, marginTop: spacing.md },
+	shortcutRow: { flexDirection: 'row', gap: spacing.sm },
+	shortcut: {
+		flex: 1,
+		gap: 2,
+		minHeight: 72,
+		padding: spacing.sm + 2,
+		borderRadius: radius.md,
+		backgroundColor: colors.bgElevated,
+	},
+	shortcutDisabled: { opacity: 0.6 },
+	shortcutLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600', marginTop: spacing.xs },
+	shortcutDetail: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	footnote: { marginTop: spacing.lg },
 	launching: {
 		flexDirection: 'row',

@@ -136,3 +136,51 @@ export const labelColor = (label: string): string => {
 	for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) | 0;
 	return palette[Math.abs(hash) % palette.length];
 };
+
+// ---------------------------------------------------------------------------
+// クラウドエージェントで実行
+// ---------------------------------------------------------------------------
+
+/**
+ * タスクをクラウドエージェントに渡す指示文。題名・説明・未完了のチェックリスト・ラベル・優先度・期限を
+ * 短くまとめる (デスクトップのカンバン実行と同じく、終わったら何をしたかを要約させる)。
+ */
+export const buildKanbanCloudPrompt = (task: KanbanTask, boardTitle?: string): string => {
+	const lines: string[] = [];
+	lines.push(`カンバン${boardTitle?.trim() ? `「${boardTitle.trim()}」` : ''}のタスクを実行してください。`);
+	lines.push('');
+	lines.push(`# ${task.title.trim() || '(無題のタスク)'}`);
+	const description = task.description.trim();
+	if (description) {
+		lines.push('');
+		lines.push(description);
+	}
+	const todo = task.checklist.filter(item => !item.done && item.text.trim());
+	if (todo.length > 0) {
+		lines.push('');
+		lines.push('## やること');
+		for (const item of todo) lines.push(`- [ ] ${item.text.trim()}`);
+	}
+	const meta = [
+		task.priority !== 'normal' ? `優先度: ${priorityLabel(task.priority)}` : null,
+		task.labels.length > 0 ? `ラベル: ${task.labels.join(', ')}` : null,
+		task.dueDate ? `期限: ${task.dueDate}` : null,
+	].filter(Boolean);
+	if (meta.length > 0) {
+		lines.push('');
+		lines.push(meta.join(' / '));
+	}
+	lines.push('');
+	lines.push('終わったら、変更した内容と残っている課題を短くまとめてください。');
+	return lines.join('\n');
+};
+
+/** クラウドセッションの題名 (サーバーの上限に合わせて 80 文字まで)。 */
+export const kanbanCloudTitle = (task: KanbanTask): string => {
+	const title = task.title.replace(/\s+/g, ' ').trim() || 'カンバンのタスク';
+	return title.length > 80 ? `${title.slice(0, 79)}…` : title;
+};
+
+/** 起動したことをカードに残すコメント。 */
+export const kanbanCloudComment = (sessionTitle: string): string =>
+	`クラウドエージェントで実行を開始しました: ${sessionTitle}`;

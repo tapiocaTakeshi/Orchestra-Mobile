@@ -18,6 +18,9 @@ export const DIVISION_PROFILES_TABLE = 'profiles';
 /** クレジットの増減履歴。自分の行だけ読める。 */
 export const DIVISION_CREDIT_TRANSACTION_TABLE = 'credit_transactions';
 
+/** Division のプロジェクト (役割ごとのモデル割り当て)。持ち主 (ownerId / userId) の行だけ読める。 */
+export const DIVISION_PROJECT_TABLE = 'Project';
+
 /** 共有された役割割り当て (ソーシャル) のテーブル。 */
 export const DIVISION_ASSIGNMENT_POST_TABLE = 'AssignmentPost';
 export const DIVISION_ASSIGNMENT_POST_LIKE_TABLE = 'AssignmentPostLike';

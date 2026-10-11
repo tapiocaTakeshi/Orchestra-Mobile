@@ -4,7 +4,8 @@
  * 「チャットでどのモデルが選ばれるか」を、コストと性能の条件で調整する場所。
  *   - 方針      … 最低性能スコア / 1 回あたりの上限 / 出力トークンの上限
  *   - 見積もり  … 依頼文を Jev に判定させ、役割ごとの想定コストを出す
- *   - 利用履歴  … 実測のトークン数と料金 (日別・役割別・モデル別の集計つき)
+ *   - 利用履歴  … 実測のトークン数と料金 (日別・役割別・モデル別の集計つき)。
+ *                 クラウドエージェントのセッションごとの料金 (最近のもの) もここに出す
  *   - 管理      … プラン、クレジット残高、自動チャージ、支払い
  *
  * すべて Division (Supabase / Division API) 直結なので、PC に接続していなくても使える。
@@ -38,6 +39,7 @@ import {
 	Toggle,
 	useToast,
 } from '../components/ui';
+import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
 	CreditTransaction,
@@ -70,6 +72,7 @@ import {
 	estimateInputTokens,
 	formatTokens,
 	formatUsd,
+	formatUsdCompact,
 	formatUsdShort,
 	isInputTokensValid,
 	quoteTotalUsd,
@@ -78,6 +81,7 @@ import {
 	sumHistory,
 	validatePolicy,
 } from '../lib/tuning';
+import { OpenPage } from '../navigation';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { loadRoutingPolicy, saveRoutingPolicy } from '../state/tuningStorage';
 import { colors, fontSize, radius, spacing } from '../theme';
@@ -140,7 +144,53 @@ const GroupTable = ({ title, groups }: { title: string; groups: CostGroup[] }) =
 	</Card>
 );
 
-export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {}) => {
+/** 利用履歴に出すクラウドエージェントのセッション数 (一覧 API から取る件数)。 */
+const CLOUD_COST_LIMIT = 20;
+
+/** 「利用履歴」のクラウドエージェントの欄。最近のセッションの料金だけを軽く出す。 */
+const CloudCostCard = ({ sessions, loading, error, onReload, onOpenCloud }: {
+	sessions: CloudSession[] | null;
+	loading: boolean;
+	error: string | null;
+	onReload: () => void;
+	onOpenCloud?: () => void;
+}) => {
+	const total = useMemo(() => sumCloudCosts(sessions ?? []), [sessions]);
+	const recent = useMemo(() => recentCostedSessions(sessions ?? [], 5), [sessions]);
+	return (
+		<Card>
+			<Row style={styles.spread}>
+				<SectionTitle>クラウドエージェント</SectionTitle>
+				<Button title='更新' icon='refresh-cw' variant='ghost' size='sm' loading={loading && sessions !== null} onPress={onReload} />
+			</Row>
+			{loading && sessions === null ? <Loading label='セッションを読み込んでいます…' /> : null}
+			{error ? <Muted>取得できませんでした: {error}</Muted> : null}
+			{sessions !== null && total.known === 0 && !error ? (
+				<Muted>{sessions.length === 0 ? 'クラウドのセッションはまだありません。' : '料金の分かるセッションはまだありません。'}</Muted>
+			) : null}
+			{total.known > 0 ? (
+				<>
+					<Row style={styles.spread}>
+						<Muted>最近の {total.known} セッション</Muted>
+						<Text style={styles.amountLarge}>{formatUsdCompact(total.totalUsd)}</Text>
+					</Row>
+					{recent.map(item => (
+						<Row key={item.id} style={styles.spread}>
+							<View style={styles.flex}>
+								<Body numberOfLines={1}>{item.title}</Body>
+								<Muted numberOfLines={1}>{item.modelLabel || item.model || '既定のモデル'} · {relativeTimeFromIso(item.updatedAt)}</Muted>
+							</View>
+							<Text style={styles.amount}>{formatUsdCompact(item.costUsd ?? 0)}</Text>
+						</Row>
+					))}
+				</>
+			) : null}
+			{onOpenCloud ? <Button title='クラウドを開く' icon='cloud' variant='secondary' size='sm' onPress={onOpenCloud} style={styles.alignStart} /> : null}
+		</Card>
+	);
+};
+
+export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: string; onOpenPage?: OpenPage } = {}) => {
 	const { session } = useDivisionAuth();
 	const toast = useToast();
 	// チャットの入力欄から開いたときはシートの中に出すので、見出しはシート側に任せる。
@@ -180,6 +230,11 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 	const [historyLoading, setHistoryLoading] = useState(false);
 	const [historyLoaded, setHistoryLoaded] = useState(false);
 	const [breakdown, setBreakdown] = useState<'day' | 'role' | 'model'>('day');
+
+	// --- クラウドエージェント ---
+	const [cloudSessions, setCloudSessions] = useState<CloudSession[] | null>(null);
+	const [cloudLoading, setCloudLoading] = useState(false);
+	const [cloudError, setCloudError] = useState<string | null>(null);
 
 	const parsedDraft = useMemo<RoutingPolicy>(() => ({
 		minPerformance: Number(draft.minPerformance),
@@ -254,15 +309,33 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 		if (section === 'history' && hasOAuthSession && !historyLoaded && !historyLoading) void loadHistory();
 	}, [section, hasOAuthSession, historyLoaded, historyLoading, loadHistory]);
 
+	const loadCloudCosts = useCallback(async () => {
+		if (!session) return;
+		setCloudLoading(true);
+		setCloudError(null);
+		try {
+			setCloudSessions(await listCloudSessions(session, CLOUD_COST_LIMIT));
+		} catch (e) {
+			setCloudError(cloudErrorText(e));
+		} finally {
+			setCloudLoading(false);
+		}
+	}, [session]);
+
+	// クラウドの料金も「利用履歴」を開いたときに 1 回だけ取る (チャットのシートの中では出さない)。
+	useEffect(() => {
+		if (section === 'history' && !embedded && hasOAuthSession && cloudSessions === null && !cloudLoading && !cloudError) void loadCloudCosts();
+	}, [section, embedded, hasOAuthSession, cloudSessions, cloudLoading, cloudError, loadCloudCosts]);
+
 	const refresh = useCallback(async () => {
 		setRefreshing(true);
 		try {
 			await loadAccount();
-			if (section === 'history' && hasOAuthSession) await loadHistory();
+			if (section === 'history' && hasOAuthSession) await Promise.all([loadHistory(), embedded ? null : loadCloudCosts()]);
 		} finally {
 			setRefreshing(false);
 		}
-	}, [loadAccount, loadHistory, section, hasOAuthSession]);
+	}, [loadAccount, loadHistory, loadCloudCosts, section, hasOAuthSession, embedded]);
 
 	// --- 操作 ---
 
@@ -556,6 +629,16 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 							) : null}
 						</Card>
 
+						{embedded ? null : (
+							<CloudCostCard
+								sessions={cloudSessions}
+								loading={cloudLoading}
+								error={cloudError}
+								onReload={() => void loadCloudCosts()}
+								onOpenCloud={onOpenPage ? () => onOpenPage('cloud') : undefined}
+							/>
+						)}
+
 						{history.length > 0 ? (
 							<>
 								<SegmentedControl<'day' | 'role' | 'model'>
@@ -751,6 +834,7 @@ export const TuningScreen = ({ composerPrompt }: { composerPrompt?: string } = {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
+	alignStart: { alignSelf: 'flex-start' },
 	toolbar: {
 		paddingHorizontal: spacing.lg,
 		paddingVertical: spacing.md,
