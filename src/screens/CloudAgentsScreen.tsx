@@ -6,7 +6,8 @@
  * 同じアカウントなら一覧に出るので、外出先から様子を見て続きを指示できる。
  *
  *   - 一覧      … 状態・題名・変更ファイル数・モデル・出どころ。動いているものがあれば 4 秒、無ければ 20 秒ごとに更新
- *   - 新規      … 指示・並列数 (1〜10)・出どころ (公開 Git リポジトリ / 空のフォルダ)・モデル
+ *   - 新規      … 指示・並列数 (1〜10)・出どころ (Git リポジトリ / 空のフォルダ)・モデル。
+ *                 リポジトリは GitHub と連携していれば一覧から選べる (非公開も可)。URL の直接入力も残してある
  *   - 詳細      … ログ (指示・返答・ツール実行・状態) を 2 秒ごとに差分取得、変更ファイルと差分 (読むだけ)
  *
  * 変更を手元のワークスペースに取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -58,6 +59,7 @@ import {
 import {
 	CloudChange,
 	CloudChanges,
+	CloudRepo,
 	CloudSession,
 	CloudSessionEvent,
 	CloudSessionStatus,
@@ -76,6 +78,7 @@ import {
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	isFullNameRepo,
 	lastSeqOf,
 	launchSessions,
 	listCloudSessions,
@@ -91,9 +94,18 @@ import {
 	validateRepoUrl,
 } from '../lib/divisionCloud';
 import { DivisionSession } from '../lib/divisionAuth';
+import { GitHubRepo } from '../lib/divisionGitHub';
 import { durationText, relativeTimeFromIso } from '../lib/format';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
+import {
+	GitHubAccountRow,
+	GitHubConnectPanel,
+	GitHubRepoPicker,
+	GitHubRepoSelection,
+	useGitHubConnection,
+} from '../components/GitHubRepoPicker';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
+import { clearLastCloudRepo, loadLastCloudRepo, saveLastCloudRepo } from '../state/cloudStorage';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 /** 開いているセッションのイベントを取りに行く間隔。 */
@@ -173,6 +185,12 @@ type Draft = {
 	prompt: string;
 	count: string;
 	source: 'repo' | 'empty';
+	/** GitHub 連携で選んだリポジトリ (未選択なら null) */
+	repo: GitHubRepo | null;
+	/** 選んだリポジトリのブランチ (空なら既定のブランチ) */
+	repoBranch: string;
+	/** 「URL を直接入力」を開いているか (GitHub 連携が使えないときは常に直接入力) */
+	manualUrl: boolean;
 	repoUrl: string;
 	branch: string;
 	model: string;
@@ -184,6 +202,9 @@ const EMPTY_DRAFT: Draft = {
 	prompt: '',
 	count: '1',
 	source: 'repo',
+	repo: null,
+	repoBranch: '',
+	manualUrl: false,
 	repoUrl: '',
 	branch: '',
 	model: '',
@@ -198,21 +219,79 @@ const SOURCE_OPTIONS: { value: Draft['source']; label: string }[] = [
 	{ value: 'empty', label: '空のフォルダ' },
 ];
 
-const draftIssues = (draft: Draft): { repoUrl: string | null; branch: string | null; ok: boolean } => {
-	const repoUrl = draft.source === 'repo' ? validateRepoUrl(draft.repoUrl) : null;
-	const branch = draft.source === 'repo' ? validateBranch(draft.branch) : null;
-	return { repoUrl, branch, ok: !!draft.prompt.trim() && !repoUrl && !branch };
+/**
+ * リポジトリの決め方。
+ *   picker  … GitHub の一覧から選ぶ (連携済みならリスト、未連携なら「GitHub と連携」)
+ *   manual  … URL を直接入力 (自分で開いたか、サーバーに GitHub 連携が無いか、状態を取れなかった)
+ *   loading … 連携の状態を確認中
+ */
+type RepoMode = 'picker' | 'manual' | 'loading';
+
+const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUrl: string | null; branch: string | null; ok: boolean } => {
+	const prompt = !!draft.prompt.trim();
+	if (draft.source !== 'repo') return { repoUrl: null, branch: null, ok: prompt };
+	if (mode === 'manual') {
+		const repoUrl = validateRepoUrl(draft.repoUrl);
+		const branch = validateBranch(draft.branch);
+		return { repoUrl, branch, ok: prompt && !repoUrl && !branch };
+	}
+	const branch = validateBranch(draft.repoBranch);
+	return { repoUrl: null, branch, ok: prompt && mode === 'picker' && connected && !!draft.repo && !branch };
 };
 
-const NewSessionSheet = ({ draft, onChange, onClose, onLaunch }: {
+/** 起動に使うリポジトリ。一覧から選んでいれば { fullName }、直接入力なら { url }。 */
+const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
+	if (draft.source !== 'repo') return undefined;
+	if (mode === 'picker' && draft.repo) return { fullName: draft.repo.fullName, branch: draft.repoBranch.trim() || undefined };
+	return { url: draft.repoUrl, branch: draft.branch.trim() || undefined };
+};
+
+const NewSessionSheet = ({ auth, draft, onChange, onClose, onLaunch }: {
+	auth: DivisionSession;
 	draft: Draft;
-	onChange: (next: Draft) => void;
+	onChange: React.Dispatch<React.SetStateAction<Draft>>;
 	onClose: () => void;
-	onLaunch: () => void;
+	onLaunch: (repo: CloudRepo | undefined) => void;
 }) => {
-	const issues = draftIssues(draft);
-	const set = <K extends keyof Draft>(key: K, value: Draft[K]) => onChange({ ...draft, [key]: value });
+	const github = useGitHubConnection(auth);
+	const status = github.status;
+	const configured = !!status?.configured;
+	const connected = !!status?.connected;
+	const mode: RepoMode = draft.manualUrl || (status && !configured) || (!status && github.error)
+		? 'manual'
+		: status ? 'picker' : 'loading';
+	const issues = draftIssues(draft, mode, connected);
+	const set = <K extends keyof Draft>(key: K, value: Draft[K]) => onChange(d => ({ ...d, [key]: value }));
 	const count = Number(draft.count);
+
+	// 連携済みなら、前回選んだリポジトリとブランチを選んだ状態にする (シートを開くたびに 1 回だけ)。
+	const preselectTried = useRef(false);
+	useEffect(() => {
+		if (!connected || draft.repo || preselectTried.current) return;
+		preselectTried.current = true;
+		void loadLastCloudRepo(auth.userId).then(last => {
+			if (last) onChange(d => (d.repo ? d : { ...d, repo: last.repo, repoBranch: last.branch }));
+		});
+	}, [connected, draft.repo, auth.userId, onChange]);
+
+	const markDisconnected = github.markDisconnected;
+	const onNotConnected = useCallback(() => {
+		markDisconnected();
+		onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+	}, [markDisconnected, onChange]);
+
+	const disconnect = async () => {
+		if (await github.disconnect()) {
+			onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+			void clearLastCloudRepo();
+		}
+	};
+
+	const selectRepo = useCallback((repo: GitHubRepo) => {
+		onChange(d => ({ ...d, repo, repoBranch: d.repo?.fullName === repo.fullName ? d.repoBranch : '' }));
+	}, [onChange]);
+	const setRepoBranch = useCallback((value: string) => onChange(d => ({ ...d, repoBranch: value })), [onChange]);
+
 	return (
 		<Sheet title='新しいセッション' eyebrow='クラウドエージェント' onClose={onClose}>
 			<ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps='handled'>
@@ -237,7 +316,48 @@ const NewSessionSheet = ({ draft, onChange, onClose, onLaunch }: {
 				<View style={styles.field}>
 					<SectionTitle>始める場所</SectionTitle>
 					<SegmentedControl options={SOURCE_OPTIONS} value={draft.source} onChange={value => set('source', value)} />
-					{draft.source === 'repo' ? (
+					{draft.source === 'repo' && mode === 'loading' ? (
+						<View style={styles.githubChecking}>
+							<ActivityIndicator size='small' color={colors.fgMuted} />
+							<Muted>GitHub の連携を確認しています…</Muted>
+						</View>
+					) : null}
+					{draft.source === 'repo' && github.error ? (
+						<ErrorBanner
+							tone='warning'
+							message={status ? github.error : `GitHub の連携状態を確認できませんでした: ${github.error}`}
+							onRetry={status ? undefined : () => void github.refresh()}
+							style={styles.inlineBanner}
+						/>
+					) : null}
+					{draft.source === 'repo' && mode === 'picker' && status ? (
+						connected ? (
+							<>
+								<GitHubAccountRow status={status} disconnecting={github.disconnecting} onDisconnect={() => void disconnect()} />
+								{draft.repo ? (
+									<GitHubRepoSelection
+										auth={auth}
+										repo={draft.repo}
+										branch={draft.repoBranch}
+										onBranch={setRepoBranch}
+										onChange={() => onChange(d => ({ ...d, repo: null, repoBranch: '' }))}
+										onNotConnected={onNotConnected}
+									/>
+								) : (
+									<GitHubRepoPicker auth={auth} onSelect={selectRepo} onNotConnected={onNotConnected} />
+								)}
+								<Muted>非公開のリポジトリも、連携したアカウントの権限でサーバーが clone します。</Muted>
+							</>
+						) : (
+							<GitHubConnectPanel
+								starting={github.starting}
+								waiting={github.waiting}
+								onConnect={() => void github.connect()}
+								onCancel={github.cancelConnect}
+							/>
+						)
+					) : null}
+					{draft.source === 'repo' && mode === 'manual' ? (
 						<>
 							<Input
 								value={draft.repoUrl}
@@ -260,11 +380,31 @@ const NewSessionSheet = ({ draft, onChange, onClose, onLaunch }: {
 								style={issues.branch ? styles.inputInvalid : undefined}
 							/>
 							{issues.branch ? <Text style={styles.invalidText}>{issues.branch}</Text> : null}
-							<Muted>公開リポジトリだけ clone できます (URL に認証情報は入れられません)。</Muted>
+							<Muted>
+								{connected
+									? 'github.com の URL は連携したアカウントの権限で clone します。それ以外は公開リポジトリのみです (URL に認証情報は入れられません)。'
+									: '公開リポジトリだけ clone できます (URL に認証情報は入れられません)。'}
+							</Muted>
+							{status && !configured ? (
+								<Muted>サーバー側で GitHub 連携が未設定のため、リポジトリを一覧から選べません (管理者が GitHub OAuth アプリを設定すると使えます)。</Muted>
+							) : null}
 						</>
-					) : (
+					) : null}
+					{draft.source === 'repo' && mode !== 'manual' ? (
+						<Pressable accessibilityRole='button' onPress={() => set('manualUrl', true)} style={styles.linkButton}>
+							<Icon name='link' size={14} color={colors.accentText} />
+							<Text style={styles.linkText}>URL を直接入力</Text>
+						</Pressable>
+					) : null}
+					{draft.source === 'repo' && mode === 'manual' && draft.manualUrl && configured ? (
+						<Pressable accessibilityRole='button' onPress={() => set('manualUrl', false)} style={styles.linkButton}>
+							<Icon name='github' size={14} color={colors.accentText} />
+							<Text style={styles.linkText}>GitHub のリポジトリから選ぶ</Text>
+						</Pressable>
+					) : null}
+					{draft.source === 'empty' ? (
 						<Muted>何も無いフォルダから始めます。新しく作らせたいときに使います。</Muted>
-					)}
+					) : null}
 				</View>
 
 				<Pressable
@@ -300,7 +440,7 @@ const NewSessionSheet = ({ draft, onChange, onClose, onLaunch }: {
 					title={count > 1 ? `${count} 個のセッションを起動` : 'セッションを起動'}
 					icon='play'
 					disabled={!issues.ok}
-					onPress={onLaunch}
+					onPress={() => onLaunch(draftRepo(draft, mode))}
 				/>
 			</ScrollView>
 		</Sheet>
@@ -799,6 +939,7 @@ export const CloudAgentsScreen = () => {
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
+		setDraft(d => ({ ...d, repo: null, repoBranch: '' }));
 	}, [session?.userId]);
 
 	const loadList = useCallback(async () => {
@@ -873,17 +1014,21 @@ export const CloudAgentsScreen = () => {
 		}
 	}, [session, patchSession, toast]);
 
-	const launch = useCallback(async () => {
+	const launch = useCallback(async (repo: CloudRepo | undefined) => {
 		if (!session) return;
 		const count = Number(draft.count);
 		setShowNew(false);
 		setLaunchError(null);
 		setLaunching(n => n + count);
+		// 次に開いたとき同じリポジトリを選んだ状態にする
+		if (repo && isFullNameRepo(repo) && draft.repo) {
+			void saveLastCloudRepo(session.userId, { repo: draft.repo, branch: repo.branch ?? '' });
+		}
 		try {
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
 				count,
-				repo: draft.source === 'repo' ? { url: draft.repoUrl, branch: draft.branch || undefined } : undefined,
+				repo,
 				model: draft.model || undefined,
 				title: draft.title || undefined,
 			});
@@ -1004,10 +1149,11 @@ export const CloudAgentsScreen = () => {
 
 			{showNew ? (
 				<NewSessionSheet
+					auth={session}
 					draft={draft}
 					onChange={setDraft}
 					onClose={() => setShowNew(false)}
-					onLaunch={() => void launch()}
+					onLaunch={repo => void launch(repo)}
 				/>
 			) : null}
 		</Screen>
@@ -1054,6 +1200,9 @@ const styles = StyleSheet.create({
 	promptInput: { minHeight: 120 },
 	inputInvalid: { borderColor: colors.danger },
 	invalidText: { color: colors.danger, fontSize: fontSize.xs },
+	githubChecking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 36 },
+	linkButton: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: spacing.xs, minHeight: 32 },
+	linkText: { color: colors.accentText, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	advancedToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 36 },
 	advancedText: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	detailMeta: {
