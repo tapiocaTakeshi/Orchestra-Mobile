@@ -35,6 +35,7 @@ import {
 	mergeEvents,
 	repoFolderName,
 	repoLabel,
+	repoNameOf,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
@@ -43,6 +44,7 @@ import {
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
+	validateRepoFullName,
 	validateRepoUrl,
 } from '../divisionCloud';
 
@@ -425,6 +427,31 @@ describe('repo validation', () => {
 	});
 });
 
+describe('GitHub repo names', () => {
+	it('validates owner/name', () => {
+		expect(validateRepoFullName('octo/app')).toBeNull();
+		expect(validateRepoFullName(' my-org/my.repo_2 ')).toBeNull();
+		expect(validateRepoFullName('')).toContain('選んで');
+		expect(validateRepoFullName('octo')).not.toBeNull();
+		expect(validateRepoFullName('a/b/c')).not.toBeNull();
+		expect(validateRepoFullName('../x')).not.toBeNull();
+		expect(validateRepoFullName('o/..')).not.toBeNull();
+		expect(validateRepoFullName('o/r;rm')).not.toBeNull();
+		expect(validateRepoFullName('https://github.com/o/r')).not.toBeNull();
+	});
+
+	it('takes the repo name for the workspace folder', () => {
+		expect(repoNameOf('octo/app')).toBe('app');
+		expect(repoNameOf('bad')).toBe('');
+	});
+
+	it('maps the start body for a picked repo', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession() } }));
+		await startCloudSession(auth, 's1', { repo: { fullName: ' octo/app ', branch: 'main' } });
+		expect(bodyOf(calls[0])).toEqual({ repo: { fullName: 'octo/app', branch: 'main' } });
+	});
+});
+
 describe('launchSessions', () => {
 	it('suffixes titles only when launching more than one', () => {
 		expect(launchTitles({ prompt: 'Fix it\nmore', count: 1 })).toEqual([undefined]);
@@ -502,8 +529,42 @@ describe('launchSessions', () => {
 		expect(results[2].session?.id).toBe('bad');
 	});
 
+	it('starts from a GitHub repo picked by fullName (private repos are cloned with the user token)', async () => {
+		mockFetch(url => (url === BASE
+			? { status: 201, body: { session: rawSession({ id: 'g1', status: 'uploading' }) } }
+			: { status: 200, body: { session: rawSession({ id: 'g1', workspaceInfo: { fileCount: 0, bytes: 0, skipped: 0, repoUrl: 'https://github.com/octo/secret', repoFullName: 'octo/secret', gitBranch: 'dev' } }) } }));
+		const [result] = await launchSessions(auth, { prompt: 'Fix', count: 1, repo: { fullName: 'octo/secret', branch: ' dev ' } });
+
+		expect(result.error).toBeUndefined();
+		expect(calls[1].url).toBe(`${BASE}/g1/start`);
+		expect(bodyOf(calls[0])).toEqual({ prompt: 'Fix', workspaceName: 'secret' });
+		expect(bodyOf(calls[1])).toEqual({ repo: { fullName: 'octo/secret', branch: 'dev' } });
+		expect(result.session?.workspaceInfo?.repoFullName).toBe('octo/secret');
+		expect(cloudSource(result.session!)).toEqual({ kind: 'repo', label: 'octo/secret @ dev' });
+	});
+
+	it('omits an empty branch for a picked repo', async () => {
+		mockFetch(url => (url === BASE
+			? { status: 201, body: { session: rawSession({ id: 'g2', status: 'uploading' }) } }
+			: { status: 200, body: { session: rawSession({ id: 'g2' }) } }));
+		await launchSessions(auth, { prompt: 'p', count: 2, repo: { fullName: 'o/r', branch: '' } });
+		const starts = calls.filter(c => c.url.endsWith('/start'));
+		expect(starts.map(bodyOf)).toEqual([{ repo: { fullName: 'o/r' } }, { repo: { fullName: 'o/r' } }]);
+	});
+
+	it('reports github_not_connected from start in Japanese', async () => {
+		mockFetch(url => (url === BASE
+			? { status: 201, body: { session: rawSession({ id: 'g3', status: 'uploading' }) } }
+			: { status: 409, body: { error: 'GitHub is not connected', code: 'github_not_connected' } }));
+		const [result] = await launchSessions(auth, { prompt: 'p', count: 1, repo: { fullName: 'o/r' } });
+		expect(result.session?.id).toBe('g3');
+		expect(result.error).toContain('GitHub と連携');
+	});
+
 	it('validates the input before calling the API', async () => {
 		mockFetch(() => ({ status: 200, body: {} }));
+		await expect(launchSessions(auth, { prompt: 'p', count: 1, repo: { fullName: 'not-a-repo' } })).rejects.toThrow('owner/name');
+		await expect(launchSessions(auth, { prompt: 'p', count: 1, repo: { fullName: 'o/r', branch: 'a..b' } })).rejects.toThrow('ブランチ');
 		await expect(launchSessions(auth, { prompt: '  ', count: 1 })).rejects.toThrow('指示');
 		await expect(launchSessions(auth, { prompt: 'p', count: 0 })).rejects.toThrow('並列数');
 		await expect(launchSessions(auth, { prompt: 'p', count: 11 })).rejects.toThrow('並列数');

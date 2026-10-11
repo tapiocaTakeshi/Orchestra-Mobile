@@ -9,7 +9,7 @@
  *   GET  /api/cloud-sessions/:id             詳細
  *   GET  /api/cloud-sessions/:id/events      ?after=<seq> 以降のイベント
  *   POST /api/cloud-sessions                 作成 (サンドボックスを用意するので数分かかることがある)
- *   POST /api/cloud-sessions/:id/start       開始 (repo を渡すとその公開リポジトリを clone、無ければ空のフォルダ)
+ *   POST /api/cloud-sessions/:id/start       開始 (repo を渡すとそのリポジトリを clone、無ければ空のフォルダ)
  *   POST /api/cloud-sessions/:id/messages    追加の指示 (止まっていれば再開する)
  *   POST /api/cloud-sessions/:id/stop        停止
  *   POST /api/cloud-sessions/:id/archive     サンドボックスを消して一覧から隠す
@@ -17,6 +17,8 @@
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
+ *
+ * GitHub アカウントの連携 (/api/github/*) は divisionGitHub.ts。同じ request と DivisionCloudError を使う。
  *
  * 後半の純粋関数 (状態の表示名・イベントの結合・ツールの要約・URL の検証など) は UI 非依存なので
  * そのままテストできる。
@@ -41,6 +43,8 @@ export type CloudWorkspaceInfo = {
 	gitCommit?: string;
 	/** Git リポジトリから始めたときの clone 元 */
 	repoUrl?: string;
+	/** GitHub 連携で選んだリポジトリから始めたときの "owner/name" */
+	repoFullName?: string;
 };
 
 export type CloudSession = {
@@ -94,21 +98,41 @@ export type CloudChanges = {
 	patchTruncated: boolean;
 };
 
-export type CloudRepo = { url: string; branch?: string };
+/** URL を直接指定した Git リポジトリ (公開リポジトリ。github.com なら連携中のトークンも使われる)。 */
+export type CloudRepoUrl = { url: string; branch?: string };
+/** GitHub 連携で選んだリポジトリ ("owner/name")。サーバーがユーザーのトークンで clone するので非公開でもよい。 */
+export type CloudRepoFullName = { fullName: string; branch?: string };
+export type CloudRepo = CloudRepoUrl | CloudRepoFullName;
+
+export const isFullNameRepo = (repo: CloudRepo): repo is CloudRepoFullName =>
+	typeof (repo as CloudRepoFullName).fullName === 'string';
 
 // ---------------------------------------------------------------------------
 // エラー
 // ---------------------------------------------------------------------------
 
+/** サーバーが { error, code } の code で返す、状態コードだけでは分からない理由。 */
+export const GITHUB_NOT_CONNECTED = 'github_not_connected';
+export const GITHUB_NOT_CONFIGURED = 'github_not_configured';
+
 export class DivisionCloudError extends Error {
 	readonly status: number;
-	constructor(status: number, message: string) {
+	/** サーバーが返した code (例: github_not_connected)。無ければ undefined */
+	readonly code: string | undefined;
+	constructor(status: number, message: string, code?: string) {
 		super(message);
 		this.name = 'DivisionCloudError';
 		this.status = status;
+		this.code = code;
 	}
 
 	get userMessage(): string {
+		if (this.code === GITHUB_NOT_CONNECTED) {
+			return 'GitHub と連携されていないか、連携が解除されています。もう一度「GitHub と連携」してください。';
+		}
+		if (this.code === GITHUB_NOT_CONFIGURED) {
+			return 'サーバー側で GitHub 連携が未設定です。リポジトリの URL を直接入力してください。';
+		}
 		switch (this.status) {
 			case 0:
 				return this.message === 'timeout'
@@ -162,14 +186,18 @@ const accessTokenFor = async (session: DivisionSession): Promise<string> => {
 	return getDivisionAccessToken(session);
 };
 
-type RequestOptions = {
+export type RequestOptions = {
 	method?: 'GET' | 'POST';
 	body?: unknown;
 	timeoutMs?: number;
 	endpoint?: string;
 };
 
-const request = async <T>(session: DivisionSession, path: string, options: RequestOptions = {}): Promise<T> => {
+/**
+ * Division API を叩く。path は '/api/...' から書く。失敗は DivisionCloudError (status 0 = 通信できない / タイムアウト)。
+ * GitHub 連携のクライアント (divisionGitHub.ts) もこれを使う。
+ */
+export const divisionApiRequest = async <T>(session: DivisionSession, path: string, options: RequestOptions = {}): Promise<T> => {
 	const accessToken = await accessTokenFor(session).catch((error: unknown) => {
 		throw new DivisionCloudError(401, error instanceof Error ? error.message : String(error));
 	});
@@ -182,7 +210,7 @@ const request = async <T>(session: DivisionSession, path: string, options: Reque
 
 	let response: Response;
 	try {
-		response = await fetch(`${base}/api/cloud-sessions${path}`, {
+		response = await fetch(`${base}${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
 			...(method === 'POST' ? { body: JSON.stringify(options.body ?? {}) } : {}),
@@ -194,12 +222,19 @@ const request = async <T>(session: DivisionSession, path: string, options: Reque
 		clearTimeout(timer);
 	}
 
-	const data = (await response.json().catch(() => ({}))) as { error?: unknown };
+	const data = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
 	if (!response.ok) {
-		throw new DivisionCloudError(response.status, typeof data.error === 'string' && data.error ? data.error : `HTTP ${response.status}`);
+		throw new DivisionCloudError(
+			response.status,
+			typeof data.error === 'string' && data.error ? data.error : `HTTP ${response.status}`,
+			typeof data.code === 'string' && data.code ? data.code : undefined,
+		);
 	}
 	return data as T;
 };
+
+const request = <T>(session: DivisionSession, path: string, options: RequestOptions = {}): Promise<T> =>
+	divisionApiRequest<T>(session, `/api/cloud-sessions${path}`, options);
 
 const idPath = (id: string): string => `/${encodeURIComponent(id)}`;
 
@@ -226,6 +261,7 @@ const toWorkspaceInfo = (raw: unknown): CloudWorkspaceInfo | null => {
 		...(typeof w.gitBranch === 'string' ? { gitBranch: w.gitBranch } : {}),
 		...(typeof w.gitCommit === 'string' ? { gitCommit: w.gitCommit } : {}),
 		...(typeof w.repoUrl === 'string' ? { repoUrl: w.repoUrl } : {}),
+		...(typeof w.repoFullName === 'string' ? { repoFullName: w.repoFullName } : {}),
 	};
 };
 
@@ -324,11 +360,21 @@ export const createCloudSession = async (session: DivisionSession, input: Create
 	return toCloudSession(data.session);
 };
 
-/** エージェントを動かし始める。repo を渡すとその公開リポジトリを clone し、無ければ空のフォルダで始める。 */
+/** start に送る repo。URL か "owner/name" のどちらか片方と、指定があればブランチ。 */
+export const repoBody = (repo: CloudRepo): Record<string, string> => {
+	const branch = repo.branch?.trim();
+	return {
+		...(isFullNameRepo(repo) ? { fullName: repo.fullName.trim() } : { url: repo.url.trim() }),
+		...(branch ? { branch } : {}),
+	};
+};
+
+/**
+ * エージェントを動かし始める。repo を渡すとそのリポジトリを clone し、無ければ空のフォルダで始める。
+ * { fullName } (GitHub 連携で選んだもの) はサーバーがユーザーの GitHub トークンで clone するので非公開でもよい。
+ */
 export const startCloudSession = async (session: DivisionSession, id: string, options: { repo?: CloudRepo } = {}): Promise<CloudSession> => {
-	const body = options.repo
-		? { repo: { url: options.repo.url.trim(), ...(options.repo.branch?.trim() ? { branch: options.repo.branch.trim() } : {}) } }
-		: {};
+	const body = options.repo ? { repo: repoBody(options.repo) } : {};
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/start`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.launch });
 	return toCloudSession(data.session);
 };
@@ -427,6 +473,9 @@ export type CloudSource = { kind: 'repo' | 'workspace' | 'empty'; label: string 
 /** 一覧と詳細の「どこで動いているか」。リポジトリ > PC のフォルダ > 空のフォルダ の順に決める。 */
 export const cloudSource = (session: Pick<CloudSession, 'workspaceInfo' | 'workspaceName'>): CloudSource => {
 	const info = session.workspaceInfo;
+	if (info?.repoFullName) {
+		return { kind: 'repo', label: `${info.repoFullName}${info.gitBranch ? ` @ ${info.gitBranch}` : ''}` };
+	}
 	if (info?.repoUrl) {
 		return { kind: 'repo', label: `${repoLabel(info.repoUrl)}${info.gitBranch ? ` @ ${info.gitBranch}` : ''}` };
 	}
@@ -498,6 +547,21 @@ export const validateRepoUrl = (raw: string): string | null => {
 	return null;
 };
 
+/** GitHub の "owner/name" として使えなければ理由を返す。使えるなら null。 */
+export const validateRepoFullName = (raw: string): string | null => {
+	const value = raw.trim();
+	if (!value) return 'リポジトリを選んでください。';
+	const m = /^([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})$/.exec(value);
+	if (!m || m.slice(1).some(part => part === '.' || part === '..')) return 'リポジトリ名の形式が正しくありません (owner/name)。';
+	return null;
+};
+
+/** "owner/name" → "name" (形式が違えば空)。 */
+export const repoNameOf = (fullName: string): string => {
+	const parts = fullName.trim().split('/');
+	return parts.length === 2 ? parts[1] : '';
+};
+
 /** ブランチ / タグ名として使えなければ理由を返す。空 (既定のブランチ) なら null。 */
 export const validateBranch = (raw: string): string | null => {
 	const value = raw.trim();
@@ -518,7 +582,7 @@ export type LaunchInput = {
 	prompt: string;
 	/** 1〜10。同じ指示で別々のサンドボックスを並べて動かす */
 	count: number;
-	/** 無ければ空のフォルダで始める */
+	/** 無ければ空のフォルダで始める。{ url } か GitHub 連携で選んだ { fullName } */
 	repo?: CloudRepo;
 	model?: string;
 	title?: string;
@@ -556,19 +620,24 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 	if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_PARALLEL_SESSIONS) {
 		throw new Error(`並列数は 1〜${MAX_PARALLEL_SESSIONS} で指定してください。`);
 	}
-	if (input.repo) {
-		const issue = validateRepoUrl(input.repo.url) ?? validateBranch(input.repo.branch ?? '');
+	const repo = input.repo;
+	if (repo) {
+		const issue = (isFullNameRepo(repo) ? validateRepoFullName(repo.fullName) : validateRepoUrl(repo.url))
+			?? validateBranch(repo.branch ?? '');
 		if (issue) throw new Error(issue);
 	}
 
 	const titles = launchTitles({ ...input, prompt });
-	const workspaceName = input.repo ? repoFolderName(input.repo.url) || undefined : undefined;
+	// workspaceName はリポジトリ名 (clone したときのフォルダ名) にする
+	const workspaceName = repo
+		? (isFullNameRepo(repo) ? repoNameOf(repo.fullName) : repoFolderName(repo.url)) || undefined
+		: undefined;
 
 	return Promise.all(titles.map(async (title, index): Promise<LaunchResult> => {
 		let created: CloudSession | undefined;
 		try {
 			created = await createCloudSession(session, { prompt, title, model: input.model, workspaceName });
-			const started = await startCloudSession(session, created.id, { repo: input.repo });
+			const started = await startCloudSession(session, created.id, { repo });
 			return { index, title, session: started };
 		} catch (e) {
 			return { index, title, ...(created ? { session: created } : {}), error: cloudErrorText(e) };
