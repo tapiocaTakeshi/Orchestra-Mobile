@@ -3,7 +3,7 @@
  *
  * ログイン中の Division アカウントに紐づくデスクトップセッション (RemoteSession) を
  * 一定間隔でポーリングして一覧表示する。行をタップするだけで接続できる。
- * 見つからない/繋がらない場合のための手入力と、未接続でも使えるページ (共有・コスト) への導線も置く。
+ * 見つからない/繋がらない場合のための手入力と、未接続でも使えるページ (クラウド・共有・コスト) への導線も置く。
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -61,7 +61,7 @@ export const DiscoverScreen = ({
 	onOpenPage,
 }: {
 	onManualConnect: () => void;
-	/** 未接続でも開けるページ (共有・コスト) を開く */
+	/** 未接続でも開けるページ (クラウド・共有・コスト) を開く */
 	onOpenPage: (page: PageKey) => void;
 }) => {
 	const { connect } = useApp();

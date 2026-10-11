@@ -4,17 +4,18 @@
  * タブバーは置かない。最初の画面は 1 つだけで、
  *   - PC に接続しているとき  … チャット
  *   - 接続していないとき      … 接続先の一覧
- * それ以外 (カンバン・Division・共有・コスト・クイック操作・接続) はメニューからページとして開き、
+ * それ以外 (カンバン・Division・クラウド・共有・コスト・クイック操作・接続) はメニューからページとして開き、
  * 「戻る」(Android は戻るキーも) で最初の画面に戻る。
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { PageKey, canOpenPage } from './src/navigation';
+import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
 import { ConnectScreen } from './src/screens/ConnectScreen';
 import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
@@ -33,6 +34,7 @@ const PageContent = ({ page }: { page: PageKey }) => {
 	switch (page) {
 		case 'kanban': return <KanbanScreen />;
 		case 'projects': return <ProjectsScreen />;
+		case 'cloud': return <CloudAgentsScreen />;
 		case 'social': return <SocialScreen />;
 		case 'tuning': return <TuningScreen />;
 		case 'actions': return <QuickActionsScreen />;
@@ -54,7 +56,12 @@ const Shell = () => {
 
 	// 接続が切れたら、繋いでいないと使えないページには留まらない。
 	const openPage = page && canOpenPage(page, !!connection) ? page : null;
-	const goBack = openPage ? () => setPage(null) : showManualConnect ? () => setShowManualConnect(false) : null;
+	// 描画のたびに作り直すと戻るキーの登録もやり直しになり、ページ側 (クラウドの詳細など) で
+	// 後から登録した戻るキーより先に呼ばれてしまうので、開いている画面が変わったときだけ作る。
+	const goBack = useMemo(
+		() => (openPage ? () => setPage(null) : showManualConnect ? () => setShowManualConnect(false) : null),
+		[openPage, showManualConnect],
+	);
 
 	// Android の戻るキーでも、ページから最初の画面へ戻る。
 	useEffect(() => {
