@@ -18,9 +18,11 @@ import { DivisionSession } from '../lib/divisionAuth';
 import {
 	CloudPullRequest,
 	CloudPullRequestInfo,
+	CloudPullRequestState,
 	CloudSession,
 	CreatePullRequestResult,
 	PULL_REQUEST_LIMITS,
+	PULL_REQUEST_STATE_LABELS,
 	PullRequestForm,
 	canOfferPullRequest,
 	createPullRequest,
@@ -35,6 +37,8 @@ import {
 	pullRequestInputIssue,
 	pullRequestMode,
 	pullRequestReasonText,
+	pullRequestResultText,
+	pullRequestStateFor,
 	toPullRequestEvent,
 } from '../lib/divisionCloud';
 import { isGitHubNotConnected } from '../lib/divisionGitHub';
@@ -55,6 +59,16 @@ const openPullRequestUrl = async (url: string, toast: Toast) => {
 /** The PR to show: the session DTO is polled every 2 s, the GET result fills in until it has one. */
 export const currentPullRequest = (session: CloudSession, info: CloudPullRequestInfo | null): CloudPullRequest | null =>
 	session.pullRequest ?? info?.pullRequest ?? null;
+
+const STATE_COLORS: Record<CloudPullRequestState, string> = {
+	open: colors.success,
+	merged: colors.accentText,
+	closed: colors.fgFaint,
+};
+
+/** Small "オープン / マージ済み / クローズ済み" badge next to the PR link. */
+export const PullRequestStateBadge = ({ state }: { state: CloudPullRequestState | null }) =>
+	state ? <Badge label={PULL_REQUEST_STATE_LABELS[state]} icon={state === 'merged' ? 'git-merge' : 'git-pull-request'} color={STATE_COLORS[state]} /> : null;
 
 // ---------------------------------------------------------------------------
 // State
@@ -176,6 +190,7 @@ export const PullRequestBar = ({ auth, session, state, onCompose }: {
 	if (!state.available && !pr) return null;
 
 	const info = state.info;
+	const prState = pullRequestStateFor(pr, info);
 	const checking = !info && state.loading;
 	const blocked = state.available && !!info && !info.canCreate;
 
@@ -194,15 +209,16 @@ export const PullRequestBar = ({ auth, session, state, onCompose }: {
 				) : null}
 				{state.available && (checking || info?.canCreate) ? (
 					<Button
-						title={pullRequestActionLabel(pr)}
-						variant={pr ? 'secondary' : 'primary'}
+						title={pullRequestActionLabel(pr, prState)}
+						variant={pr && pullRequestMode(pr, prState) === 'update' ? 'secondary' : 'primary'}
 						size='sm'
 						icon='git-pull-request'
 						loading={checking}
 						onPress={onCompose}
 					/>
 				) : null}
-				{pr?.draft ? <Badge label='下書き' icon='edit-3' /> : null}
+				{pr ? <PullRequestStateBadge state={prState} /> : null}
+				{pr?.draft && prState !== 'merged' && prState !== 'closed' ? <Badge label='下書き' icon='edit-3' /> : null}
 			</Row>
 			{blocked ? (
 				<View style={styles.reason}>
@@ -238,9 +254,14 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 }) => {
 	const toast = useToast();
 	const existing = currentPullRequest(session, info);
+	const existingState = pullRequestStateFor(existing, info);
 	// Fixed for the sheet's lifetime, so the form does not flip to "update" right after creating
-	const [mode] = useState(() => pullRequestMode(existing));
-	const [form, setForm] = useState<PullRequestForm>(() => initialPullRequestForm({ pullRequest: existing, suggestion: info.suggestion }));
+	const [mode] = useState(() => pullRequestMode(existing, existingState));
+	const [form, setForm] = useState<PullRequestForm>(() => initialPullRequestForm({
+		pullRequest: existing,
+		pullRequestState: existingState,
+		suggestion: info.suggestion,
+	}));
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<SubmitError | null>(null);
 	const [result, setResult] = useState<CreatePullRequestResult | null>(null);
@@ -269,7 +290,7 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 
 	if (result) {
 		const pr = result.pullRequest;
-		const unchanged = !creating && !result.updated;
+		const unchanged = result.action === 'unchanged';
 		return (
 			<Sheet title={creating ? 'PR を作成' : 'PR を更新'} eyebrow={repo} onClose={onClose}>
 				<ScrollView contentContainerStyle={styles.sheetContent}>
@@ -277,9 +298,7 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 						<Row>
 							<Icon name={unchanged ? 'info' : 'check-circle'} size={18} color={unchanged ? colors.fgMuted : colors.success} />
 							<Text style={styles.resultTitle}>
-								{unchanged
-									? `変更はありません (PR #${pr.number} は最新です)`
-									: pullRequestEventText({ number: pr.number, action: creating ? 'created' : 'updated' })}
+								{pullRequestResultText(result)}
 							</Text>
 						</Row>
 						{pr.title ? <Text selectable style={styles.resultText}>{pr.title}</Text> : null}
@@ -293,8 +312,14 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 	}
 
 	return (
-		<Sheet title={creating ? 'PR を作成' : `PR #${existing?.number ?? ''} を更新`} eyebrow={repo} onClose={onClose}>
+		<Sheet title={creating ? (existing ? '新しい PR を作成' : 'PR を作成') : `PR #${existing?.number ?? ''} を更新`} eyebrow={repo} onClose={onClose}>
 			<ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps='handled'>
+				{creating && existing && existingState ? (
+					<View style={styles.notice}>
+						<PullRequestStateBadge state={existingState} />
+						<Muted style={styles.flex}>PR #{existing.number} は{PULL_REQUEST_STATE_LABELS[existingState]}のため、このセッションのブランチの上に新しい PR を作成します。</Muted>
+					</View>
+				) : null}
 				<View style={styles.field}>
 					<SectionTitle>タイトル</SectionTitle>
 					<Input
@@ -319,7 +344,7 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 						accessibilityLabel='PR の説明'
 						style={styles.bodyInput}
 					/>
-					{!creating ? <Muted>GitHub 上の PR の説明はこの内容に置き換わります。</Muted> : null}
+					{!creating ? <Muted>GitHub 上のいまの説明から始めています。更新すると PR の説明はこの内容に置き換わります。</Muted> : null}
 				</View>
 
 				<View style={styles.field}>
@@ -461,6 +486,14 @@ const styles = StyleSheet.create({
 	invalidText: { color: colors.danger, fontSize: fontSize.xs },
 	progress: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	actions: { gap: spacing.sm },
+	notice: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.sm,
+		padding: spacing.md,
+		borderRadius: radius.md,
+		backgroundColor: colors.bgElevated,
+	},
 	resultCard: {
 		gap: spacing.md,
 		padding: spacing.md,

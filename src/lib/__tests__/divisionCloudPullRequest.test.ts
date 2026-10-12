@@ -28,6 +28,8 @@ import {
 	pullRequestInputIssue,
 	pullRequestMode,
 	pullRequestReasonText,
+	pullRequestResultText,
+	pullRequestStateFor,
 	toCloudPullRequest,
 	toCloudSession,
 	toPullRequestEvent,
@@ -71,6 +73,32 @@ const rawSession = (over: Record<string, unknown> = {}): Record<string, unknown>
 	createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', startedAt: '2026-10-01T00:00:00.000Z', completedAt: null,
 	...over,
 });
+
+/** Runs a request against a fetch that never answers and checks it is aborted exactly after `ms`. */
+const expectTimeout = async (run: () => Promise<unknown>, ms: number) => {
+	jest.useFakeTimers();
+	try {
+		(globalThis as unknown as { fetch: unknown }).fetch = jest.fn((url: string, init: RequestInit) => {
+			calls.push({ url, init });
+			return new Promise((_, reject) => {
+				init.signal?.addEventListener('abort', () => reject(new Error('The operation was aborted')));
+			});
+		});
+		const promise = run();
+		const settled = jest.fn();
+		promise.then(settled, settled);
+		for (let i = 0; i < 10 && calls.length === 0; i++) await Promise.resolve();
+		expect(calls).toHaveLength(1);
+
+		await jest.advanceTimersByTimeAsync(ms - 1);
+		expect(settled).not.toHaveBeenCalled();
+		await jest.advanceTimersByTimeAsync(1);
+		await expect(promise).rejects.toMatchObject({ status: 0, message: 'timeout' });
+		calls.length = 0;
+	} finally {
+		jest.useRealTimers();
+	}
+};
 
 const suggestion = { title: 'Fix login', body: 'Summary\n\n- src/a.ts', branch: 'orchestra/fix-login-abc123', base: 'main' };
 
@@ -120,13 +148,26 @@ describe('getPullRequestInfo', () => {
 	it('keeps the reason and code when a PR cannot be created', async () => {
 		mockFetch(() => ({
 			status: 200,
-			body: { pullRequest: rawPr(), suggestion, canCreate: false, reason: 'ベースブランチからの変更がありません。', code: 'no_changes' },
+			body: { pullRequest: null, suggestion, canCreate: false, reason: 'ベースブランチからの変更がありません。', code: 'no_changes' },
 		}));
 		const info = await getPullRequestInfo(auth, 's1');
 		expect(info.canCreate).toBe(false);
-		expect(info.pullRequest?.number).toBe(12);
 		expect(info.reason).toBe('ベースブランチからの変更がありません。');
 		expect(info.code).toBe('no_changes');
+		expect('pullRequestState' in info).toBe(false);
+	});
+
+	it('reads pullRequestState only alongside a PR (unknown values become null)', () => {
+		expect(toPullRequestInfo({ pullRequest: rawPr(), pullRequestState: 'merged', suggestion, canCreate: true }).pullRequestState).toBe('merged');
+		expect(toPullRequestInfo({ pullRequest: rawPr(), pullRequestState: 'open', suggestion, canCreate: true }).pullRequestState).toBe('open');
+		expect(toPullRequestInfo({ pullRequest: rawPr(), pullRequestState: null, suggestion }).pullRequestState).toBeNull();
+		expect(toPullRequestInfo({ pullRequest: rawPr(), pullRequestState: 'draft', suggestion }).pullRequestState).toBeNull();
+		expect('pullRequestState' in toPullRequestInfo({ pullRequest: null, pullRequestState: 'open', suggestion })).toBe(false);
+	});
+
+	it('waits up to 300 s (the server may start a stopped sandbox and diff it)', async () => {
+		await expectTimeout(() => getPullRequestInfo(auth, 's1'), CLOUD_TIMEOUTS.pullRequestInfo);
+		expect(CLOUD_TIMEOUTS.pullRequestInfo).toBeGreaterThanOrEqual(300_000);
 	});
 
 	it('fills in a missing suggestion and treats anything but true as canCreate=false', () => {
@@ -150,46 +191,40 @@ describe('getPullRequestInfo', () => {
 
 describe('createPullRequest', () => {
 	it('POSTs title, body, branch, base and draft', async () => {
-		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr({ draft: true }), updated: true } }));
+		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr({ draft: true }), updated: true, action: 'created' } }));
 		const res = await createPullRequest(auth, 's1', {
 			title: '  Fix login  ', body: 'Body', branch: ' orchestra/fix ', base: 'main', draft: true,
 		});
 		expect(calls[0].url).toBe(`${BASE}/s1/pull-request`);
 		expect(calls[0].init.method).toBe('POST');
 		expect(bodyOf(calls[0])).toEqual({ title: 'Fix login', body: 'Body', branch: 'orchestra/fix', base: 'main', draft: true });
-		expect(res).toEqual({ pullRequest: expect.objectContaining({ number: 12, draft: true }), updated: true });
+		expect(res).toEqual({ pullRequest: expect.objectContaining({ number: 12, draft: true }), updated: true, action: 'created' });
 	});
 
-	it('waits up to 180 s (commit + push + GitHub API) before timing out', async () => {
-		jest.useFakeTimers();
-		try {
-			(globalThis as unknown as { fetch: unknown }).fetch = jest.fn((url: string, init: RequestInit) => {
-				calls.push({ url, init });
-				return new Promise((_, reject) => {
-					init.signal?.addEventListener('abort', () => reject(new Error('The operation was aborted')));
-				});
-			});
-			const promise = createPullRequest(auth, 's1', { title: 'x' });
-			const settled = jest.fn();
-			promise.then(settled, settled);
-			for (let i = 0; i < 10 && calls.length === 0; i++) await Promise.resolve();
-			expect(calls).toHaveLength(1);
-
-			await jest.advanceTimersByTimeAsync(CLOUD_TIMEOUTS.pullRequest - 1);
-			expect(settled).not.toHaveBeenCalled();
-			await jest.advanceTimersByTimeAsync(1);
-			await expect(promise).rejects.toMatchObject({ status: 0, message: 'timeout' });
-			expect(CLOUD_TIMEOUTS.pullRequest).toBe(180_000);
-		} finally {
-			jest.useRealTimers();
-		}
+	it('waits up to 600 s (commit + push + GitHub API) before timing out', async () => {
+		await expectTimeout(() => createPullRequest(auth, 's1', { title: 'x' }), CLOUD_TIMEOUTS.pullRequest);
+		expect(CLOUD_TIMEOUTS.pullRequest).toBeGreaterThanOrEqual(300_000);
 	});
 
-	it('reports updated=false when nothing changed since the last push', async () => {
-		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr(), updated: false } }));
+	it('reads action and falls back to updated when an older server omits it', async () => {
+		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr(), updated: false, action: 'unchanged' } }));
 		const res = await createPullRequest(auth, 's1', { title: 'Fix login' });
 		expect(bodyOf(calls[0])).toEqual({ title: 'Fix login' });
-		expect(res.updated).toBe(false);
+		expect(res).toMatchObject({ updated: false, action: 'unchanged' });
+
+		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr(), updated: true, action: 'updated' } }));
+		expect((await createPullRequest(auth, 's1', { title: 'x' })).action).toBe('updated');
+		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr(), updated: true } }));
+		expect((await createPullRequest(auth, 's1', { title: 'x' })).action).toBe('updated');
+		mockFetch(() => ({ status: 200, body: { pullRequest: rawPr(), updated: false, action: 'weird' } }));
+		expect((await createPullRequest(auth, 's1', { title: 'x' })).action).toBe('unchanged');
+	});
+
+	it('formats the result by action', () => {
+		const pr = toCloudPullRequest(rawPr())!;
+		expect(pullRequestResultText({ pullRequest: pr, action: 'created' })).toBe('PR #12 を作成しました');
+		expect(pullRequestResultText({ pullRequest: pr, action: 'updated' })).toBe('PR #12 を更新しました');
+		expect(pullRequestResultText({ pullRequest: pr, action: 'unchanged' })).toBe('変更はありません（PR は最新です）');
 	});
 
 	it('does not call the API when the input is invalid', async () => {
@@ -269,9 +304,26 @@ describe('whether to offer the PR button', () => {
 		const pr = toCloudPullRequest(rawPr())!;
 		expect(pullRequestActionLabel(null)).toBe('PR を作成');
 		expect(pullRequestActionLabel(pr)).toBe('PR を更新');
+		expect(pullRequestActionLabel(pr, 'open')).toBe('PR を更新');
+		expect(pullRequestActionLabel(pr, null)).toBe('PR を更新');
+		expect(pullRequestActionLabel(pr, 'merged')).toBe('新しい PR を作成');
+		expect(pullRequestActionLabel(pr, 'closed')).toBe('新しい PR を作成');
 		expect(openPullRequestLabel(pr)).toBe('PR #12 を開く');
 		expect(pullRequestMode(undefined)).toBe('create');
 		expect(pullRequestMode(pr)).toBe('update');
+		expect(pullRequestMode(pr, 'open')).toBe('update');
+		expect(pullRequestMode(pr, 'merged')).toBe('create');
+		expect(pullRequestMode(pr, 'closed')).toBe('create');
+	});
+
+	it('uses the GET state only for the same PR number', () => {
+		const pr = toCloudPullRequest(rawPr())!;
+		const other = toCloudPullRequest(rawPr({ number: 13 }))!;
+		expect(pullRequestStateFor(pr, { pullRequest: pr, pullRequestState: 'merged' })).toBe('merged');
+		expect(pullRequestStateFor(other, { pullRequest: pr, pullRequestState: 'merged' })).toBeNull();
+		expect(pullRequestStateFor(pr, { pullRequest: pr })).toBeNull();
+		expect(pullRequestStateFor(null, { pullRequest: pr, pullRequestState: 'open' })).toBeNull();
+		expect(pullRequestStateFor(pr, null)).toBeNull();
 	});
 });
 
@@ -280,6 +332,8 @@ describe('reason shown instead of the button', () => {
 		expect(pullRequestReasonText({ reason: 'エージェントが作業中です。', code: 'session_running' })).toBe('エージェントが作業中です。');
 		expect(pullRequestReasonText({ reason: 'no_changes' })).toBe('ベースブランチからの変更がありません。');
 		expect(pullRequestReasonText({ code: 'github_not_connected' })).toContain('GitHub と連携');
+		expect(pullRequestReasonText({ code: 'session_archived' })).toContain('サンドボックスが削除');
+		expect(pullRequestReasonText({ code: 'github_not_configured' })).toContain('未設定');
 		expect(pullRequestReasonText({})).toBe('いまは PR を作成できません。');
 	});
 
@@ -297,11 +351,21 @@ describe('PR form', () => {
 		expect(initialPullRequestForm(base)).toEqual({ ...suggestion, draft: false });
 	});
 
-	it('keeps the existing PR title, branch, base and draft state when updating', () => {
-		const pr = toCloudPullRequest(rawPr({ title: 'Edited on GitHub', branch: 'orchestra/x', base: 'dev', draft: true }))!;
-		expect(initialPullRequestForm({ ...base, pullRequest: pr })).toEqual({
-			title: 'Edited on GitHub', body: suggestion.body, branch: 'orchestra/x', base: 'dev', draft: true,
-		});
+	it('prefills an open PR from the suggestion (GitHub\'s current values) and keeps its draft state', () => {
+		const pr = toCloudPullRequest(rawPr({ title: 'Old', branch: 'orchestra/x', base: 'dev', draft: true }))!;
+		const current = { title: 'Edited on GitHub', body: 'GitHub body', branch: 'orchestra/x', base: 'dev' };
+		expect(initialPullRequestForm({ pullRequest: pr, pullRequestState: 'open', suggestion: current }))
+			.toEqual({ ...current, draft: true });
+		// Gaps in the suggestion are filled from the PR
+		expect(initialPullRequestForm({ pullRequest: pr, pullRequestState: 'open', suggestion: { title: '', body: '', branch: '', base: '' } }))
+			.toEqual({ title: 'Old', body: '', branch: 'orchestra/x', base: 'dev', draft: true });
+	});
+
+	it('starts a fresh form (create mode, draft off) after the PR was merged or closed', () => {
+		const pr = toCloudPullRequest(rawPr({ title: 'Old', branch: 'orchestra/x', draft: true }))!;
+		for (const state of ['merged', 'closed'] as const) {
+			expect(initialPullRequestForm({ pullRequest: pr, pullRequestState: state, suggestion })).toEqual({ ...suggestion, draft: false });
+		}
 	});
 
 	it('sends branch, base and draft only when creating', () => {
@@ -323,6 +387,21 @@ describe('pullRequestErrorText', () => {
 
 	it('falls back to a Japanese text when only a code came back', () => {
 		expect(pullRequestErrorText(new DivisionCloudError(409, 'HTTP 409', 'pr_in_progress'))).toContain('push しています');
+		expect(pullRequestErrorText(new DivisionCloudError(409, 'HTTP 409', 'branch_diverged'))).toContain('ほかの push');
+		expect(pullRequestErrorText(new DivisionCloudError(409, 'HTTP 409', 'session_archived'))).toContain('サンドボックスが削除');
+		expect(pullRequestErrorText(new DivisionCloudError(502, 'HTTP 502', 'sandbox_error'))).toContain('git');
+	});
+
+	it('shows the server text for the final error codes', () => {
+		const cases: [number, string][] = [
+			[409, 'session_archived'], [409, 'branch_diverged'], [409, 'missing_parent'],
+			[502, 'sandbox_error'], [503, 'github_not_configured'],
+		];
+		for (const [status, code] of cases) {
+			expect(pullRequestErrorText(new DivisionCloudError(status, `サーバーの説明 ${code}`, code))).toBe(`サーバーの説明 ${code}`);
+		}
+		expect(pullRequestErrorText(new DivisionCloudError(400, 'タイトルは必須です / ブランチ名が不正です', 'validation')))
+			.toBe('タイトルは必須です / ブランチ名が不正です');
 	});
 
 	it('uses the shared reconnect text for github_not_connected', () => {

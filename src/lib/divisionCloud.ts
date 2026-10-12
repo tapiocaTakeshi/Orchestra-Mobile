@@ -201,8 +201,10 @@ export const CLOUD_TIMEOUTS = {
 	default: 30_000,
 	launch: 300_000,
 	changes: 120_000,
-	// Creating a PR commits the workspace, pushes it and calls the GitHub API
-	pullRequest: 180_000,
+	// GET .../pull-request may start a stopped sandbox and diff it (~3 min)
+	pullRequestInfo: 300_000,
+	// POST .../pull-request commits the workspace, pushes it and calls the GitHub API (~10 min at worst)
+	pullRequest: 600_000,
 } as const;
 
 /**
@@ -821,15 +823,26 @@ export const validateBranch = (raw: string): string | null => {
 /** Prefill values the server suggests for the PR form. */
 export type CloudPullRequestSuggestion = { title: string; body: string; branch: string; base: string };
 
+/** State of the session's PR on GitHub. */
+export type CloudPullRequestState = 'open' | 'closed' | 'merged';
+
+const PULL_REQUEST_STATES: CloudPullRequestState[] = ['open', 'closed', 'merged'];
+
 /** Response of GET /api/cloud-sessions/:id/pull-request. */
 export type CloudPullRequestInfo = {
 	pullRequest: CloudPullRequest | null;
+	/**
+	 * Only meaningful when pullRequest is set; null = GitHub could not be read.
+	 * merged / closed: the suggestion is a fresh one and the next POST opens a new PR.
+	 * open: the suggestion holds the PR's current title / body / branch / base on GitHub.
+	 */
+	pullRequestState?: CloudPullRequestState | null;
 	suggestion: CloudPullRequestSuggestion;
 	/** false = the button is replaced by `reason` */
 	canCreate: boolean;
 	/** Japanese text explaining why a PR cannot be created / updated right now */
 	reason?: string;
-	/** Machine-readable reason when the server sends one (e.g. github_not_connected) */
+	/** Machine-readable reason, sent with every reason (e.g. github_not_connected) */
 	code?: string;
 };
 
@@ -842,10 +855,14 @@ export type CreatePullRequestInput = {
 	draft?: boolean;
 };
 
+export type CreatePullRequestAction = 'created' | 'updated' | 'unchanged';
+
 export type CreatePullRequestResult = {
 	pullRequest: CloudPullRequest;
-	/** false = nothing changed since the last push (the PR is already up to date) */
+	/** true = a commit was pushed, a PR was created, or the title / body were patched */
 	updated: boolean;
+	/** What happened ("unchanged" = the PR is already up to date) */
+	action: CreatePullRequestAction;
 };
 
 export const PULL_REQUEST_LIMITS = { title: 256, body: 60_000 } as const;
@@ -863,7 +880,12 @@ export const PULL_REQUEST_REASONS: Record<string, string> = {
 	branch_exists: '同じ名前のブランチがすでにリモートにあります。ブランチ名を変えてください。',
 	github_no_push_access: 'このリポジトリに push する権限がありません。',
 	github_error: 'GitHub でエラーが発生しました。しばらくしてから試してください。',
-	sandbox_archived: 'サンドボックスが削除されているため、PR を作成できません。',
+	github_not_configured: 'サーバー側で GitHub 連携が未設定のため、PR を作成できません。',
+	session_archived: 'サンドボックスが削除されているため、PR を作成できません。',
+	sandbox_error: 'サンドボックスで git の操作に失敗しました。しばらくしてから試してください。',
+	branch_diverged: 'PR のブランチにほかの push があるため更新できません。GitHub で確認してください。',
+	missing_parent: '前回の PR のコミットがサンドボックスに見つからないため更新できません。',
+	validation: '入力内容が正しくありません。',
 };
 
 /** Reads the GET response defensively (a missing suggestion becomes empty strings). */
@@ -872,10 +894,14 @@ export const toPullRequestInfo = (raw: unknown): CloudPullRequestInfo => {
 	const s = (r.suggestion && typeof r.suggestion === 'object' ? r.suggestion : {}) as Record<string, unknown>;
 	const reason = str(r.reason).trim();
 	const code = str(r.code).trim();
+	const pullRequest = toCloudPullRequest(r.pullRequest);
 	return {
-		pullRequest: toCloudPullRequest(r.pullRequest),
+		pullRequest,
 		suggestion: { title: str(s.title), body: str(s.body), branch: str(s.branch), base: str(s.base) },
 		canCreate: r.canCreate === true,
+		...(pullRequest
+			? { pullRequestState: PULL_REQUEST_STATES.includes(r.pullRequestState as CloudPullRequestState) ? r.pullRequestState as CloudPullRequestState : null }
+			: {}),
 		...(reason ? { reason } : {}),
 		...(code ? { code } : {}),
 	};
@@ -883,7 +909,7 @@ export const toPullRequestInfo = (raw: unknown): CloudPullRequestInfo => {
 
 /** PR state and form suggestion for a session. */
 export const getPullRequestInfo = async (session: DivisionSession, id: string): Promise<CloudPullRequestInfo> =>
-	toPullRequestInfo(await request<unknown>(session, `${idPath(id)}/pull-request`));
+	toPullRequestInfo(await request<unknown>(session, `${idPath(id)}/pull-request`, { timeoutMs: CLOUD_TIMEOUTS.pullRequestInfo }));
 
 /**
  * Whether a branch name can be used as the PR's head branch (git ref rules on top of validateBranch).
@@ -933,12 +959,17 @@ export const createPullRequest = async (
 	input: CreatePullRequestInput,
 ): Promise<CreatePullRequestResult> => {
 	const body = pullRequestBody(input);
-	const data = await request<{ pullRequest?: unknown; updated?: unknown }>(
+	const data = await request<{ pullRequest?: unknown; updated?: unknown; action?: unknown }>(
 		session, `${idPath(id)}/pull-request`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.pullRequest },
 	);
 	const pullRequest = toCloudPullRequest(data.pullRequest);
 	if (!pullRequest) throw new DivisionCloudError(502, 'PR の情報を受け取れませんでした。');
-	return { pullRequest, updated: data.updated !== false };
+	const updated = data.updated !== false;
+	const action: CreatePullRequestAction = data.action === 'created' || data.action === 'updated' || data.action === 'unchanged'
+		? data.action
+		// Older servers sent only `updated`
+		: updated ? 'updated' : 'unchanged';
+	return { pullRequest, updated, action };
 };
 
 /** Error text for the pull-request endpoints: prefers the server's Japanese `error` over generic status text. */
@@ -970,28 +1001,62 @@ export const pullRequestReasonText = (info: Pick<CloudPullRequestInfo, 'code' | 
 
 export type PullRequestMode = 'create' | 'update';
 
-export const pullRequestMode = (pr: CloudPullRequest | null | undefined): PullRequestMode => (pr ? 'update' : 'create');
+/** A merged / closed PR cannot be updated: the next POST opens a new PR. */
+export const isPullRequestFinished = (state: CloudPullRequestState | null | undefined): boolean =>
+	state === 'merged' || state === 'closed';
 
-/** "PR を作成" before a PR exists, "PR を更新" after. */
-export const pullRequestActionLabel = (pr: CloudPullRequest | null | undefined): string => (pr ? 'PR を更新' : 'PR を作成');
+/** 'update' only while the PR is open (or its state is unknown); otherwise a new PR is created. */
+export const pullRequestMode = (pr: CloudPullRequest | null | undefined, state?: CloudPullRequestState | null): PullRequestMode =>
+	pr && !isPullRequestFinished(state) ? 'update' : 'create';
+
+/** "PR を作成" before a PR exists, "PR を更新" while it is open, "新しい PR を作成" once merged / closed. */
+export const pullRequestActionLabel = (pr: CloudPullRequest | null | undefined, state?: CloudPullRequestState | null): string =>
+	!pr ? 'PR を作成' : isPullRequestFinished(state) ? '新しい PR を作成' : 'PR を更新';
+
+export const PULL_REQUEST_STATE_LABELS: Record<CloudPullRequestState, string> = {
+	open: 'オープン',
+	merged: 'マージ済み',
+	closed: 'クローズ済み',
+};
+
+/**
+ * The state of `pr` from a GET result. The session DTO can be newer than the GET, so the state is only
+ * used when it belongs to the same PR number; otherwise it is unknown (null).
+ */
+export const pullRequestStateFor = (
+	pr: Pick<CloudPullRequest, 'number'> | null | undefined,
+	info: Pick<CloudPullRequestInfo, 'pullRequest' | 'pullRequestState'> | null | undefined,
+): CloudPullRequestState | null =>
+	pr && info?.pullRequest?.number === pr.number ? info.pullRequestState ?? null : null;
 
 export const openPullRequestLabel = (pr: Pick<CloudPullRequest, 'number'>): string => `PR #${pr.number} を開く`;
 
 /** Values edited in the PR form. */
 export type PullRequestForm = { title: string; body: string; branch: string; base: string; draft: boolean };
 
-/** Prefills the form from the suggestion; an existing PR keeps its title, branch, base and draft state. */
-export const initialPullRequestForm = (info: Pick<CloudPullRequestInfo, 'pullRequest' | 'suggestion'>): PullRequestForm => {
-	const pr = info.pullRequest;
+/**
+ * Prefills the form from the suggestion. While a PR is open the suggestion holds its current values on GitHub
+ * (the PR's own fields fill any gap); after merge / close it is a fresh suggestion for a new PR.
+ */
+export const initialPullRequestForm = (
+	info: Pick<CloudPullRequestInfo, 'pullRequest' | 'suggestion' | 'pullRequestState'>,
+): PullRequestForm => {
 	const s = info.suggestion;
+	const pr = pullRequestMode(info.pullRequest, info.pullRequestState) === 'update' ? info.pullRequest : null;
 	return {
-		title: pr?.title || s.title,
+		title: s.title || pr?.title || '',
 		body: s.body,
-		branch: pr?.branch || s.branch,
-		base: pr?.base || s.base,
+		branch: s.branch || pr?.branch || '',
+		base: s.base || pr?.base || '',
 		draft: pr?.draft ?? false,
 	};
 };
+
+/** Result text after a POST: "PR #n を作成しました" / "PR #n を更新しました" / "変更はありません（PR は最新です）". */
+export const pullRequestResultText = (result: Pick<CreatePullRequestResult, 'action' | 'pullRequest'>): string =>
+	result.action === 'unchanged'
+		? '変更はありません（PR は最新です）'
+		: pullRequestEventText({ number: result.pullRequest.number, action: result.action });
 
 /** What the form sends. Updating an existing PR only changes title / body (branch, base and draft are fixed). */
 export const pullRequestFormInput = (form: PullRequestForm, mode: PullRequestMode): CreatePullRequestInput =>

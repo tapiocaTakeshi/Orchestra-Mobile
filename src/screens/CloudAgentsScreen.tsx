@@ -112,6 +112,7 @@ import {
 	mergeEvents,
 	modelSelectionIssue,
 	pullRequestActionLabel,
+	pullRequestStateFor,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
@@ -1085,7 +1086,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	}, [events]);
 	const prDoneAction = prState.available && prState.info?.canCreate ? (
 		<Button
-			title={pullRequestActionLabel(pullRequest)}
+			title={pullRequestActionLabel(pullRequest, pullRequestStateFor(pullRequest, prState.info))}
 			variant='secondary'
 			size='sm'
 			icon='git-pull-request'
