@@ -14,6 +14,8 @@
  *   POST /api/cloud-sessions/:id/stop        停止
  *   POST /api/cloud-sessions/:id/archive     サンドボックスを消して一覧から隠す
  *   GET  /api/cloud-sessions/:id/changes     変更ファイルと unified diff
+ *   GET  /api/cloud-sessions/:id/pull-request  PR の状態と作成フォームの初期値 (GitHub のリポジトリから始めたセッションだけ)
+ *   POST /api/cloud-sessions/:id/pull-request  PR を作成 / 既存の PR に push して更新
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -75,13 +77,33 @@ export type CloudSession = {
 	completedAt: string | null;
 	/** これまでにかかったモデルの料金 (USD)。一覧と詳細の API だけが返す。無ければ不明 */
 	costUsd?: number;
+	/** The PR opened from this session (GitHub-repo sessions only). Absent = no PR yet */
+	pullRequest?: CloudPullRequest | null;
+};
+
+/** A pull request opened from a session (same shape as Division's PullRequestInfo). */
+export type CloudPullRequest = {
+	number: number;
+	/** html URL on github.com */
+	url: string;
+	/** Head branch the session's work was pushed to */
+	branch: string;
+	base: string;
+	headSha: string;
+	title: string;
+	draft: boolean;
+	createdAt: string;
+	updatedAt: string;
 };
 
 /**
  * plan / task は Division Project をモデルにしたセッション (model: 'division-project') だけが出す。
  * サーバーが将来ほかの種類を足しても、知らない種類は画面で読み飛ばす (toEvent は文字列をそのまま通す)。
  */
-export type CloudSessionEventType = 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task';
+export type CloudSessionEventType =
+	| 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task'
+	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
+	| 'pull_request';
 
 export type CloudSessionEvent = {
 	seq: number;
@@ -179,6 +201,8 @@ export const CLOUD_TIMEOUTS = {
 	default: 30_000,
 	launch: 300_000,
 	changes: 120_000,
+	// Creating a PR commits the workspace, pushes it and calls the GitHub API
+	pullRequest: 180_000,
 } as const;
 
 /**
@@ -278,8 +302,29 @@ const toWorkspaceInfo = (raw: unknown): CloudWorkspaceInfo | null => {
 	};
 };
 
+/** Reads a PR DTO. Returns null when it is missing or has no usable number / https URL. */
+export const toCloudPullRequest = (raw: unknown): CloudPullRequest | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const p = raw as Record<string, unknown>;
+	const number = num(p.number, Number.NaN);
+	const url = str(p.url).trim();
+	if (!Number.isInteger(number) || number <= 0 || !/^https:\/\//i.test(url)) return null;
+	return {
+		number,
+		url,
+		branch: str(p.branch),
+		base: str(p.base),
+		headSha: str(p.headSha),
+		title: str(p.title),
+		draft: p.draft === true,
+		createdAt: str(p.createdAt),
+		updatedAt: str(p.updatedAt) || str(p.createdAt),
+	};
+};
+
 export const toCloudSession = (raw: unknown): CloudSession => {
 	const s = (raw ?? {}) as Record<string, unknown>;
+	const pullRequest = toCloudPullRequest(s.pullRequest);
 	const status = STATUSES.includes(s.status as CloudSessionStatus) ? s.status as CloudSessionStatus : 'failed';
 	return {
 		id: str(s.id),
@@ -300,6 +345,7 @@ export const toCloudSession = (raw: unknown): CloudSession => {
 		startedAt: strOrNull(s.startedAt),
 		completedAt: strOrNull(s.completedAt),
 		...(typeof s.costUsd === 'number' && Number.isFinite(s.costUsd) && s.costUsd >= 0 ? { costUsd: s.costUsd } : {}),
+		...(pullRequest ? { pullRequest } : {}),
 	};
 };
 
@@ -767,6 +813,221 @@ export const validateBranch = (raw: string): string | null => {
 	}
 	return null;
 };
+
+// ---------------------------------------------------------------------------
+// Pull requests (sessions started from a GitHub repo only)
+// ---------------------------------------------------------------------------
+
+/** Prefill values the server suggests for the PR form. */
+export type CloudPullRequestSuggestion = { title: string; body: string; branch: string; base: string };
+
+/** Response of GET /api/cloud-sessions/:id/pull-request. */
+export type CloudPullRequestInfo = {
+	pullRequest: CloudPullRequest | null;
+	suggestion: CloudPullRequestSuggestion;
+	/** false = the button is replaced by `reason` */
+	canCreate: boolean;
+	/** Japanese text explaining why a PR cannot be created / updated right now */
+	reason?: string;
+	/** Machine-readable reason when the server sends one (e.g. github_not_connected) */
+	code?: string;
+};
+
+export type CreatePullRequestInput = {
+	title: string;
+	body?: string;
+	/** Head branch. Only used when the session has no PR yet; empty = the server's suggestion */
+	branch?: string;
+	base?: string;
+	draft?: boolean;
+};
+
+export type CreatePullRequestResult = {
+	pullRequest: CloudPullRequest;
+	/** false = nothing changed since the last push (the PR is already up to date) */
+	updated: boolean;
+};
+
+export const PULL_REQUEST_LIMITS = { title: 256, body: 60_000 } as const;
+
+/**
+ * Japanese fallbacks for the `code` values of the pull-request endpoints. The server's own `error` /
+ * `reason` text wins when it sends one; these are used when it only sends a code.
+ */
+export const PULL_REQUEST_REASONS: Record<string, string> = {
+	not_github_repo: 'GitHub のリポジトリから始めたセッションだけ PR を作成できます。',
+	[GITHUB_NOT_CONNECTED]: 'GitHub と連携されていないか、連携が解除されています。「GitHub と連携」してください。',
+	session_running: 'エージェントの作業中は PR を作成できません。終わるまでお待ちください。',
+	no_changes: 'ベースブランチからの変更がありません。',
+	pr_in_progress: 'ほかの操作で PR に push しています。少し待ってから試してください。',
+	branch_exists: '同じ名前のブランチがすでにリモートにあります。ブランチ名を変えてください。',
+	github_no_push_access: 'このリポジトリに push する権限がありません。',
+	github_error: 'GitHub でエラーが発生しました。しばらくしてから試してください。',
+	sandbox_archived: 'サンドボックスが削除されているため、PR を作成できません。',
+};
+
+/** Reads the GET response defensively (a missing suggestion becomes empty strings). */
+export const toPullRequestInfo = (raw: unknown): CloudPullRequestInfo => {
+	const r = (raw ?? {}) as Record<string, unknown>;
+	const s = (r.suggestion && typeof r.suggestion === 'object' ? r.suggestion : {}) as Record<string, unknown>;
+	const reason = str(r.reason).trim();
+	const code = str(r.code).trim();
+	return {
+		pullRequest: toCloudPullRequest(r.pullRequest),
+		suggestion: { title: str(s.title), body: str(s.body), branch: str(s.branch), base: str(s.base) },
+		canCreate: r.canCreate === true,
+		...(reason ? { reason } : {}),
+		...(code ? { code } : {}),
+	};
+};
+
+/** PR state and form suggestion for a session. */
+export const getPullRequestInfo = async (session: DivisionSession, id: string): Promise<CloudPullRequestInfo> =>
+	toPullRequestInfo(await request<unknown>(session, `${idPath(id)}/pull-request`));
+
+/**
+ * Whether a branch name can be used as the PR's head branch (git ref rules on top of validateBranch).
+ * Empty is fine: the server then uses its suggestion.
+ */
+export const validatePullRequestBranch = (raw: string): string | null => {
+	const value = raw.trim();
+	if (!value) return null;
+	const issue = validateBranch(value);
+	if (issue) return issue;
+	if (value.endsWith('/') || value.endsWith('.') || value.endsWith('.lock') || value.includes('//') || /(^|\/)\./.test(value)) {
+		return 'ブランチ名の形式が正しくありません (git のブランチ名として使えません)。';
+	}
+	return null;
+};
+
+/** Returns why the input cannot be sent, or null when it is valid (same limits as the server). */
+export const pullRequestInputIssue = (input: CreatePullRequestInput): string | null => {
+	const title = input.title.trim();
+	if (!title) return 'タイトルを入力してください。';
+	if (title.length > PULL_REQUEST_LIMITS.title) return `タイトルは ${PULL_REQUEST_LIMITS.title} 文字以内にしてください。`;
+	if ((input.body ?? '').length > PULL_REQUEST_LIMITS.body) {
+		return `説明は ${PULL_REQUEST_LIMITS.body.toLocaleString('en-US')} 文字以内にしてください。`;
+	}
+	return validatePullRequestBranch(input.branch ?? '') ?? validateBranch(input.base ?? '');
+};
+
+/** POST body. Empty optional values are left out. Throws when the input is invalid. */
+export const pullRequestBody = (input: CreatePullRequestInput): Record<string, string | boolean> => {
+	const issue = pullRequestInputIssue(input);
+	if (issue) throw new Error(issue);
+	const body: Record<string, string | boolean> = { title: input.title.trim() };
+	if (input.body?.trim()) body.body = input.body.trim();
+	if (input.branch?.trim()) body.branch = input.branch.trim();
+	if (input.base?.trim()) body.base = input.base.trim();
+	if (typeof input.draft === 'boolean') body.draft = input.draft;
+	return body;
+};
+
+/**
+ * Creates the PR, or pushes the current workspace to the existing PR and updates its title / body.
+ * Validates first and does not call the API when the input is invalid.
+ */
+export const createPullRequest = async (
+	session: DivisionSession,
+	id: string,
+	input: CreatePullRequestInput,
+): Promise<CreatePullRequestResult> => {
+	const body = pullRequestBody(input);
+	const data = await request<{ pullRequest?: unknown; updated?: unknown }>(
+		session, `${idPath(id)}/pull-request`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.pullRequest },
+	);
+	const pullRequest = toCloudPullRequest(data.pullRequest);
+	if (!pullRequest) throw new DivisionCloudError(502, 'PR の情報を受け取れませんでした。');
+	return { pullRequest, updated: data.updated !== false };
+};
+
+/** Error text for the pull-request endpoints: prefers the server's Japanese `error` over generic status text. */
+export const pullRequestErrorText = (e: unknown): string => {
+	if (!(e instanceof DivisionCloudError)) return cloudErrorText(e);
+	const serverText = e.message && !/^HTTP \d+$/.test(e.message) && e.message !== 'timeout' ? e.message : '';
+	if (e.code === GITHUB_NOT_CONNECTED) return e.userMessage;
+	if (e.code) return serverText || PULL_REQUEST_REASONS[e.code] || e.userMessage;
+	if (e.status === 404) return 'PR を作成できません (セッションが見つからないか、Division サーバーが PR の作成に未対応です)。';
+	if (e.status === 409 && serverText) return serverText;
+	return e.userMessage;
+};
+
+/** Whether a session offers the PR button: started from a GitHub repo and not working right now. */
+export const canOfferPullRequest = (session: Pick<CloudSession, 'workspaceInfo' | 'status'>): boolean =>
+	!!session.workspaceInfo?.repoFullName?.trim() && !isActive(session.status);
+
+/** The GET says GitHub is not connected (offer the "GitHub と連携" flow). */
+export const isPullRequestNotConnected = (info: Pick<CloudPullRequestInfo, 'code' | 'reason'>): boolean =>
+	info.code === GITHUB_NOT_CONNECTED || info.reason === GITHUB_NOT_CONNECTED;
+
+/** Text shown instead of the button when canCreate is false. A bare code is turned into Japanese. */
+export const pullRequestReasonText = (info: Pick<CloudPullRequestInfo, 'code' | 'reason'>): string => {
+	const reason = info.reason?.trim();
+	if (reason && PULL_REQUEST_REASONS[reason]) return PULL_REQUEST_REASONS[reason];
+	if (reason) return reason;
+	return (info.code && PULL_REQUEST_REASONS[info.code]) || 'いまは PR を作成できません。';
+};
+
+export type PullRequestMode = 'create' | 'update';
+
+export const pullRequestMode = (pr: CloudPullRequest | null | undefined): PullRequestMode => (pr ? 'update' : 'create');
+
+/** "PR を作成" before a PR exists, "PR を更新" after. */
+export const pullRequestActionLabel = (pr: CloudPullRequest | null | undefined): string => (pr ? 'PR を更新' : 'PR を作成');
+
+export const openPullRequestLabel = (pr: Pick<CloudPullRequest, 'number'>): string => `PR #${pr.number} を開く`;
+
+/** Values edited in the PR form. */
+export type PullRequestForm = { title: string; body: string; branch: string; base: string; draft: boolean };
+
+/** Prefills the form from the suggestion; an existing PR keeps its title, branch, base and draft state. */
+export const initialPullRequestForm = (info: Pick<CloudPullRequestInfo, 'pullRequest' | 'suggestion'>): PullRequestForm => {
+	const pr = info.pullRequest;
+	const s = info.suggestion;
+	return {
+		title: pr?.title || s.title,
+		body: s.body,
+		branch: pr?.branch || s.branch,
+		base: pr?.base || s.base,
+		draft: pr?.draft ?? false,
+	};
+};
+
+/** What the form sends. Updating an existing PR only changes title / body (branch, base and draft are fixed). */
+export const pullRequestFormInput = (form: PullRequestForm, mode: PullRequestMode): CreatePullRequestInput =>
+	mode === 'create'
+		? { title: form.title, body: form.body, branch: form.branch, base: form.base, draft: form.draft }
+		: { title: form.title, body: form.body };
+
+/** Data of a `pull_request` event. */
+export type CloudPullRequestEvent = {
+	number: number;
+	/** Empty when the server did not send a usable https URL (the card is then not tappable) */
+	url: string;
+	branch: string;
+	base: string;
+	action: 'created' | 'updated';
+	title: string;
+};
+
+/** Reads a `pull_request` event's data. Returns null when it has no PR number (not rendered). */
+export const toPullRequestEvent = (data: Record<string, unknown>): CloudPullRequestEvent | null => {
+	const number = num(data.number, Number.NaN);
+	if (!Number.isInteger(number) || number <= 0) return null;
+	const url = str(data.url).trim();
+	return {
+		number,
+		url: /^https:\/\//i.test(url) ? url : '',
+		branch: str(data.branch),
+		base: str(data.base),
+		action: data.action === 'updated' ? 'updated' : 'created',
+		title: str(data.title),
+	};
+};
+
+/** "PR #12 を作成しました" / "PR #12 を更新しました" */
+export const pullRequestEventText = (event: Pick<CloudPullRequestEvent, 'number' | 'action'>): string =>
+	`PR #${event.number} を${event.action === 'updated' ? '更新' : '作成'}しました`;
 
 // ---------------------------------------------------------------------------
 // 並列起動

@@ -16,6 +16,8 @@
  *                 カンバンと Division のプロジェクトは PC 接続が必要なので、未接続なら押せない
  *   - プロジェクト … 新規のシートで Division のプロジェクトを選ぶと、そのプロジェクトのコーダーのモデルで動く
  *   - 料金      … 各セッションの料金 (costUsd) と、一覧の合計
+ *   - PR        … Sessions started from a GitHub repo can open / update a pull request from the detail header
+ *                 (and the last completion card); `pull_request` log events render as a card. See CloudPullRequest.tsx
  *
  * 変更を手元のワークスペースに取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
  * Division API 直結なので、PC に接続していなくても使える。
@@ -66,9 +68,17 @@ import {
 import { CloudModelPicker } from '../components/CloudModelPicker';
 import { CloudProjectPicker, CloudProjects, useCloudProjects } from '../components/CloudProjectPicker';
 import {
+	PullRequestBar,
+	PullRequestEventCard,
+	PullRequestSheet,
+	currentPullRequest,
+	usePullRequestInfo,
+} from '../components/CloudPullRequest';
+import {
 	CloudChange,
 	CloudChanges,
 	CloudModelSelection,
+	CloudPullRequest,
 	CloudRepo,
 	CloudSession,
 	CloudSessionEvent,
@@ -101,6 +111,7 @@ import {
 	listPollInterval,
 	mergeEvents,
 	modelSelectionIssue,
+	pullRequestActionLabel,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
@@ -699,10 +710,12 @@ const TaskEventView = ({ data, position }: { data: Record<string, unknown>; posi
 	);
 };
 
-const EventView = ({ event, timeline, onShowChanges }: {
+const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 	event: CloudSessionEvent;
 	timeline: DivisionTimeline;
 	onShowChanges: () => void;
+	/** Extra button on the completion card (the PR button, only on the latest one) */
+	doneAction?: React.ReactNode;
 }) => {
 	const data = event.data;
 	switch (event.type) {
@@ -757,10 +770,15 @@ const EventView = ({ event, timeline, onShowChanges }: {
 						{changed !== null ? <Muted>{changed} ファイル変更</Muted> : null}
 					</Row>
 					{text(data.summary) ? <Text selectable style={styles.doneText}>{text(data.summary)}</Text> : null}
-					<Button title='変更を見る' variant='secondary' size='sm' icon='file-text' onPress={onShowChanges} style={styles.alignStart} />
+					<Row style={styles.wrapRow}>
+						<Button title='変更を見る' variant='secondary' size='sm' icon='file-text' onPress={onShowChanges} style={styles.alignStart} />
+						{doneAction}
+					</Row>
 				</View>
 			);
 		}
+		case 'pull_request':
+			return <PullRequestEventCard data={data} />;
 		default:
 			return null;
 	}
@@ -897,7 +915,8 @@ const ChangesView = ({ data, loading, error, onReload }: {
 // 詳細
 // ---------------------------------------------------------------------------
 
-const sessionKey = (s: CloudSession): string => `${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}`;
+const sessionKey = (s: CloudSession): string =>
+	`${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}|${s.pullRequest?.number ?? ''}|${s.pullRequest?.updatedAt ?? ''}`;
 
 const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, onArchived }: {
 	auth: DivisionSession;
@@ -921,6 +940,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const [sending, setSending] = useState(false);
 	const [stopping, setStopping] = useState(false);
 	const [archiving, setArchiving] = useState(false);
+	const [composingPr, setComposingPr] = useState(false);
 
 	const [changes, setChanges] = useState<CloudChanges | null>(null);
 	const [changesLoading, setChangesLoading] = useState(false);
@@ -1049,6 +1069,30 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
 	const canSend = sendable && !!draft.trim() && !sending;
 
+	// Pull request (GitHub-repo sessions only; nothing is fetched or shown otherwise)
+	const prState = usePullRequestInfo(auth, current);
+	const pullRequest = currentPullRequest(current, prState.info);
+	const applyPrResult = prState.applyResult;
+	const onPrSubmitted = useCallback((pr: CloudPullRequest) => {
+		applyPrResult(pr);
+		follow.current = true;
+		// Picks up the session's pullRequest and the new pull_request event
+		void loadEvents();
+	}, [applyPrResult, loadEvents]);
+	const lastDoneSeq = useMemo(() => {
+		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'done') return events[i].seq;
+		return null;
+	}, [events]);
+	const prDoneAction = prState.available && prState.info?.canCreate ? (
+		<Button
+			title={pullRequestActionLabel(pullRequest)}
+			variant='secondary'
+			size='sm'
+			icon='git-pull-request'
+			onPress={() => setComposingPr(true)}
+		/>
+	) : null;
+
 	return (
 		<KeyboardAvoidingView
 			style={styles.flex}
@@ -1079,6 +1123,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 					<View style={styles.flex} />
 					<Muted>{relativeTimeFromIso(current.createdAt)}に開始</Muted>
 				</Row>
+				<PullRequestBar auth={auth} session={current} state={prState} onCompose={() => setComposingPr(true)} />
 			</View>
 
 			<View style={styles.toolbar}>
@@ -1112,7 +1157,13 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
 						<View style={styles.conversation}>
 							{events.map(event => (
-								<EventView key={event.seq} event={event} timeline={timeline} onShowChanges={() => setTab('changes')} />
+								<EventView
+									key={event.seq}
+									event={event}
+									timeline={timeline}
+									onShowChanges={() => setTab('changes')}
+									doneAction={event.seq === lastDoneSeq ? prDoneAction : undefined}
+								/>
 							))}
 							{current.status === 'running' ? (
 								<View style={styles.working} accessibilityLiveRegion='polite'>
@@ -1143,6 +1194,16 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 			) : (
 				<ChangesView data={changes} loading={changesLoading} error={changesError} onReload={() => void loadChanges()} />
 			)}
+
+			{composingPr && prState.info ? (
+				<PullRequestSheet
+					auth={auth}
+					session={current}
+					info={prState.info}
+					onClose={() => setComposingPr(false)}
+					onSubmitted={result => onPrSubmitted(result.pullRequest)}
+				/>
+			) : null}
 		</KeyboardAvoidingView>
 	);
 };

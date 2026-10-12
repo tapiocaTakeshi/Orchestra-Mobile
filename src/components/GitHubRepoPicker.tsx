@@ -203,11 +203,13 @@ export const GitHubAccountRow = ({ status, disconnecting, onDisconnect }: {
 // 連携
 // ---------------------------------------------------------------------------
 
-export const GitHubConnectPanel = ({ starting, waiting, onConnect, onCancel }: {
+export const GitHubConnectPanel = ({ starting, waiting, onConnect, onCancel, description }: {
 	starting: boolean;
 	waiting: boolean;
 	onConnect: () => void;
 	onCancel: () => void;
+	/** Text above the button (defaults to the repo picker's explanation) */
+	description?: string;
 }) => (
 	<View style={styles.connectPanel}>
 		{waiting ? (
@@ -221,7 +223,7 @@ export const GitHubConnectPanel = ({ starting, waiting, onConnect, onCancel }: {
 			</>
 		) : (
 			<>
-				<Muted>GitHub アカウントと連携すると、URL を入力しなくても自分のリポジトリ (非公開を含む) を一覧から選べます。</Muted>
+				<Muted>{description ?? 'GitHub アカウントと連携すると、URL を入力しなくても自分のリポジトリ (非公開を含む) を一覧から選べます。'}</Muted>
 				<Button title='GitHub と連携' icon='github' loading={starting} onPress={onConnect} />
 			</>
 		)}
