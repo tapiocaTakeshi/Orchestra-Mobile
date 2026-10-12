@@ -14,11 +14,17 @@
  *   POST /api/cloud-sessions/:id/stop        停止
  *   POST /api/cloud-sessions/:id/archive     サンドボックスを消して一覧から隠す
  *   GET  /api/cloud-sessions/:id/changes     変更ファイルと unified diff
+ *   GET  /api/cloud-sessions/:id/pull-request  PR の状態と作成フォームの初期値 (GitHub のリポジトリから始めたセッションだけ)
+ *   POST /api/cloud-sessions/:id/pull-request  PR を作成 / 既存の PR に push して更新
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
  *
  * GitHub アカウントの連携 (/api/github/*) は divisionGitHub.ts。同じ request と DivisionCloudError を使う。
+ *
+ * モデルに 'division-project' (DIVISION_PROJECT_MODEL) と projectId を渡すと、セッションは Division Project
+ * (マルチエージェント) として動く: リーダーの計画 (plan イベント) → 役割ごとのタスク (task イベント、間の assistant に role)
+ * → まとめ (done)。計画ごとのタスクの状態は divisionTimeline で組み立てる。
  *
  * 後半の純粋関数 (状態の表示名・イベントの結合・ツールの要約・URL の検証など) は UI 非依存なので
  * そのままテストできる。
@@ -71,14 +77,41 @@ export type CloudSession = {
 	completedAt: string | null;
 	/** これまでにかかったモデルの料金 (USD)。一覧と詳細の API だけが返す。無ければ不明 */
 	costUsd?: number;
+	/** The PR opened from this session (GitHub-repo sessions only). Absent = no PR yet */
+	pullRequest?: CloudPullRequest | null;
 };
 
-export type CloudSessionEventType = 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done';
+/** A pull request opened from a session (same shape as Division's PullRequestInfo). */
+export type CloudPullRequest = {
+	number: number;
+	/** html URL on github.com */
+	url: string;
+	/** Head branch the session's work was pushed to */
+	branch: string;
+	base: string;
+	headSha: string;
+	title: string;
+	draft: boolean;
+	createdAt: string;
+	updatedAt: string;
+};
+
+/**
+ * plan / task は Division Project をモデルにしたセッション (model: 'division-project') だけが出す。
+ * サーバーが将来ほかの種類を足しても、知らない種類は画面で読み飛ばす (toEvent は文字列をそのまま通す)。
+ */
+export type CloudSessionEventType =
+	| 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task'
+	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
+	| 'pull_request';
 
 export type CloudSessionEvent = {
 	seq: number;
 	type: CloudSessionEventType;
-	/** 種類ごとの中身。user/assistant は { text }, tool は { name, args, ok, output, durationMs } など */
+	/**
+	 * 種類ごとの中身。user/assistant は { text } (Division Project では assistant に role も付く)、
+	 * tool は { name, args, ok, output, durationMs }、plan は { tasks, leaderModel }、task は { index, role, status, ... } など
+	 */
 	data: Record<string, unknown>;
 	createdAt: string;
 };
@@ -168,6 +201,10 @@ export const CLOUD_TIMEOUTS = {
 	default: 30_000,
 	launch: 300_000,
 	changes: 120_000,
+	// GET .../pull-request may start a stopped sandbox and diff it (~3 min)
+	pullRequestInfo: 300_000,
+	// POST .../pull-request commits the workspace, pushes it and calls the GitHub API (~10 min at worst)
+	pullRequest: 600_000,
 } as const;
 
 /**
@@ -267,8 +304,29 @@ const toWorkspaceInfo = (raw: unknown): CloudWorkspaceInfo | null => {
 	};
 };
 
+/** Reads a PR DTO. Returns null when it is missing or has no usable number / https URL. */
+export const toCloudPullRequest = (raw: unknown): CloudPullRequest | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const p = raw as Record<string, unknown>;
+	const number = num(p.number, Number.NaN);
+	const url = str(p.url).trim();
+	if (!Number.isInteger(number) || number <= 0 || !/^https:\/\//i.test(url)) return null;
+	return {
+		number,
+		url,
+		branch: str(p.branch),
+		base: str(p.base),
+		headSha: str(p.headSha),
+		title: str(p.title),
+		draft: p.draft === true,
+		createdAt: str(p.createdAt),
+		updatedAt: str(p.updatedAt) || str(p.createdAt),
+	};
+};
+
 export const toCloudSession = (raw: unknown): CloudSession => {
 	const s = (raw ?? {}) as Record<string, unknown>;
+	const pullRequest = toCloudPullRequest(s.pullRequest);
 	const status = STATUSES.includes(s.status as CloudSessionStatus) ? s.status as CloudSessionStatus : 'failed';
 	return {
 		id: str(s.id),
@@ -289,6 +347,7 @@ export const toCloudSession = (raw: unknown): CloudSession => {
 		startedAt: strOrNull(s.startedAt),
 		completedAt: strOrNull(s.completedAt),
 		...(typeof s.costUsd === 'number' && Number.isFinite(s.costUsd) && s.costUsd >= 0 ? { costUsd: s.costUsd } : {}),
+		...(pullRequest ? { pullRequest } : {}),
 	};
 };
 
@@ -347,18 +406,43 @@ export const fetchCloudEvents = async (
 export type CreateCloudSessionInput = {
 	prompt: string;
 	title?: string;
+	/** provider/model か DIVISION_PROJECT_MODEL。空ならプロジェクトのコーダーの割り当て */
 	model?: string;
 	projectId?: string;
 	workspaceName?: string;
 };
 
-/** サンドボックスを用意する (status は uploading で返る)。数分かかることがある。 */
-export const createCloudSession = async (session: DivisionSession, input: CreateCloudSessionInput): Promise<CloudSession> => {
+/**
+ * モデルに指定すると、そのセッションは Division Project (マルチエージェント) として動く。
+ * プロジェクトのリーダーが役割ごとのタスクに分け、各タスクをその役割に割り当てたモデルがサンドボックスで進め、
+ * 最後にまとめる。projectId が必須 (無いとサーバーは 400)。
+ */
+export const DIVISION_PROJECT_MODEL = 'division-project';
+
+export const isDivisionProjectModel = (model: string | null | undefined): boolean =>
+	(model ?? '').trim() === DIVISION_PROJECT_MODEL;
+
+/** モデルとプロジェクトの組み合わせが送れなければ理由を返す。送れるなら null。 */
+export const modelInputIssue = (model: string | undefined, projectId: string | undefined): string | null =>
+	isDivisionProjectModel(model) && !projectId?.trim()
+		? 'Division Project をモデルにするときは、プロジェクトを選んでください。'
+		: null;
+
+/** POST /api/cloud-sessions の body。空の値は送らない。Division Project なのにプロジェクトが無ければ投げる。 */
+export const createSessionBody = (input: CreateCloudSessionInput): Record<string, string> => {
+	const issue = modelInputIssue(input.model, input.projectId);
+	if (issue) throw new Error(issue);
 	const body: Record<string, string> = { prompt: input.prompt };
 	if (input.title?.trim()) body.title = input.title.trim();
 	if (input.model?.trim()) body.model = input.model.trim();
 	if (input.projectId?.trim()) body.projectId = input.projectId.trim();
 	if (input.workspaceName?.trim()) body.workspaceName = input.workspaceName.trim();
+	return body;
+};
+
+/** サンドボックスを用意する (status は uploading で返る)。数分かかることがある。 */
+export const createCloudSession = async (session: DivisionSession, input: CreateCloudSessionInput): Promise<CloudSession> => {
+	const body = createSessionBody(input);
 	const data = await request<{ session?: unknown }>(session, '', { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.launch });
 	return toCloudSession(data.session);
 };
@@ -488,9 +572,12 @@ export const cloudSource = (session: Pick<CloudSession, 'workspaceInfo' | 'works
 	return { kind: 'empty', label: '空のフォルダ' };
 };
 
-/** 一覧に出すモデル名。決まる前は指定したモデル、どちらも無ければ既定。 */
+/**
+ * 一覧に出すモデル名。決まる前は指定したモデル、どちらも無ければ既定。
+ * Division Project は決まると "Division Project · <プロジェクト名>" がサーバーから入る。
+ */
 export const cloudModelLabel = (session: Pick<CloudSession, 'model' | 'modelLabel'>): string =>
-	session.modelLabel || session.model || '既定のモデル';
+	session.modelLabel || (isDivisionProjectModel(session.model) ? 'Division Project' : session.model) || '既定のモデル';
 
 // ---------------------------------------------------------------------------
 // イベント
@@ -527,6 +614,160 @@ export const toolCallSummary = (name: string, args: unknown, max = 80): string =
 		?? Object.keys(record).find(k => typeof record[k] === 'string' && (record[k] as string).trim());
 	const value = key ? String(record[key]) : '';
 	return oneLine(value ? `${toolName} ${value}` : toolName, max);
+};
+
+// ---------------------------------------------------------------------------
+// Division Project の計画とタスク (plan / task イベント)
+// ---------------------------------------------------------------------------
+
+export type CloudPlanTask = {
+	index: number;
+	/** 役割のスラッグ (例: coder) */
+	role: string;
+	/** 役割の表示名 (例: 実装) */
+	roleName: string;
+	title: string;
+	instruction: string;
+	/** "Provider · modelId" */
+	model: string;
+};
+
+export type CloudPlan = { tasks: CloudPlanTask[]; leaderModel: string };
+
+export type CloudTaskStatus = 'start' | 'done' | 'failed';
+
+export type CloudTaskEvent = {
+	index: number;
+	role: string;
+	roleName: string;
+	title: string;
+	model: string;
+	status: CloudTaskStatus;
+	summary?: string;
+};
+
+/** 欠けた値で落ちないように plan の data を取り出す。tasks が配列でなければ空の計画。 */
+export const toCloudPlan = (data: Record<string, unknown>): CloudPlan => {
+	const rawTasks = Array.isArray(data.tasks) ? data.tasks : [];
+	const tasks = rawTasks.map((raw, i): CloudPlanTask => {
+		const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+		const role = str(t.role);
+		return {
+			index: typeof t.index === 'number' && Number.isFinite(t.index) ? t.index : i,
+			role,
+			roleName: str(t.roleName) || role || '担当',
+			title: str(t.title),
+			instruction: str(t.instruction),
+			model: str(t.model),
+		};
+	});
+	return { tasks, leaderModel: str(data.leaderModel) };
+};
+
+/** task の data を取り出す。index か status が無ければ null (表示しない)。 */
+export const toCloudTaskEvent = (data: Record<string, unknown>): CloudTaskEvent | null => {
+	const status = data.status;
+	if (typeof data.index !== 'number' || !Number.isFinite(data.index)) return null;
+	if (status !== 'start' && status !== 'done' && status !== 'failed') return null;
+	const role = str(data.role);
+	return {
+		index: data.index,
+		role,
+		roleName: str(data.roleName) || role || '担当',
+		title: str(data.title),
+		model: str(data.model),
+		status,
+		...(typeof data.summary === 'string' && data.summary.trim() ? { summary: data.summary.trim() } : {}),
+	};
+};
+
+/**
+ * 計画の各タスクの状態。
+ *   pending     … まだ始まっていない
+ *   running     … 始まって、まだ終わっていない (セッションが動いているあいだだけ)
+ *   done/failed … 終わった
+ *   interrupted … 始まったが、終わる前にセッションが止まった (停止・失敗)
+ */
+export type PlanTaskState = 'pending' | 'running' | 'done' | 'failed' | 'interrupted';
+
+export type PlanItem = CloudPlanTask & { state: PlanTaskState; summary?: string };
+
+export type PlanProgress = {
+	leaderModel: string;
+	items: PlanItem[];
+	done: number;
+	failed: number;
+};
+
+export type DivisionTimeline = {
+	/** plan イベントの seq → その計画の進み具合 */
+	plans: Map<number, PlanProgress>;
+	/** task イベントの seq → 「何番目 / 全部で何個」(計画に見つからなければ入らない) */
+	taskPositions: Map<number, { position: number; total: number }>;
+	/** 役割のスラッグ → 表示名 (assistant の role に名前を付ける) */
+	roleNames: Map<string, string>;
+};
+
+/**
+ * イベントの列から、各計画のタスクの状態を組み立てる。task イベントは直前の plan に属する
+ * (次の plan が来たら、それ以降は新しい計画)。同じタスクの task が何度か来たら最後のものを使う。
+ * active はセッションがまだ動いているか。止まっていれば、始まったまま終わっていないタスクは interrupted にする。
+ */
+export const divisionTimeline = (events: CloudSessionEvent[], active: boolean): DivisionTimeline => {
+	const plans = new Map<number, PlanProgress>();
+	const taskPositions = new Map<number, { position: number; total: number }>();
+	const roleNames = new Map<string, string>();
+
+	let currentSeq: number | null = null;
+	let currentPlan: CloudPlan | null = null;
+	let states = new Map<number, { state: PlanTaskState; summary?: string }>();
+
+	const finish = () => {
+		if (currentSeq === null || !currentPlan) return;
+		const items = currentPlan.tasks.map((task): PlanItem => {
+			const s = states.get(task.index);
+			const state: PlanTaskState = !s ? 'pending' : s.state === 'running' && !active ? 'interrupted' : s.state;
+			return { ...task, state, ...(s?.summary ? { summary: s.summary } : {}) };
+		});
+		plans.set(currentSeq, {
+			leaderModel: currentPlan.leaderModel,
+			items,
+			done: items.filter(i => i.state === 'done').length,
+			failed: items.filter(i => i.state === 'failed').length,
+		});
+	};
+
+	for (const event of events) {
+		if (event.type === 'plan') {
+			finish();
+			currentSeq = event.seq;
+			currentPlan = toCloudPlan(event.data);
+			states = new Map();
+			for (const t of currentPlan.tasks) if (t.role) roleNames.set(t.role, t.roleName);
+		} else if (event.type === 'task') {
+			const task = toCloudTaskEvent(event.data);
+			if (!task) continue;
+			if (task.role) roleNames.set(task.role, task.roleName);
+			if (!currentPlan) continue;
+			const position = currentPlan.tasks.findIndex(t => t.index === task.index);
+			if (position < 0) continue;
+			taskPositions.set(event.seq, { position: position + 1, total: currentPlan.tasks.length });
+			states.set(task.index, {
+				state: task.status === 'start' ? 'running' : task.status,
+				...(task.summary ? { summary: task.summary } : {}),
+			});
+		}
+	}
+	finish();
+	return { plans, taskPositions, roleNames };
+};
+
+/** タスクの見出し。例: "2/4 · 実装 (Anthropic · claude-opus) — API を足す" */
+export const taskHeaderLabel = (task: Pick<CloudTaskEvent, 'roleName' | 'model' | 'title'>, position?: { position: number; total: number }): string => {
+	const head = position ? `${position.position}/${position.total} · ` : '';
+	const model = task.model ? ` (${task.model})` : '';
+	const title = task.title ? ` — ${task.title}` : '';
+	return `${head}${task.roleName}${model}${title}`;
 };
 
 // ---------------------------------------------------------------------------
@@ -576,6 +817,284 @@ export const validateBranch = (raw: string): string | null => {
 };
 
 // ---------------------------------------------------------------------------
+// Pull requests (sessions started from a GitHub repo only)
+// ---------------------------------------------------------------------------
+
+/** Prefill values the server suggests for the PR form. */
+export type CloudPullRequestSuggestion = { title: string; body: string; branch: string; base: string };
+
+/** State of the session's PR on GitHub. */
+export type CloudPullRequestState = 'open' | 'closed' | 'merged';
+
+const PULL_REQUEST_STATES: CloudPullRequestState[] = ['open', 'closed', 'merged'];
+
+/** Response of GET /api/cloud-sessions/:id/pull-request. */
+export type CloudPullRequestInfo = {
+	pullRequest: CloudPullRequest | null;
+	/**
+	 * Only meaningful when pullRequest is set; null = GitHub could not be read.
+	 * merged / closed: the suggestion is a fresh one and the next POST opens a new PR.
+	 * open: the suggestion holds the PR's current title / body / branch / base on GitHub.
+	 */
+	pullRequestState?: CloudPullRequestState | null;
+	suggestion: CloudPullRequestSuggestion;
+	/** false = the button is replaced by `reason` */
+	canCreate: boolean;
+	/** Japanese text explaining why a PR cannot be created / updated right now */
+	reason?: string;
+	/** Machine-readable reason, sent with every reason (e.g. github_not_connected) */
+	code?: string;
+};
+
+export type CreatePullRequestInput = {
+	title: string;
+	body?: string;
+	/** Head branch. Only used when the session has no PR yet; empty = the server's suggestion */
+	branch?: string;
+	base?: string;
+	draft?: boolean;
+};
+
+export type CreatePullRequestAction = 'created' | 'updated' | 'unchanged';
+
+export type CreatePullRequestResult = {
+	pullRequest: CloudPullRequest;
+	/** true = a commit was pushed, a PR was created, or the title / body were patched */
+	updated: boolean;
+	/** What happened ("unchanged" = the PR is already up to date) */
+	action: CreatePullRequestAction;
+};
+
+export const PULL_REQUEST_LIMITS = { title: 256, body: 60_000 } as const;
+
+/**
+ * Japanese fallbacks for the `code` values of the pull-request endpoints. The server's own `error` /
+ * `reason` text wins when it sends one; these are used when it only sends a code.
+ */
+export const PULL_REQUEST_REASONS: Record<string, string> = {
+	not_github_repo: 'GitHub のリポジトリから始めたセッションだけ PR を作成できます。',
+	[GITHUB_NOT_CONNECTED]: 'GitHub と連携されていないか、連携が解除されています。「GitHub と連携」してください。',
+	session_running: 'エージェントの作業中は PR を作成できません。終わるまでお待ちください。',
+	no_changes: 'ベースブランチからの変更がありません。',
+	pr_in_progress: 'ほかの操作で PR に push しています。少し待ってから試してください。',
+	branch_exists: '同じ名前のブランチがすでにリモートにあります。ブランチ名を変えてください。',
+	github_no_push_access: 'このリポジトリに push する権限がありません。',
+	github_error: 'GitHub でエラーが発生しました。しばらくしてから試してください。',
+	github_not_configured: 'サーバー側で GitHub 連携が未設定のため、PR を作成できません。',
+	session_archived: 'サンドボックスが削除されているため、PR を作成できません。',
+	sandbox_error: 'サンドボックスで git の操作に失敗しました。しばらくしてから試してください。',
+	branch_diverged: 'PR のブランチにほかの push があるため更新できません。GitHub で確認してください。',
+	missing_parent: '前回の PR のコミットがサンドボックスに見つからないため更新できません。',
+	validation: '入力内容が正しくありません。',
+};
+
+/** Reads the GET response defensively (a missing suggestion becomes empty strings). */
+export const toPullRequestInfo = (raw: unknown): CloudPullRequestInfo => {
+	const r = (raw ?? {}) as Record<string, unknown>;
+	const s = (r.suggestion && typeof r.suggestion === 'object' ? r.suggestion : {}) as Record<string, unknown>;
+	const reason = str(r.reason).trim();
+	const code = str(r.code).trim();
+	const pullRequest = toCloudPullRequest(r.pullRequest);
+	return {
+		pullRequest,
+		suggestion: { title: str(s.title), body: str(s.body), branch: str(s.branch), base: str(s.base) },
+		canCreate: r.canCreate === true,
+		...(pullRequest
+			? { pullRequestState: PULL_REQUEST_STATES.includes(r.pullRequestState as CloudPullRequestState) ? r.pullRequestState as CloudPullRequestState : null }
+			: {}),
+		...(reason ? { reason } : {}),
+		...(code ? { code } : {}),
+	};
+};
+
+/** PR state and form suggestion for a session. */
+export const getPullRequestInfo = async (session: DivisionSession, id: string): Promise<CloudPullRequestInfo> =>
+	toPullRequestInfo(await request<unknown>(session, `${idPath(id)}/pull-request`, { timeoutMs: CLOUD_TIMEOUTS.pullRequestInfo }));
+
+/**
+ * Whether a branch name can be used as the PR's head branch (git ref rules on top of validateBranch).
+ * Empty is fine: the server then uses its suggestion.
+ */
+export const validatePullRequestBranch = (raw: string): string | null => {
+	const value = raw.trim();
+	if (!value) return null;
+	const issue = validateBranch(value);
+	if (issue) return issue;
+	if (value.endsWith('/') || value.endsWith('.') || value.endsWith('.lock') || value.includes('//') || /(^|\/)\./.test(value)) {
+		return 'ブランチ名の形式が正しくありません (git のブランチ名として使えません)。';
+	}
+	return null;
+};
+
+/** Returns why the input cannot be sent, or null when it is valid (same limits as the server). */
+export const pullRequestInputIssue = (input: CreatePullRequestInput): string | null => {
+	const title = input.title.trim();
+	if (!title) return 'タイトルを入力してください。';
+	if (title.length > PULL_REQUEST_LIMITS.title) return `タイトルは ${PULL_REQUEST_LIMITS.title} 文字以内にしてください。`;
+	if ((input.body ?? '').length > PULL_REQUEST_LIMITS.body) {
+		return `説明は ${PULL_REQUEST_LIMITS.body.toLocaleString('en-US')} 文字以内にしてください。`;
+	}
+	return validatePullRequestBranch(input.branch ?? '') ?? validateBranch(input.base ?? '');
+};
+
+/** POST body. Empty optional values are left out. Throws when the input is invalid. */
+export const pullRequestBody = (input: CreatePullRequestInput): Record<string, string | boolean> => {
+	const issue = pullRequestInputIssue(input);
+	if (issue) throw new Error(issue);
+	const body: Record<string, string | boolean> = { title: input.title.trim() };
+	if (input.body?.trim()) body.body = input.body.trim();
+	if (input.branch?.trim()) body.branch = input.branch.trim();
+	if (input.base?.trim()) body.base = input.base.trim();
+	if (typeof input.draft === 'boolean') body.draft = input.draft;
+	return body;
+};
+
+/**
+ * Creates the PR, or pushes the current workspace to the existing PR and updates its title / body.
+ * Validates first and does not call the API when the input is invalid.
+ */
+export const createPullRequest = async (
+	session: DivisionSession,
+	id: string,
+	input: CreatePullRequestInput,
+): Promise<CreatePullRequestResult> => {
+	const body = pullRequestBody(input);
+	const data = await request<{ pullRequest?: unknown; updated?: unknown; action?: unknown }>(
+		session, `${idPath(id)}/pull-request`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.pullRequest },
+	);
+	const pullRequest = toCloudPullRequest(data.pullRequest);
+	if (!pullRequest) throw new DivisionCloudError(502, 'PR の情報を受け取れませんでした。');
+	const updated = data.updated !== false;
+	const action: CreatePullRequestAction = data.action === 'created' || data.action === 'updated' || data.action === 'unchanged'
+		? data.action
+		// Older servers sent only `updated`
+		: updated ? 'updated' : 'unchanged';
+	return { pullRequest, updated, action };
+};
+
+/** Error text for the pull-request endpoints: prefers the server's Japanese `error` over generic status text. */
+export const pullRequestErrorText = (e: unknown): string => {
+	if (!(e instanceof DivisionCloudError)) return cloudErrorText(e);
+	const serverText = e.message && !/^HTTP \d+$/.test(e.message) && e.message !== 'timeout' ? e.message : '';
+	if (e.code === GITHUB_NOT_CONNECTED) return e.userMessage;
+	if (e.code) return serverText || PULL_REQUEST_REASONS[e.code] || e.userMessage;
+	if (e.status === 404) return 'PR を作成できません (セッションが見つからないか、Division サーバーが PR の作成に未対応です)。';
+	if (e.status === 409 && serverText) return serverText;
+	return e.userMessage;
+};
+
+/** Whether a session offers the PR button: started from a GitHub repo and not working right now. */
+export const canOfferPullRequest = (session: Pick<CloudSession, 'workspaceInfo' | 'status'>): boolean =>
+	!!session.workspaceInfo?.repoFullName?.trim() && !isActive(session.status);
+
+/** The GET says GitHub is not connected (offer the "GitHub と連携" flow). */
+export const isPullRequestNotConnected = (info: Pick<CloudPullRequestInfo, 'code' | 'reason'>): boolean =>
+	info.code === GITHUB_NOT_CONNECTED || info.reason === GITHUB_NOT_CONNECTED;
+
+/** Text shown instead of the button when canCreate is false. A bare code is turned into Japanese. */
+export const pullRequestReasonText = (info: Pick<CloudPullRequestInfo, 'code' | 'reason'>): string => {
+	const reason = info.reason?.trim();
+	if (reason && PULL_REQUEST_REASONS[reason]) return PULL_REQUEST_REASONS[reason];
+	if (reason) return reason;
+	return (info.code && PULL_REQUEST_REASONS[info.code]) || 'いまは PR を作成できません。';
+};
+
+export type PullRequestMode = 'create' | 'update';
+
+/** A merged / closed PR cannot be updated: the next POST opens a new PR. */
+export const isPullRequestFinished = (state: CloudPullRequestState | null | undefined): boolean =>
+	state === 'merged' || state === 'closed';
+
+/** 'update' only while the PR is open (or its state is unknown); otherwise a new PR is created. */
+export const pullRequestMode = (pr: CloudPullRequest | null | undefined, state?: CloudPullRequestState | null): PullRequestMode =>
+	pr && !isPullRequestFinished(state) ? 'update' : 'create';
+
+/** "PR を作成" before a PR exists, "PR を更新" while it is open, "新しい PR を作成" once merged / closed. */
+export const pullRequestActionLabel = (pr: CloudPullRequest | null | undefined, state?: CloudPullRequestState | null): string =>
+	!pr ? 'PR を作成' : isPullRequestFinished(state) ? '新しい PR を作成' : 'PR を更新';
+
+export const PULL_REQUEST_STATE_LABELS: Record<CloudPullRequestState, string> = {
+	open: 'オープン',
+	merged: 'マージ済み',
+	closed: 'クローズ済み',
+};
+
+/**
+ * The state of `pr` from a GET result. The session DTO can be newer than the GET, so the state is only
+ * used when it belongs to the same PR number; otherwise it is unknown (null).
+ */
+export const pullRequestStateFor = (
+	pr: Pick<CloudPullRequest, 'number'> | null | undefined,
+	info: Pick<CloudPullRequestInfo, 'pullRequest' | 'pullRequestState'> | null | undefined,
+): CloudPullRequestState | null =>
+	pr && info?.pullRequest?.number === pr.number ? info.pullRequestState ?? null : null;
+
+export const openPullRequestLabel = (pr: Pick<CloudPullRequest, 'number'>): string => `PR #${pr.number} を開く`;
+
+/** Values edited in the PR form. */
+export type PullRequestForm = { title: string; body: string; branch: string; base: string; draft: boolean };
+
+/**
+ * Prefills the form from the suggestion. While a PR is open the suggestion holds its current values on GitHub
+ * (the PR's own fields fill any gap); after merge / close it is a fresh suggestion for a new PR.
+ */
+export const initialPullRequestForm = (
+	info: Pick<CloudPullRequestInfo, 'pullRequest' | 'suggestion' | 'pullRequestState'>,
+): PullRequestForm => {
+	const s = info.suggestion;
+	const pr = pullRequestMode(info.pullRequest, info.pullRequestState) === 'update' ? info.pullRequest : null;
+	return {
+		title: s.title || pr?.title || '',
+		body: s.body,
+		branch: s.branch || pr?.branch || '',
+		base: s.base || pr?.base || '',
+		draft: pr?.draft ?? false,
+	};
+};
+
+/** Result text after a POST: "PR #n を作成しました" / "PR #n を更新しました" / "変更はありません（PR は最新です）". */
+export const pullRequestResultText = (result: Pick<CreatePullRequestResult, 'action' | 'pullRequest'>): string =>
+	result.action === 'unchanged'
+		? '変更はありません（PR は最新です）'
+		: pullRequestEventText({ number: result.pullRequest.number, action: result.action });
+
+/** What the form sends. Updating an existing PR only changes title / body (branch, base and draft are fixed). */
+export const pullRequestFormInput = (form: PullRequestForm, mode: PullRequestMode): CreatePullRequestInput =>
+	mode === 'create'
+		? { title: form.title, body: form.body, branch: form.branch, base: form.base, draft: form.draft }
+		: { title: form.title, body: form.body };
+
+/** Data of a `pull_request` event. */
+export type CloudPullRequestEvent = {
+	number: number;
+	/** Empty when the server did not send a usable https URL (the card is then not tappable) */
+	url: string;
+	branch: string;
+	base: string;
+	action: 'created' | 'updated';
+	title: string;
+};
+
+/** Reads a `pull_request` event's data. Returns null when it has no PR number (not rendered). */
+export const toPullRequestEvent = (data: Record<string, unknown>): CloudPullRequestEvent | null => {
+	const number = num(data.number, Number.NaN);
+	if (!Number.isInteger(number) || number <= 0) return null;
+	const url = str(data.url).trim();
+	return {
+		number,
+		url: /^https:\/\//i.test(url) ? url : '',
+		branch: str(data.branch),
+		base: str(data.base),
+		action: data.action === 'updated' ? 'updated' : 'created',
+		title: str(data.title),
+	};
+};
+
+/** "PR #12 を作成しました" / "PR #12 を更新しました" */
+export const pullRequestEventText = (event: Pick<CloudPullRequestEvent, 'number' | 'action'>): string =>
+	`PR #${event.number} を${event.action === 'updated' ? '更新' : '作成'}しました`;
+
+// ---------------------------------------------------------------------------
 // 並列起動
 // ---------------------------------------------------------------------------
 
@@ -587,6 +1106,7 @@ export type LaunchInput = {
 	count: number;
 	/** 無ければ空のフォルダで始める。{ url } か GitHub 連携で選んだ { fullName } */
 	repo?: CloudRepo;
+	/** provider/model か DIVISION_PROJECT_MODEL (このときは projectId が必須) */
 	model?: string;
 	title?: string;
 	/** Division のプロジェクト ID。指定するとそのプロジェクトの「コーダー」のモデルで動く (model が優先) */
@@ -633,6 +1153,8 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 			?? validateBranch(repo.branch ?? '');
 		if (issue) throw new Error(issue);
 	}
+	const modelIssue = modelInputIssue(input.model, input.projectId);
+	if (modelIssue) throw new Error(modelIssue);
 
 	const titles = launchTitles({ ...input, prompt });
 	// workspaceName はリポジトリ名 (clone したときのフォルダ名) にする
@@ -651,6 +1173,117 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 			return { index, title, ...(created ? { session: created } : {}), error: cloudErrorText(e) };
 		}
 	}));
+};
+
+// ---------------------------------------------------------------------------
+// モデルの選択 (新しいセッションのシート)
+// ---------------------------------------------------------------------------
+
+/**
+ * モデルの選び方。デスクトップのモデルの選択と同じく Division Project を先頭に置く。
+ *   division … Division Project (マルチエージェント)。model = 'division-project' と、そのプロジェクトの projectId を送る
+ *   default  … 既定。model を送らない (プロジェクトを選んでいればそのコーダー、無ければサーバーの既定)
+ *   custom   … provider/model を直接入力 (上級者向け)
+ */
+export type CloudModelMode = 'division' | 'default' | 'custom';
+
+export type CloudModelSelection = {
+	mode: CloudModelMode;
+	/** custom のときのモデル */
+	model: string;
+	/** division ではモデルにした Division Project、それ以外では「プロジェクト」で選んだもの (空なら指定なし) */
+	projectId: string;
+};
+
+export type CloudModelOption = {
+	/** 選択中かを比べるキー (division:<id> / default / custom) */
+	key: string;
+	mode: CloudModelMode;
+	label: string;
+	detail?: string;
+	/** division のときのプロジェクト ID */
+	projectId?: string;
+	/** PC で有効なプロジェクト */
+	active?: boolean;
+};
+
+export const DEFAULT_MODEL_LABEL = '既定 (プロジェクトの coder ロール)';
+export const CUSTOM_MODEL_LABEL = 'モデルを直接指定';
+
+export const modelOptionKey = (selection: Pick<CloudModelSelection, 'mode' | 'projectId'>): string =>
+	selection.mode === 'division' ? `division:${selection.projectId}` : selection.mode;
+
+/**
+ * モデルの選択肢。プロジェクトごとの "Division Project · <名前>" (一覧の順)、既定、直接指定の順。
+ * selectedProjectId (いま division で選んでいるもの) が一覧に無ければ、見失わないよう先頭に足す。
+ */
+export const cloudModelOptions = (
+	projects: { id: string; name: string; active?: boolean }[],
+	selectedProjectId?: string,
+): CloudModelOption[] => {
+	const division: CloudModelOption[] = projects.map(p => ({
+		key: `division:${p.id}`,
+		mode: 'division',
+		label: `Division Project · ${p.name}`,
+		detail: 'リーダーが役割ごとに分担し、各役割のモデルが順に進めます',
+		projectId: p.id,
+		...(p.active ? { active: true } : {}),
+	}));
+	const missing = selectedProjectId?.trim();
+	if (missing && !projects.some(p => p.id === missing)) {
+		division.unshift({
+			key: `division:${missing}`,
+			mode: 'division',
+			label: `Division Project · プロジェクト ${missing.slice(0, 8)}`,
+			detail: '一覧に見つかりません (削除されたか、別のアカウントのプロジェクトです)',
+			projectId: missing,
+		});
+	}
+	return [
+		...division,
+		{ key: 'default', mode: 'default', label: DEFAULT_MODEL_LABEL, detail: 'プロジェクトを選べばその coder、無ければサーバーの既定' },
+		{ key: 'custom', mode: 'custom', label: CUSTOM_MODEL_LABEL, detail: 'provider/model を入力 (上級者向け)' },
+	];
+};
+
+/** 選択肢を選んだあとの選択。division はそのプロジェクトにし、ほかはプロジェクトとモデルの入力を残す。 */
+export const applyModelOption = (current: CloudModelSelection, option: CloudModelOption): CloudModelSelection =>
+	option.mode === 'division'
+		? { ...current, mode: 'division', projectId: option.projectId ?? '' }
+		: { ...current, mode: option.mode };
+
+/** 起動に送る model と projectId。 */
+export const launchModelFields = (selection: CloudModelSelection): { model?: string; projectId?: string } => {
+	const projectId = selection.projectId.trim() || undefined;
+	switch (selection.mode) {
+		case 'division':
+			return { model: DIVISION_PROJECT_MODEL, ...(projectId ? { projectId } : {}) };
+		case 'custom': {
+			const model = selection.model.trim() || undefined;
+			return { ...(model ? { model } : {}), ...(projectId ? { projectId } : {}) };
+		}
+		default:
+			return projectId ? { projectId } : {};
+	}
+};
+
+/** 起動できない理由 (Division Project なのにプロジェクトが無いなど)。起動できるなら null。 */
+export const modelSelectionIssue = (selection: CloudModelSelection): string | null => {
+	const fields = launchModelFields(selection);
+	return modelInputIssue(fields.model, fields.projectId);
+};
+
+/** 保存しておいた選択を読み戻す。形が違えば null。 */
+export const toModelSelection = (raw: unknown): CloudModelSelection | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const r = raw as Record<string, unknown>;
+	if (r.mode !== 'division' && r.mode !== 'default' && r.mode !== 'custom') return null;
+	const selection: CloudModelSelection = {
+		mode: r.mode,
+		model: typeof r.model === 'string' ? r.model : '',
+		projectId: typeof r.projectId === 'string' ? r.projectId : '',
+	};
+	return modelSelectionIssue(selection) ? null : selection;
 };
 
 // ---------------------------------------------------------------------------
