@@ -8,7 +8,10 @@
  *   - 一覧      … 状態・題名・変更ファイル数・モデル・出どころ。動いているものがあれば 4 秒、無ければ 20 秒ごとに更新
  *   - 新規      … 指示・並列数 (1〜10)・出どころ (Git リポジトリ / 空のフォルダ)・モデル。
  *                 リポジトリは GitHub と連携していれば一覧から選べる (非公開も可)。URL の直接入力も残してある
- *   - 詳細      … ログ (指示・返答・ツール実行・状態) を 2 秒ごとに差分取得、変更ファイルと差分 (読むだけ)
+ *   - モデル    … デスクトップのモデルの選択と同じく "Division Project · <プロジェクト>" が先頭。選ぶとリーダーが
+ *                 役割ごとに分担するマルチエージェントで動く。続けて既定 (プロジェクトの coder)・直接指定。前回の選択を覚える
+ *   - 詳細      … ログ (指示・返答・ツール実行・状態) を 2 秒ごとに差分取得、変更ファイルと差分 (読むだけ)。
+ *                 Division Project では計画 (チェックリスト)・タスクの見出しと結果・返答の役割も出す
  *   - 上の段    … 「プロジェクト」「コスト」「カンバン」へのショートカット (デスクトップと同じくクラウドから辿れる)。
  *                 カンバンと Division のプロジェクトは PC 接続が必要なので、未接続なら押せない
  *   - プロジェクト … 新規のシートで Division のプロジェクトを選ぶと、そのプロジェクトのコーダーのモデルで動く
@@ -60,17 +63,22 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { CloudModelPicker } from '../components/CloudModelPicker';
 import { CloudProjectPicker, CloudProjects, useCloudProjects } from '../components/CloudProjectPicker';
 import {
 	CloudChange,
 	CloudChanges,
+	CloudModelSelection,
 	CloudRepo,
 	CloudSession,
 	CloudSessionEvent,
 	CloudSessionStatus,
 	CloudSource,
+	DivisionTimeline,
 	MAX_PARALLEL_SESSIONS,
 	PatchSection,
+	PlanProgress,
+	PlanTaskState,
 	archiveCloudSession,
 	canSendMessage,
 	classifyPatchLines,
@@ -79,21 +87,28 @@ import {
 	cloudSource,
 	cloudStatusColor,
 	cloudStatusLabel,
+	divisionTimeline,
 	fetchCloudChanges,
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	isDivisionProjectModel,
 	isFullNameRepo,
 	lastSeqOf,
+	launchModelFields,
 	launchSessions,
 	listCloudSessions,
 	listPollInterval,
 	mergeEvents,
+	modelSelectionIssue,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
 	stopCloudSession,
 	sumCloudCosts,
+	taskHeaderLabel,
+	toCloudPlan,
+	toCloudTaskEvent,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -102,7 +117,7 @@ import {
 import { DivisionSession } from '../lib/divisionAuth';
 import { GitHubRepo } from '../lib/divisionGitHub';
 import { CloudProjectOption, projectLabel } from '../lib/divisionProjects';
-import { durationText, relativeTimeFromIso } from '../lib/format';
+import { durationText, oneLine, relativeTimeFromIso } from '../lib/format';
 import { formatUsdCompact } from '../lib/tuning';
 import { OpenPage, PageKey, canOpenPage } from '../navigation';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
@@ -115,7 +130,13 @@ import {
 } from '../components/GitHubRepoPicker';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { clearLastCloudRepo, loadLastCloudRepo, saveLastCloudRepo } from '../state/cloudStorage';
+import {
+	clearLastCloudRepo,
+	loadLastCloudModel,
+	loadLastCloudRepo,
+	saveLastCloudModel,
+	saveLastCloudRepo,
+} from '../state/cloudStorage';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 /** 開いているセッションのイベントを取りに行く間隔。 */
@@ -140,6 +161,9 @@ const useForeground = (): boolean => {
 };
 
 const SOURCE_ICONS: Record<CloudSource['kind'], IconName> = { repo: 'git-branch', workspace: 'monitor', empty: 'folder' };
+
+/** Division Project (マルチエージェント) は人の集まりの印、それ以外はチップの印。 */
+const modelIcon = (session: Pick<CloudSession, 'model'>): IconName => (isDivisionProjectModel(session.model) ? 'users' : 'cpu');
 
 /** 状態の印。動いているあいだはくるくる、止まっていれば色の点。 */
 const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
@@ -220,7 +244,7 @@ const SessionRow = ({ item, projectName, onPress, onStop, stopping }: {
 				<Text style={styles.rowTitle} numberOfLines={2}>{item.title}</Text>
 				<Text style={[styles.rowMeta, { color: cloudStatusColor(item.status) }]} numberOfLines={1}>{meta}</Text>
 				<Row style={styles.rowBadges}>
-					<Badge label={cloudModelLabel(item)} icon='cpu' />
+					<Badge label={cloudModelLabel(item)} icon={modelIcon(item)} />
 					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
 					{projectName ? <Badge label={projectName} icon='layers' /> : null}
 				</Row>
@@ -248,12 +272,21 @@ type Draft = {
 	manualUrl: boolean;
 	repoUrl: string;
 	branch: string;
+	/** モデルの選び方 (Division Project / 既定 / 直接指定) */
+	modelMode: CloudModelSelection['mode'];
+	/** 直接指定のモデル (provider/model) */
 	model: string;
 	title: string;
-	/** Division のプロジェクト ID (空なら指定なし) */
+	/**
+	 * Division のプロジェクト ID (空なら指定なし)。モデルに Division Project を選んだときはそのプロジェクトで、
+	 * 「プロジェクト」の欄はこれに固定される (モデルとプロジェクトが食い違わないよう 1 つの値で持つ)。
+	 */
 	projectId: string;
 	showAdvanced: boolean;
 };
+
+const modelSelectionOf = (draft: Pick<Draft, 'modelMode' | 'model' | 'projectId'>): CloudModelSelection =>
+	({ mode: draft.modelMode, model: draft.model, projectId: draft.projectId });
 
 const EMPTY_DRAFT: Draft = {
 	prompt: '',
@@ -264,6 +297,7 @@ const EMPTY_DRAFT: Draft = {
 	manualUrl: false,
 	repoUrl: '',
 	branch: '',
+	modelMode: 'default',
 	model: '',
 	title: '',
 	projectId: '',
@@ -286,7 +320,7 @@ const SOURCE_OPTIONS: { value: Draft['source']; label: string }[] = [
 type RepoMode = 'picker' | 'manual' | 'loading';
 
 const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUrl: string | null; branch: string | null; ok: boolean } => {
-	const prompt = !!draft.prompt.trim();
+	const prompt = !!draft.prompt.trim() && !modelSelectionIssue(modelSelectionOf(draft));
 	if (draft.source !== 'repo') return { repoUrl: null, branch: null, ok: prompt };
 	if (mode === 'manual') {
 		const repoUrl = validateRepoUrl(draft.repoUrl);
@@ -467,8 +501,33 @@ const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }:
 				</View>
 
 				<View style={styles.field}>
+					<SectionTitle>モデル</SectionTitle>
+					<CloudModelPicker
+						projects={projects}
+						value={modelSelectionOf(draft)}
+						onChange={next => onChange(d => ({ ...d, modelMode: next.mode, model: next.model, projectId: next.projectId }))}
+					/>
+					{draft.modelMode === 'division' ? (
+						<Muted>
+							プロジェクトのリーダーが指示を役割ごとのタスクに分け、各役割に割り当てたモデルがサンドボックスで順に進めて、
+							最後にまとめます。ログに計画と各タスクの進み具合が出ます。
+						</Muted>
+					) : null}
+				</View>
+
+				<View style={styles.field}>
 					<SectionTitle>プロジェクト</SectionTitle>
-					<CloudProjectPicker projects={projects} value={draft.projectId} onChange={value => set('projectId', value)} />
+					<CloudProjectPicker
+						projects={projects}
+						value={draft.projectId}
+						onChange={value => set('projectId', value)}
+						lockedReason={draft.modelMode === 'division'
+							? 'モデルに Division Project を選んでいるので、そのプロジェクトに固定しています (変えるときはモデルの欄から)。'
+							: undefined}
+						hint={draft.modelMode === 'custom' && draft.model.trim()
+							? '直接指定したモデルで動きます (プロジェクトのコーダーより優先)。'
+							: '選んだプロジェクトの「コーダー」に割り当てたモデルで動きます。'}
+					/>
 				</View>
 
 				<Pressable
@@ -482,14 +541,6 @@ const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }:
 				</Pressable>
 				{draft.showAdvanced ? (
 					<View style={styles.field}>
-						<Input
-							value={draft.model}
-							onChangeText={value => set('model', value)}
-							placeholder='モデル (例: provider/model。空欄ならプロジェクトのコーダー)'
-							autoCapitalize='none'
-							autoCorrect={false}
-							accessibilityLabel='モデル'
-						/>
 						<Input
 							value={draft.title}
 							onChangeText={value => set('title', value)}
@@ -553,13 +604,130 @@ const ToolRow = ({ data }: { data: Record<string, unknown> }) => {
 	);
 };
 
-const EventView = ({ event, onShowChanges }: { event: CloudSessionEvent; onShowChanges: () => void }) => {
+// ---------------------------------------------------------------------------
+// Division Project の計画とタスク
+// ---------------------------------------------------------------------------
+
+/** 役割の小さなチップ (例: 実装)。 */
+const RoleChip = ({ label }: { label: string }) => (
+	<View style={styles.roleChip}>
+		<Text style={styles.roleChipText} numberOfLines={1}>{label}</Text>
+	</View>
+);
+
+const PLAN_STATE_LABELS: Record<PlanTaskState, string> = {
+	pending: '未着手',
+	running: '実行中',
+	done: '完了',
+	failed: '失敗',
+	interrupted: '中断',
+};
+
+/** チェックリストの印。✓ 完了 / ✕ 失敗 / くるくる 実行中 / 白抜き 未着手 / − 中断。 */
+const PlanMarker = ({ state }: { state: PlanTaskState }) => (
+	<View style={styles.planMarker}>
+		{state === 'done' ? <Icon name='check' size={15} color={colors.success} />
+			: state === 'failed' ? <Icon name='x' size={15} color={colors.danger} />
+				: state === 'running' ? <ActivityIndicator size='small' color={colors.running} />
+					: state === 'interrupted' ? <Icon name='minus' size={15} color={colors.fgFaint} />
+						: <View style={styles.planHollow} />}
+	</View>
+);
+
+const PlanCard = ({ progress }: { progress: PlanProgress }) => {
+	const total = progress.items.length;
+	return (
+		<View style={styles.planCard} accessibilityLabel={`計画 ${total} タスク、${progress.done} 件完了`}>
+			<Row>
+				<Icon name='list' size={16} color={colors.accentText} />
+				<Text style={styles.planTitle}>計画 · {total} タスク</Text>
+				<View style={styles.flex} />
+				<Muted>{progress.done}/{total} 完了{progress.failed > 0 ? ` · ${progress.failed} 失敗` : ''}</Muted>
+			</Row>
+			{progress.leaderModel ? <Text style={styles.planMeta} numberOfLines={1}>リーダー: {progress.leaderModel}</Text> : null}
+			{total === 0 ? <Muted>タスクはありません。</Muted> : null}
+			{progress.items.map((item, i) => (
+				<View
+					key={`${item.index}-${i}`}
+					style={styles.planItem}
+					accessibilityLabel={`${i + 1}. ${item.roleName}: ${item.title}。${PLAN_STATE_LABELS[item.state]}`}
+				>
+					<PlanMarker state={item.state} />
+					<View style={styles.flex}>
+						<View style={styles.planItemHead}>
+							<RoleChip label={item.roleName} />
+							<Text
+								style={[styles.planItemTitle, item.state === 'done' && styles.planItemDone]}
+								numberOfLines={2}
+							>
+								{item.title || '(題名なし)'}
+							</Text>
+						</View>
+						{item.model ? <Text style={styles.planItemModel} numberOfLines={1}>{item.model}</Text> : null}
+					</View>
+				</View>
+			))}
+		</View>
+	);
+};
+
+const TaskEventView = ({ data, position }: { data: Record<string, unknown>; position?: { position: number; total: number } }) => {
+	const task = toCloudTaskEvent(data);
+	if (!task) return null;
+	if (task.status === 'start') {
+		return (
+			<View style={styles.taskHeader} accessibilityRole='header' accessibilityLabel={taskHeaderLabel(task, position)}>
+				<View style={styles.taskHeaderLine} />
+				<Text style={styles.taskHeaderText}>
+					{position ? <Text style={styles.taskHeaderPos}>{position.position}/{position.total} · </Text> : null}
+					{task.roleName}
+					{task.model ? <Text style={styles.taskHeaderModel}> ({task.model})</Text> : null}
+					{task.title ? ` — ${task.title}` : ''}
+				</Text>
+			</View>
+		);
+	}
+	const ok = task.status === 'done';
+	return (
+		<View style={styles.taskResult}>
+			<Icon name={ok ? 'check' : 'x'} size={14} color={ok ? colors.success : colors.danger} />
+			<Text selectable style={styles.taskResultText} numberOfLines={3}>
+				<Text style={{ color: ok ? colors.fgMuted : colors.danger }}>{task.roleName}{ok ? ' 完了' : ' 失敗'}</Text>
+				{task.summary ? ` · ${oneLine(task.summary, 240)}` : ''}
+			</Text>
+		</View>
+	);
+};
+
+const EventView = ({ event, timeline, onShowChanges }: {
+	event: CloudSessionEvent;
+	timeline: DivisionTimeline;
+	onShowChanges: () => void;
+}) => {
 	const data = event.data;
 	switch (event.type) {
 		case 'user':
 			return <UserBubble value={text(data.text)} />;
-		case 'assistant':
-			return text(data.text).trim() ? <Text selectable style={styles.assistantText}>{text(data.text).trim()}</Text> : null;
+		case 'assistant': {
+			const value = text(data.text).trim();
+			if (!value) return null;
+			const role = text(data.role);
+			if (!role) return <Text selectable style={styles.assistantText}>{value}</Text>;
+			return (
+				<View style={styles.assistantWithRole}>
+					<RoleChip label={timeline.roleNames.get(role) ?? role} />
+					<Text selectable style={styles.assistantText}>{value}</Text>
+				</View>
+			);
+		}
+		case 'plan': {
+			const progress = timeline.plans.get(event.seq);
+			if (progress) return <PlanCard progress={progress} />;
+			const plan = toCloudPlan(data);
+			return <PlanCard progress={{ leaderModel: plan.leaderModel, items: plan.tasks.map(t => ({ ...t, state: 'pending' })), done: 0, failed: 0 }} />;
+		}
+		case 'task':
+			return <TaskEventView data={data} position={timeline.taskPositions.get(event.seq)} />;
 		case 'tool':
 			return <ToolRow data={data} />;
 		case 'status': {
@@ -877,6 +1045,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const source = cloudSource(current);
 	const active = isActive(current.status);
 	const sendable = canSendMessage(current);
+	// Division Project の計画ごとのタスクの状態 (plan / task イベントが無ければ空)
+	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
 	const canSend = sendable && !!draft.trim() && !sending;
 
 	return (
@@ -893,7 +1063,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						<StatusMark status={current.status} />
 						<Text style={[styles.statusLabel, { color: cloudStatusColor(current.status) }]}>{cloudStatusLabel(current.status)}</Text>
 					</View>
-					<Badge label={cloudModelLabel(current)} icon='cpu' />
+					<Badge label={cloudModelLabel(current)} icon={modelIcon(current)} />
 					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
 					{current.projectId ? <Badge label={projectLabel(projects, current.projectId) ?? ''} icon='layers' /> : null}
 					{typeof current.costUsd === 'number' ? (
@@ -941,7 +1111,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						{!loaded ? <Loading label='ログを読み込んでいます…' /> : null}
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
 						<View style={styles.conversation}>
-							{events.map(event => <EventView key={event.seq} event={event} onShowChanges={() => setTab('changes')} />)}
+							{events.map(event => (
+								<EventView key={event.seq} event={event} timeline={timeline} onShowChanges={() => setTab('changes')} />
+							))}
 							{current.status === 'running' ? (
 								<View style={styles.working} accessibilityLiveRegion='polite'>
 									<ActivityIndicator size='small' color={colors.running} />
@@ -1020,7 +1192,21 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '' }));
+		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '' }));
+	}, [session?.userId]);
+
+	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
+	useEffect(() => {
+		const userId = session?.userId;
+		if (!userId) return;
+		let cancelled = false;
+		void loadLastCloudModel(userId).then(last => {
+			if (cancelled || !last) return;
+			setDraft(d => (d.modelMode === 'default' && !d.model && !d.projectId
+				? { ...d, modelMode: last.mode, model: last.model, projectId: last.projectId }
+				: d));
+		});
+		return () => { cancelled = true; };
 	}, [session?.userId]);
 
 	const loadList = useCallback(async () => {
@@ -1099,14 +1285,17 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 		if (repo && isFullNameRepo(repo) && draft.repo) {
 			void saveLastCloudRepo(session.userId, { repo: draft.repo, branch: repo.branch ?? '' });
 		}
+		// 次に開いたとき同じモデル (Division Project ならそのプロジェクト) を選んだ状態にする
+		const selection = modelSelectionOf(draft);
+		void saveLastCloudModel(session.userId, selection);
 		try {
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
 				count,
 				repo,
-				model: draft.model || undefined,
 				title: draft.title || undefined,
-				projectId: draft.projectId || undefined,
+				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
+				...launchModelFields(selection),
 			});
 			const failed = results.filter(r => r.error);
 			const succeeded = results.length - failed.length;
@@ -1383,6 +1572,40 @@ const styles = StyleSheet.create({
 	},
 	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
 	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 25 },
+	assistantWithRole: { gap: spacing.xs },
+	roleChip: {
+		alignSelf: 'flex-start',
+		maxWidth: 160,
+		paddingHorizontal: spacing.sm,
+		paddingVertical: 2,
+		borderRadius: 999,
+		backgroundColor: colors.bgHover,
+	},
+	roleChipText: { color: colors.fgMuted, fontSize: fontSize.xs - 1, fontWeight: '600' },
+	planCard: {
+		gap: spacing.sm,
+		padding: spacing.md,
+		borderRadius: radius.lg,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bgElevated,
+	},
+	planTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
+	planMeta: { color: colors.fgFaint, fontSize: fontSize.xs },
+	planItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	planMarker: { width: 20, height: 22, alignItems: 'center', justifyContent: 'center' },
+	planHollow: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: colors.fgFaint },
+	planItemHead: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
+	planItemTitle: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
+	planItemDone: { color: colors.fgMuted },
+	planItemModel: { color: colors.fgFaint, fontSize: fontSize.xs, marginTop: 2 },
+	taskHeader: { gap: spacing.xs, marginTop: spacing.sm },
+	taskHeaderLine: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderStrong },
+	taskHeaderText: { color: colors.fgStrong, fontSize: fontSize.xs + 1, fontWeight: '600', lineHeight: 20 },
+	taskHeaderPos: { color: colors.accentText, fontVariant: ['tabular-nums'] },
+	taskHeaderModel: { color: colors.fgFaint, fontWeight: '400' },
+	taskResult: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	taskResultText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
 	tool: { gap: spacing.xs },
 	toolHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	toolDot: { width: 6, height: 6, borderRadius: 3 },

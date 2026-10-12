@@ -1,16 +1,19 @@
 /**
- * クラウドエージェントの「前回選んだリポジトリ」の保存。接続情報 (storage.ts) とは別ファイルに分けてある。
+ * クラウドエージェントの「前回選んだリポジトリ」と「前回選んだモデル」の保存。接続情報 (storage.ts) とは別ファイルに分けてある。
  *
- * 次に新しいセッションを開いたとき、同じリポジトリとブランチを選んだ状態にするだけの便利機能。
+ * 次に新しいセッションを開いたとき、同じリポジトリとブランチ・同じモデル (Division Project ならそのプロジェクト) を
+ * 選んだ状態にするだけの便利機能。
  * リポジトリ名・ブランチ名は秘密ではないので AsyncStorage で十分 (GitHub のトークンはサーバーにしか無い)。
  * 別のアカウントでログインし直したときに持ち越さないよう、Division のユーザー ID も一緒に保存する。
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { CloudModelSelection, toModelSelection } from '../lib/divisionCloud';
 import { GitHubRepo } from '../lib/divisionGitHub';
 
 const LAST_REPO_KEY = 'orchestra.cloudLastRepo.v1';
+const LAST_MODEL_KEY = 'orchestra.cloudLastModel.v1';
 
 export type LastCloudRepo = { repo: GitHubRepo; branch: string };
 
@@ -49,5 +52,26 @@ export const clearLastCloudRepo = async (): Promise<void> => {
 		await AsyncStorage.removeItem(LAST_REPO_KEY);
 	} catch {
 		// 同上
+	}
+};
+
+/** 前回のモデルの選択。別のユーザーのものや形の違うもの (Division Project なのにプロジェクトが無いなど) は null。 */
+export const loadLastCloudModel = async (userId: string): Promise<CloudModelSelection | null> => {
+	try {
+		const raw = await AsyncStorage.getItem(LAST_MODEL_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw) as { userId?: unknown; selection?: unknown };
+		return parsed.userId === userId ? toModelSelection(parsed.selection) : null;
+	} catch {
+		return null;
+	}
+};
+
+export const saveLastCloudModel = async (userId: string, selection: CloudModelSelection): Promise<void> => {
+	try {
+		const { mode, model, projectId } = selection;
+		await AsyncStorage.setItem(LAST_MODEL_KEY, JSON.stringify({ userId, selection: { mode, model, projectId } }));
+	} catch {
+		// 保存できなくても困らない。次回は選び直すだけ。
 	}
 };

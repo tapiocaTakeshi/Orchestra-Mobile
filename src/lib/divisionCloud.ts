@@ -20,6 +20,10 @@
  *
  * GitHub アカウントの連携 (/api/github/*) は divisionGitHub.ts。同じ request と DivisionCloudError を使う。
  *
+ * モデルに 'division-project' (DIVISION_PROJECT_MODEL) と projectId を渡すと、セッションは Division Project
+ * (マルチエージェント) として動く: リーダーの計画 (plan イベント) → 役割ごとのタスク (task イベント、間の assistant に role)
+ * → まとめ (done)。計画ごとのタスクの状態は divisionTimeline で組み立てる。
+ *
  * 後半の純粋関数 (状態の表示名・イベントの結合・ツールの要約・URL の検証など) は UI 非依存なので
  * そのままテストできる。
  */
@@ -73,12 +77,19 @@ export type CloudSession = {
 	costUsd?: number;
 };
 
-export type CloudSessionEventType = 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done';
+/**
+ * plan / task は Division Project をモデルにしたセッション (model: 'division-project') だけが出す。
+ * サーバーが将来ほかの種類を足しても、知らない種類は画面で読み飛ばす (toEvent は文字列をそのまま通す)。
+ */
+export type CloudSessionEventType = 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task';
 
 export type CloudSessionEvent = {
 	seq: number;
 	type: CloudSessionEventType;
-	/** 種類ごとの中身。user/assistant は { text }, tool は { name, args, ok, output, durationMs } など */
+	/**
+	 * 種類ごとの中身。user/assistant は { text } (Division Project では assistant に role も付く)、
+	 * tool は { name, args, ok, output, durationMs }、plan は { tasks, leaderModel }、task は { index, role, status, ... } など
+	 */
 	data: Record<string, unknown>;
 	createdAt: string;
 };
@@ -347,18 +358,43 @@ export const fetchCloudEvents = async (
 export type CreateCloudSessionInput = {
 	prompt: string;
 	title?: string;
+	/** provider/model か DIVISION_PROJECT_MODEL。空ならプロジェクトのコーダーの割り当て */
 	model?: string;
 	projectId?: string;
 	workspaceName?: string;
 };
 
-/** サンドボックスを用意する (status は uploading で返る)。数分かかることがある。 */
-export const createCloudSession = async (session: DivisionSession, input: CreateCloudSessionInput): Promise<CloudSession> => {
+/**
+ * モデルに指定すると、そのセッションは Division Project (マルチエージェント) として動く。
+ * プロジェクトのリーダーが役割ごとのタスクに分け、各タスクをその役割に割り当てたモデルがサンドボックスで進め、
+ * 最後にまとめる。projectId が必須 (無いとサーバーは 400)。
+ */
+export const DIVISION_PROJECT_MODEL = 'division-project';
+
+export const isDivisionProjectModel = (model: string | null | undefined): boolean =>
+	(model ?? '').trim() === DIVISION_PROJECT_MODEL;
+
+/** モデルとプロジェクトの組み合わせが送れなければ理由を返す。送れるなら null。 */
+export const modelInputIssue = (model: string | undefined, projectId: string | undefined): string | null =>
+	isDivisionProjectModel(model) && !projectId?.trim()
+		? 'Division Project をモデルにするときは、プロジェクトを選んでください。'
+		: null;
+
+/** POST /api/cloud-sessions の body。空の値は送らない。Division Project なのにプロジェクトが無ければ投げる。 */
+export const createSessionBody = (input: CreateCloudSessionInput): Record<string, string> => {
+	const issue = modelInputIssue(input.model, input.projectId);
+	if (issue) throw new Error(issue);
 	const body: Record<string, string> = { prompt: input.prompt };
 	if (input.title?.trim()) body.title = input.title.trim();
 	if (input.model?.trim()) body.model = input.model.trim();
 	if (input.projectId?.trim()) body.projectId = input.projectId.trim();
 	if (input.workspaceName?.trim()) body.workspaceName = input.workspaceName.trim();
+	return body;
+};
+
+/** サンドボックスを用意する (status は uploading で返る)。数分かかることがある。 */
+export const createCloudSession = async (session: DivisionSession, input: CreateCloudSessionInput): Promise<CloudSession> => {
+	const body = createSessionBody(input);
 	const data = await request<{ session?: unknown }>(session, '', { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.launch });
 	return toCloudSession(data.session);
 };
@@ -488,9 +524,12 @@ export const cloudSource = (session: Pick<CloudSession, 'workspaceInfo' | 'works
 	return { kind: 'empty', label: '空のフォルダ' };
 };
 
-/** 一覧に出すモデル名。決まる前は指定したモデル、どちらも無ければ既定。 */
+/**
+ * 一覧に出すモデル名。決まる前は指定したモデル、どちらも無ければ既定。
+ * Division Project は決まると "Division Project · <プロジェクト名>" がサーバーから入る。
+ */
 export const cloudModelLabel = (session: Pick<CloudSession, 'model' | 'modelLabel'>): string =>
-	session.modelLabel || session.model || '既定のモデル';
+	session.modelLabel || (isDivisionProjectModel(session.model) ? 'Division Project' : session.model) || '既定のモデル';
 
 // ---------------------------------------------------------------------------
 // イベント
@@ -527,6 +566,160 @@ export const toolCallSummary = (name: string, args: unknown, max = 80): string =
 		?? Object.keys(record).find(k => typeof record[k] === 'string' && (record[k] as string).trim());
 	const value = key ? String(record[key]) : '';
 	return oneLine(value ? `${toolName} ${value}` : toolName, max);
+};
+
+// ---------------------------------------------------------------------------
+// Division Project の計画とタスク (plan / task イベント)
+// ---------------------------------------------------------------------------
+
+export type CloudPlanTask = {
+	index: number;
+	/** 役割のスラッグ (例: coder) */
+	role: string;
+	/** 役割の表示名 (例: 実装) */
+	roleName: string;
+	title: string;
+	instruction: string;
+	/** "Provider · modelId" */
+	model: string;
+};
+
+export type CloudPlan = { tasks: CloudPlanTask[]; leaderModel: string };
+
+export type CloudTaskStatus = 'start' | 'done' | 'failed';
+
+export type CloudTaskEvent = {
+	index: number;
+	role: string;
+	roleName: string;
+	title: string;
+	model: string;
+	status: CloudTaskStatus;
+	summary?: string;
+};
+
+/** 欠けた値で落ちないように plan の data を取り出す。tasks が配列でなければ空の計画。 */
+export const toCloudPlan = (data: Record<string, unknown>): CloudPlan => {
+	const rawTasks = Array.isArray(data.tasks) ? data.tasks : [];
+	const tasks = rawTasks.map((raw, i): CloudPlanTask => {
+		const t = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+		const role = str(t.role);
+		return {
+			index: typeof t.index === 'number' && Number.isFinite(t.index) ? t.index : i,
+			role,
+			roleName: str(t.roleName) || role || '担当',
+			title: str(t.title),
+			instruction: str(t.instruction),
+			model: str(t.model),
+		};
+	});
+	return { tasks, leaderModel: str(data.leaderModel) };
+};
+
+/** task の data を取り出す。index か status が無ければ null (表示しない)。 */
+export const toCloudTaskEvent = (data: Record<string, unknown>): CloudTaskEvent | null => {
+	const status = data.status;
+	if (typeof data.index !== 'number' || !Number.isFinite(data.index)) return null;
+	if (status !== 'start' && status !== 'done' && status !== 'failed') return null;
+	const role = str(data.role);
+	return {
+		index: data.index,
+		role,
+		roleName: str(data.roleName) || role || '担当',
+		title: str(data.title),
+		model: str(data.model),
+		status,
+		...(typeof data.summary === 'string' && data.summary.trim() ? { summary: data.summary.trim() } : {}),
+	};
+};
+
+/**
+ * 計画の各タスクの状態。
+ *   pending     … まだ始まっていない
+ *   running     … 始まって、まだ終わっていない (セッションが動いているあいだだけ)
+ *   done/failed … 終わった
+ *   interrupted … 始まったが、終わる前にセッションが止まった (停止・失敗)
+ */
+export type PlanTaskState = 'pending' | 'running' | 'done' | 'failed' | 'interrupted';
+
+export type PlanItem = CloudPlanTask & { state: PlanTaskState; summary?: string };
+
+export type PlanProgress = {
+	leaderModel: string;
+	items: PlanItem[];
+	done: number;
+	failed: number;
+};
+
+export type DivisionTimeline = {
+	/** plan イベントの seq → その計画の進み具合 */
+	plans: Map<number, PlanProgress>;
+	/** task イベントの seq → 「何番目 / 全部で何個」(計画に見つからなければ入らない) */
+	taskPositions: Map<number, { position: number; total: number }>;
+	/** 役割のスラッグ → 表示名 (assistant の role に名前を付ける) */
+	roleNames: Map<string, string>;
+};
+
+/**
+ * イベントの列から、各計画のタスクの状態を組み立てる。task イベントは直前の plan に属する
+ * (次の plan が来たら、それ以降は新しい計画)。同じタスクの task が何度か来たら最後のものを使う。
+ * active はセッションがまだ動いているか。止まっていれば、始まったまま終わっていないタスクは interrupted にする。
+ */
+export const divisionTimeline = (events: CloudSessionEvent[], active: boolean): DivisionTimeline => {
+	const plans = new Map<number, PlanProgress>();
+	const taskPositions = new Map<number, { position: number; total: number }>();
+	const roleNames = new Map<string, string>();
+
+	let currentSeq: number | null = null;
+	let currentPlan: CloudPlan | null = null;
+	let states = new Map<number, { state: PlanTaskState; summary?: string }>();
+
+	const finish = () => {
+		if (currentSeq === null || !currentPlan) return;
+		const items = currentPlan.tasks.map((task): PlanItem => {
+			const s = states.get(task.index);
+			const state: PlanTaskState = !s ? 'pending' : s.state === 'running' && !active ? 'interrupted' : s.state;
+			return { ...task, state, ...(s?.summary ? { summary: s.summary } : {}) };
+		});
+		plans.set(currentSeq, {
+			leaderModel: currentPlan.leaderModel,
+			items,
+			done: items.filter(i => i.state === 'done').length,
+			failed: items.filter(i => i.state === 'failed').length,
+		});
+	};
+
+	for (const event of events) {
+		if (event.type === 'plan') {
+			finish();
+			currentSeq = event.seq;
+			currentPlan = toCloudPlan(event.data);
+			states = new Map();
+			for (const t of currentPlan.tasks) if (t.role) roleNames.set(t.role, t.roleName);
+		} else if (event.type === 'task') {
+			const task = toCloudTaskEvent(event.data);
+			if (!task) continue;
+			if (task.role) roleNames.set(task.role, task.roleName);
+			if (!currentPlan) continue;
+			const position = currentPlan.tasks.findIndex(t => t.index === task.index);
+			if (position < 0) continue;
+			taskPositions.set(event.seq, { position: position + 1, total: currentPlan.tasks.length });
+			states.set(task.index, {
+				state: task.status === 'start' ? 'running' : task.status,
+				...(task.summary ? { summary: task.summary } : {}),
+			});
+		}
+	}
+	finish();
+	return { plans, taskPositions, roleNames };
+};
+
+/** タスクの見出し。例: "2/4 · 実装 (Anthropic · claude-opus) — API を足す" */
+export const taskHeaderLabel = (task: Pick<CloudTaskEvent, 'roleName' | 'model' | 'title'>, position?: { position: number; total: number }): string => {
+	const head = position ? `${position.position}/${position.total} · ` : '';
+	const model = task.model ? ` (${task.model})` : '';
+	const title = task.title ? ` — ${task.title}` : '';
+	return `${head}${task.roleName}${model}${title}`;
 };
 
 // ---------------------------------------------------------------------------
@@ -587,6 +780,7 @@ export type LaunchInput = {
 	count: number;
 	/** 無ければ空のフォルダで始める。{ url } か GitHub 連携で選んだ { fullName } */
 	repo?: CloudRepo;
+	/** provider/model か DIVISION_PROJECT_MODEL (このときは projectId が必須) */
 	model?: string;
 	title?: string;
 	/** Division のプロジェクト ID。指定するとそのプロジェクトの「コーダー」のモデルで動く (model が優先) */
@@ -633,6 +827,8 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 			?? validateBranch(repo.branch ?? '');
 		if (issue) throw new Error(issue);
 	}
+	const modelIssue = modelInputIssue(input.model, input.projectId);
+	if (modelIssue) throw new Error(modelIssue);
 
 	const titles = launchTitles({ ...input, prompt });
 	// workspaceName はリポジトリ名 (clone したときのフォルダ名) にする
@@ -651,6 +847,117 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 			return { index, title, ...(created ? { session: created } : {}), error: cloudErrorText(e) };
 		}
 	}));
+};
+
+// ---------------------------------------------------------------------------
+// モデルの選択 (新しいセッションのシート)
+// ---------------------------------------------------------------------------
+
+/**
+ * モデルの選び方。デスクトップのモデルの選択と同じく Division Project を先頭に置く。
+ *   division … Division Project (マルチエージェント)。model = 'division-project' と、そのプロジェクトの projectId を送る
+ *   default  … 既定。model を送らない (プロジェクトを選んでいればそのコーダー、無ければサーバーの既定)
+ *   custom   … provider/model を直接入力 (上級者向け)
+ */
+export type CloudModelMode = 'division' | 'default' | 'custom';
+
+export type CloudModelSelection = {
+	mode: CloudModelMode;
+	/** custom のときのモデル */
+	model: string;
+	/** division ではモデルにした Division Project、それ以外では「プロジェクト」で選んだもの (空なら指定なし) */
+	projectId: string;
+};
+
+export type CloudModelOption = {
+	/** 選択中かを比べるキー (division:<id> / default / custom) */
+	key: string;
+	mode: CloudModelMode;
+	label: string;
+	detail?: string;
+	/** division のときのプロジェクト ID */
+	projectId?: string;
+	/** PC で有効なプロジェクト */
+	active?: boolean;
+};
+
+export const DEFAULT_MODEL_LABEL = '既定 (プロジェクトの coder ロール)';
+export const CUSTOM_MODEL_LABEL = 'モデルを直接指定';
+
+export const modelOptionKey = (selection: Pick<CloudModelSelection, 'mode' | 'projectId'>): string =>
+	selection.mode === 'division' ? `division:${selection.projectId}` : selection.mode;
+
+/**
+ * モデルの選択肢。プロジェクトごとの "Division Project · <名前>" (一覧の順)、既定、直接指定の順。
+ * selectedProjectId (いま division で選んでいるもの) が一覧に無ければ、見失わないよう先頭に足す。
+ */
+export const cloudModelOptions = (
+	projects: { id: string; name: string; active?: boolean }[],
+	selectedProjectId?: string,
+): CloudModelOption[] => {
+	const division: CloudModelOption[] = projects.map(p => ({
+		key: `division:${p.id}`,
+		mode: 'division',
+		label: `Division Project · ${p.name}`,
+		detail: 'リーダーが役割ごとに分担し、各役割のモデルが順に進めます',
+		projectId: p.id,
+		...(p.active ? { active: true } : {}),
+	}));
+	const missing = selectedProjectId?.trim();
+	if (missing && !projects.some(p => p.id === missing)) {
+		division.unshift({
+			key: `division:${missing}`,
+			mode: 'division',
+			label: `Division Project · プロジェクト ${missing.slice(0, 8)}`,
+			detail: '一覧に見つかりません (削除されたか、別のアカウントのプロジェクトです)',
+			projectId: missing,
+		});
+	}
+	return [
+		...division,
+		{ key: 'default', mode: 'default', label: DEFAULT_MODEL_LABEL, detail: 'プロジェクトを選べばその coder、無ければサーバーの既定' },
+		{ key: 'custom', mode: 'custom', label: CUSTOM_MODEL_LABEL, detail: 'provider/model を入力 (上級者向け)' },
+	];
+};
+
+/** 選択肢を選んだあとの選択。division はそのプロジェクトにし、ほかはプロジェクトとモデルの入力を残す。 */
+export const applyModelOption = (current: CloudModelSelection, option: CloudModelOption): CloudModelSelection =>
+	option.mode === 'division'
+		? { ...current, mode: 'division', projectId: option.projectId ?? '' }
+		: { ...current, mode: option.mode };
+
+/** 起動に送る model と projectId。 */
+export const launchModelFields = (selection: CloudModelSelection): { model?: string; projectId?: string } => {
+	const projectId = selection.projectId.trim() || undefined;
+	switch (selection.mode) {
+		case 'division':
+			return { model: DIVISION_PROJECT_MODEL, ...(projectId ? { projectId } : {}) };
+		case 'custom': {
+			const model = selection.model.trim() || undefined;
+			return { ...(model ? { model } : {}), ...(projectId ? { projectId } : {}) };
+		}
+		default:
+			return projectId ? { projectId } : {};
+	}
+};
+
+/** 起動できない理由 (Division Project なのにプロジェクトが無いなど)。起動できるなら null。 */
+export const modelSelectionIssue = (selection: CloudModelSelection): string | null => {
+	const fields = launchModelFields(selection);
+	return modelInputIssue(fields.model, fields.projectId);
+};
+
+/** 保存しておいた選択を読み戻す。形が違えば null。 */
+export const toModelSelection = (raw: unknown): CloudModelSelection | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const r = raw as Record<string, unknown>;
+	if (r.mode !== 'division' && r.mode !== 'default' && r.mode !== 'custom') return null;
+	const selection: CloudModelSelection = {
+		mode: r.mode,
+		model: typeof r.model === 'string' ? r.model : '',
+		projectId: typeof r.projectId === 'string' ? r.projectId : '',
+	};
+	return modelSelectionIssue(selection) ? null : selection;
 };
 
 // ---------------------------------------------------------------------------

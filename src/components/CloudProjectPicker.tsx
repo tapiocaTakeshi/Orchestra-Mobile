@@ -4,6 +4,7 @@
  * 一覧は PC に接続していれば PC の Orchestra のプロジェクト (有効なものが先頭)、
  * 接続していなければ Supabase の Project テーブル (自分のもの、新しい順) から作る。
  * プロジェクトを選ぶと、エージェントはそのプロジェクトの「コーダー」のモデルで動く。
+ * クラウドのシートでモデルに Division Project を選んだときは、そのプロジェクトに固定する (lockedReason)。
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -69,12 +70,17 @@ export const useCloudProjects = (auth: DivisionSession | null): CloudProjects =>
 /** 一度に並べる数。多いときは「すべて表示」で広げる。 */
 const COLLAPSED_COUNT = 8;
 
-export const CloudProjectPicker = ({ projects, value, onChange }: {
+export const CloudProjectPicker = ({ projects, value, onChange, lockedReason, hint }: {
 	projects: CloudProjects;
 	/** 選んだプロジェクトの ID (空なら指定なし) */
 	value: string;
 	onChange: (projectId: string) => void;
+	/** 指定すると選べなくなり、この理由を出す (モデルに Division Project を選んでいるときなど) */
+	lockedReason?: string;
+	/** プロジェクトを選んでいるときの説明を差し替える */
+	hint?: string;
 }) => {
+	const locked = !!lockedReason;
 	const [expanded, setExpanded] = useState(false);
 	const list = projects.projects;
 	// 選んでいるものが畳んだ範囲の外にあっても見えるようにする
@@ -90,12 +96,13 @@ export const CloudProjectPicker = ({ projects, value, onChange }: {
 			<Pressable
 				key={id || '__none'}
 				accessibilityRole='button'
-				accessibilityState={{ selected }}
+				accessibilityState={{ selected, disabled: locked }}
 				accessibilityLabel={id ? `プロジェクト ${label}${active ? '、PC で有効' : ''}` : 'プロジェクトを指定しない'}
+				disabled={locked}
 				onPress={() => onChange(id)}
-				style={[styles.chip, selected && styles.chipSelected]}
+				style={[styles.chip, selected && styles.chipSelected, locked && !selected && styles.chipLocked]}
 			>
-				{selected ? <Icon name='check' size={13} color={colors.fg} /> : null}
+				{selected ? <Icon name={locked ? 'lock' : 'check'} size={13} color={colors.fg} /> : null}
 				<Text style={[styles.chipText, selected && styles.chipTextSelected]} numberOfLines={1}>{label}</Text>
 				{active ? <View style={styles.activeDot} /> : null}
 			</Pressable>
@@ -113,24 +120,27 @@ export const CloudProjectPicker = ({ projects, value, onChange }: {
 					</Pressable>
 				) : null}
 			</View>
-			{projects.loading ? (
+			{/* 固定しているときは読み込み中・エラーの表示はモデルの欄に任せる (同じ一覧なので二重に出さない) */}
+			{projects.loading && !locked ? (
 				<View style={styles.loadingRow}>
 					<ActivityIndicator size='small' color={colors.fgMuted} />
 					<Muted>プロジェクトを読み込んでいます…</Muted>
 				</View>
 			) : null}
-			{projects.error ? (
+			{projects.error && !locked ? (
 				<ErrorBanner tone='warning' message={projects.error} onRetry={projects.reload} style={styles.banner} />
 			) : null}
-			{!projects.loading && !projects.error && list.length === 0 ? (
+			{!locked && !projects.loading && !projects.error && list.length === 0 ? (
 				<Muted>Division のプロジェクトがまだありません。PC の Orchestra で作って保存すると選べます。</Muted>
 			) : null}
 			<Muted>
-				{value
-					? '選んだプロジェクトの「コーダー」に割り当てたモデルで動きます (詳細でモデルを指定するとそちらが優先)。'
-					: projects.source === 'pc'
-						? 'PC の Orchestra のプロジェクトから選べます (緑の点は PC で有効なもの)。'
-						: 'Division に保存したプロジェクトから選べます。'}
+				{lockedReason
+					? lockedReason
+					: value
+						? hint ?? '選んだプロジェクトの「コーダー」に割り当てたモデルで動きます (詳細でモデルを指定するとそちらが優先)。'
+						: projects.source === 'pc'
+							? 'PC の Orchestra のプロジェクトから選べます (緑の点は PC で有効なもの)。'
+							: 'Division に保存したプロジェクトから選べます。'}
 			</Muted>
 		</View>
 	);
@@ -151,6 +161,7 @@ const styles = StyleSheet.create({
 		borderColor: colors.border,
 	},
 	chipSelected: { borderColor: colors.borderStrong, backgroundColor: colors.bgHover },
+	chipLocked: { opacity: 0.45 },
 	chipText: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600', flexShrink: 1 },
 	chipTextSelected: { color: colors.fg },
 	activeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.success },
