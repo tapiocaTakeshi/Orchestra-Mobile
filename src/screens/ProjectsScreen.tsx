@@ -8,6 +8,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+	KeyboardAvoidingView,
+	Platform,
 	Pressable,
 	RefreshControl,
 	ScrollView,
@@ -183,79 +185,81 @@ const ProjectEditor = ({
 			onClose={() => void close()}
 			headerRight={<Button title='保存' size='sm' loading={saving} disabled={!dirty || !name.trim()} onPress={() => void save()} />}
 		>
-			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-				<Card>
-					<SectionTitle>基本情報</SectionTitle>
-					<Muted>プロジェクト名</Muted>
-					<Input value={name} onChangeText={setName} placeholder='プロジェクト名' />
-					<Muted>プロジェクト ID</Muted>
-					<Body>{project.projectId || '(未設定)'}</Body>
-				</Card>
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+					<Card>
+						<SectionTitle>基本情報</SectionTitle>
+						<Muted>プロジェクト名</Muted>
+						<Input value={name} onChangeText={setName} placeholder='プロジェクト名' />
+						<Muted>プロジェクト ID</Muted>
+						<Body>{project.projectId || '(未設定)'}</Body>
+					</Card>
 
-				<Card>
-					<SectionTitle right={<Badge label={`${agents.length} 役割`} />}>役割ごとのモデル</SectionTitle>
-					<Muted>ここで割り当てたモデルが、Division API のオーケストレーションで使われます。</Muted>
-					{agents.length === 0 ? <Muted>役割が登録されていません。</Muted> : null}
-					{agents.map((a, idx) => (
-						<AgentRow
-							key={`${a.role}-${idx}`}
-							assignment={a}
-							providers={providers}
-							onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
-							onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
-						/>
-					))}
-				</Card>
-
-				<Card>
-					<SectionTitle>役割を追加</SectionTitle>
-					<Muted>まだ割り当てていない役割を足せます。モデルは追加したあとに選んでください。</Muted>
-					<View style={styles.roleChips}>
-						{KNOWN_ROLES.filter(role => !agents.some(a => a.role === role)).map(role => (
-							<Pressable
-								key={role}
-								accessibilityRole='button'
-								accessibilityLabel={`${roleTitle(role)} を追加`}
-								onPress={() => setAgents(prev => [...prev, {
-									role,
-									provider: providers[0]?.provider ?? '',
-									model: providers[0]?.models[0] ?? '',
-								}])}
-								style={styles.roleChip}
-							>
-								<Icon name='plus' size={14} color={colors.accentText} />
-								<Text style={styles.roleChipText}>{roleTitle(role)}</Text>
-							</Pressable>
+					<Card>
+						<SectionTitle right={<Badge label={`${agents.length} 役割`} />}>役割ごとのモデル</SectionTitle>
+						<Muted>ここで割り当てたモデルが、Division API のオーケストレーションで使われます。</Muted>
+						{agents.length === 0 ? <Muted>役割が登録されていません。</Muted> : null}
+						{agents.map((a, idx) => (
+							<AgentRow
+								key={`${a.role}-${idx}`}
+								assignment={a}
+								providers={providers}
+								onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
+								onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
+							/>
 						))}
-					</View>
-					<Row>
-						<Input
-							value={customRole}
-							onChangeText={setCustomRole}
-							placeholder='その他の役割 (英小文字)'
-							autoCapitalize='none'
-							style={styles.flex}
-						/>
-						<Button
-							title='追加'
-							variant='secondary'
-							disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
-							onPress={() => {
-								const role = customRole.trim();
-								setCustomRole('');
-								setAgents(prev => [...prev, {
-									role,
-									provider: providers[0]?.provider ?? '',
-									model: providers[0]?.models[0] ?? '',
-								}]);
-							}}
-						/>
-					</Row>
-				</Card>
+					</Card>
 
-				<Button title='保存' icon='check' onPress={() => void save()} loading={saving} disabled={!dirty || !name.trim()} />
-				<Button title='このプロジェクトを削除' icon='trash-2' variant='ghost' onPress={() => void remove()} style={styles.centered} />
-			</ScrollView>
+					<Card>
+						<SectionTitle>役割を追加</SectionTitle>
+						<Muted>まだ割り当てていない役割を足せます。モデルは追加したあとに選んでください。</Muted>
+						<View style={styles.roleChips}>
+							{KNOWN_ROLES.filter(role => !agents.some(a => a.role === role)).map(role => (
+								<Pressable
+									key={role}
+									accessibilityRole='button'
+									accessibilityLabel={`${roleTitle(role)} を追加`}
+									onPress={() => setAgents(prev => [...prev, {
+										role,
+										provider: providers[0]?.provider ?? '',
+										model: providers[0]?.models[0] ?? '',
+									}])}
+									style={styles.roleChip}
+								>
+									<Icon name='plus' size={14} color={colors.accentText} />
+									<Text style={styles.roleChipText}>{roleTitle(role)}</Text>
+								</Pressable>
+							))}
+						</View>
+						<Row>
+							<Input
+								value={customRole}
+								onChangeText={setCustomRole}
+								placeholder='その他の役割 (英小文字)'
+								autoCapitalize='none'
+								style={styles.flex}
+							/>
+							<Button
+								title='追加'
+								variant='secondary'
+								disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
+								onPress={() => {
+									const role = customRole.trim();
+									setCustomRole('');
+									setAgents(prev => [...prev, {
+										role,
+										provider: providers[0]?.provider ?? '',
+										model: providers[0]?.models[0] ?? '',
+									}]);
+								}}
+							/>
+						</Row>
+					</Card>
+
+					<Button title='保存' icon='check' onPress={() => void save()} loading={saving} disabled={!dirty || !name.trim()} />
+					<Button title='このプロジェクトを削除' icon='trash-2' variant='ghost' onPress={() => void remove()} style={styles.centered} />
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</Sheet>
 	);
 };
@@ -298,38 +302,40 @@ const ShareSheet = ({
 
 	return (
 		<Sheet title='役割の割り当てを共有' eyebrow={project.name} onClose={onClose}>
-			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-				{!session ? (
-					<Card><Muted>共有するには Division アカウントでログインしてください。</Muted></Card>
-				) : (
-					<>
-						<Card>
-							<Muted>タイトル</Muted>
-							<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
-							<Muted>説明 (任意)</Muted>
-							<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
-						</Card>
-						<Card>
-							<SectionTitle>共有される内容</SectionTitle>
-							{project.agents.map((a, i) => (
-								<Row key={`${a.role}-${i}`} style={styles.spread}>
-									<Muted>{roleTitle(a.role)}</Muted>
-									<Body>{a.model || '(未設定)'}</Body>
-								</Row>
-							))}
-							<Muted>API キーやコードは共有されません。</Muted>
-						</Card>
-						{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
-						<Button
-							title='共有する'
-							icon='share-2'
-							loading={busy}
-							disabled={!title.trim() || project.agents.length === 0}
-							onPress={() => void run()}
-						/>
-					</>
-				)}
-			</ScrollView>
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+					{!session ? (
+						<Card><Muted>共有するには Division アカウントでログインしてください。</Muted></Card>
+					) : (
+						<>
+							<Card>
+								<Muted>タイトル</Muted>
+								<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
+								<Muted>説明 (任意)</Muted>
+								<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
+							</Card>
+							<Card>
+								<SectionTitle>共有される内容</SectionTitle>
+								{project.agents.map((a, i) => (
+									<Row key={`${a.role}-${i}`} style={styles.spread}>
+										<Muted>{roleTitle(a.role)}</Muted>
+										<Body>{a.model || '(未設定)'}</Body>
+									</Row>
+								))}
+								<Muted>API キーやコードは共有されません。</Muted>
+							</Card>
+							{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
+							<Button
+								title='共有する'
+								icon='share-2'
+								loading={busy}
+								disabled={!title.trim() || project.agents.length === 0}
+								onPress={() => void run()}
+							/>
+						</>
+					)}
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</Sheet>
 	);
 };

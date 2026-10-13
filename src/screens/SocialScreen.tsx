@@ -11,6 +11,8 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+	KeyboardAvoidingView,
+	Platform,
 	Pressable,
 	RefreshControl,
 	ScrollView,
@@ -133,68 +135,70 @@ const ImportSheet = ({
 
 	return (
 		<Sheet title={post.title} eyebrow='取り込み' onClose={onClose}>
-			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-				<Card>
-					<SectionTitle>取り込み方</SectionTitle>
-					<ChipGroup<ImportMode>
-						options={[
-							{ value: 'merge', label: '既存に重ねる' },
-							{ value: 'replace', label: '既存を置き換える' },
-							{ value: 'new', label: '新しいプロジェクト' },
-						]}
-						value={mode}
-						onChange={setMode}
-					/>
-					<Muted>
-						{mode === 'merge' ? '同じ役割は投稿の内容で上書きし、投稿にしかない役割は追加します。'
-							: mode === 'replace' ? 'プロジェクトの割り当てをすべて投稿の内容に置き換えます。'
-								: '新しい Division プロジェクトを作って、その中身にします。'}
-					</Muted>
-				</Card>
-
-				{mode === 'new' ? (
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
 					<Card>
-						<SectionTitle>プロジェクト名</SectionTitle>
-						<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' />
+						<SectionTitle>取り込み方</SectionTitle>
+						<ChipGroup<ImportMode>
+							options={[
+								{ value: 'merge', label: '既存に重ねる' },
+								{ value: 'replace', label: '既存を置き換える' },
+								{ value: 'new', label: '新しいプロジェクト' },
+							]}
+							value={mode}
+							onChange={setMode}
+						/>
+						<Muted>
+							{mode === 'merge' ? '同じ役割は投稿の内容で上書きし、投稿にしかない役割は追加します。'
+								: mode === 'replace' ? 'プロジェクトの割り当てをすべて投稿の内容に置き換えます。'
+									: '新しい Division プロジェクトを作って、その中身にします。'}
+						</Muted>
 					</Card>
-				) : (
+
+					{mode === 'new' ? (
+						<Card>
+							<SectionTitle>プロジェクト名</SectionTitle>
+							<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' />
+						</Card>
+					) : (
+						<Card>
+							<SectionTitle>取り込み先</SectionTitle>
+							{projects.length === 0 ? <Muted>プロジェクトがありません。「新しいプロジェクト」を選んでください。</Muted> : null}
+							{projects.map(p => {
+								const selected = p.projectId === targetId;
+								return (
+									<Pressable
+										key={p.projectId}
+										accessibilityRole='button'
+										accessibilityState={{ selected }}
+										onPress={() => setTargetId(p.projectId)}
+										style={[styles.selectRow, selected && styles.selectRowActive]}
+									>
+										<View style={styles.flex}>
+											<Body>{p.name}</Body>
+											<Muted>{p.agents.length} 役割{p.isActive ? ' · 有効' : ''}</Muted>
+										</View>
+										{selected ? <Icon name='check' color={colors.fg} /> : null}
+									</Pressable>
+								);
+							})}
+						</Card>
+					)}
+
 					<Card>
-						<SectionTitle>取り込み先</SectionTitle>
-						{projects.length === 0 ? <Muted>プロジェクトがありません。「新しいプロジェクト」を選んでください。</Muted> : null}
-						{projects.map(p => {
-							const selected = p.projectId === targetId;
-							return (
-								<Pressable
-									key={p.projectId}
-									accessibilityRole='button'
-									accessibilityState={{ selected }}
-									onPress={() => setTargetId(p.projectId)}
-									style={[styles.selectRow, selected && styles.selectRowActive]}
-								>
-									<View style={styles.flex}>
-										<Body>{p.name}</Body>
-										<Muted>{p.agents.length} 役割{p.isActive ? ' · 有効' : ''}</Muted>
-									</View>
-									{selected ? <Icon name='check' color={colors.fg} /> : null}
-								</Pressable>
-							);
-						})}
+						<SectionTitle>取り込まれる割り当て</SectionTitle>
+						{post.assignments.map(a => (
+							<Row key={`${a.roleSlug}-${a.priority}`} style={styles.spread}>
+								<Muted>{a.roleName}</Muted>
+								<Body>{a.modelDisplayName || a.model}</Body>
+							</Row>
+						))}
 					</Card>
-				)}
 
-				<Card>
-					<SectionTitle>取り込まれる割り当て</SectionTitle>
-					{post.assignments.map(a => (
-						<Row key={`${a.roleSlug}-${a.priority}`} style={styles.spread}>
-							<Muted>{a.roleName}</Muted>
-							<Body>{a.modelDisplayName || a.model}</Body>
-						</Row>
-					))}
-				</Card>
-
-				{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
-				<Button title='取り込む' icon='download' onPress={() => void run()} loading={busy} disabled={mode !== 'new' && !target} />
-			</ScrollView>
+					{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
+					<Button title='取り込む' icon='download' onPress={() => void run()} loading={busy} disabled={mode !== 'new' && !target} />
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</Sheet>
 	);
 };
@@ -243,42 +247,44 @@ const PublishSheet = ({
 
 	return (
 		<Sheet title='役割の割り当てを共有' onClose={onClose}>
-			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-				<Card>
-					<SectionTitle>共有するプロジェクト</SectionTitle>
-					{projects.length === 0 ? <Muted>共有できるプロジェクトがありません。</Muted> : null}
-					{projects.map(p => {
-						const selected = p.projectId === projectId;
-						return (
-							<Pressable
-								key={p.projectId}
-								accessibilityRole='button'
-								accessibilityState={{ selected }}
-								onPress={() => { setProjectId(p.projectId); setTitle(defaultPostTitle(p)); }}
-								style={[styles.selectRow, selected && styles.selectRowActive]}
-							>
-								<View style={styles.flex}>
-									<Body>{p.name}</Body>
-									<Muted>{assignmentSummary(toPostAssignments(p.agents))}</Muted>
-								</View>
-								{selected ? <Icon name='check' color={colors.fg} /> : null}
-							</Pressable>
-						);
-					})}
-				</Card>
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+					<Card>
+						<SectionTitle>共有するプロジェクト</SectionTitle>
+						{projects.length === 0 ? <Muted>共有できるプロジェクトがありません。</Muted> : null}
+						{projects.map(p => {
+							const selected = p.projectId === projectId;
+							return (
+								<Pressable
+									key={p.projectId}
+									accessibilityRole='button'
+									accessibilityState={{ selected }}
+									onPress={() => { setProjectId(p.projectId); setTitle(defaultPostTitle(p)); }}
+									style={[styles.selectRow, selected && styles.selectRowActive]}
+								>
+									<View style={styles.flex}>
+										<Body>{p.name}</Body>
+										<Muted>{assignmentSummary(toPostAssignments(p.agents))}</Muted>
+									</View>
+									{selected ? <Icon name='check' color={colors.fg} /> : null}
+								</Pressable>
+							);
+						})}
+					</Card>
 
-				<Card>
-					<SectionTitle>公開する内容</SectionTitle>
-					<Muted>タイトル</Muted>
-					<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
-					<Muted>説明 (任意)</Muted>
-					<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
-					<Muted>共有されるのは役割とモデルの組み合わせだけです。API キーやコードは含まれません。</Muted>
-				</Card>
+					<Card>
+						<SectionTitle>公開する内容</SectionTitle>
+						<Muted>タイトル</Muted>
+						<Input value={title} onChangeText={setTitle} placeholder='例: コスト重視の構成' />
+						<Muted>説明 (任意)</Muted>
+						<Input value={description} onChangeText={setDescription} placeholder='どんな用途に向くかなど' multiline />
+						<Muted>共有されるのは役割とモデルの組み合わせだけです。API キーやコードは含まれません。</Muted>
+					</Card>
 
-				{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
-				<Button title='共有する' icon='share-2' onPress={() => void run()} loading={busy} disabled={!project || !title.trim()} />
-			</ScrollView>
+					{error ? <ErrorBanner message={error} style={styles.bannerFlush} /> : null}
+					<Button title='共有する' icon='share-2' onPress={() => void run()} loading={busy} disabled={!project || !title.trim()} />
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</Sheet>
 	);
 };
@@ -391,29 +397,31 @@ const EditSheet = ({
 
 	return (
 		<Sheet title='投稿を編集' eyebrow={post.title} onClose={onClose}>
-			<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
-				<Card>
-					<Muted>タイトル</Muted>
-					<Input value={title} onChangeText={setTitle} />
-					<Muted>説明</Muted>
-					<Input value={description} onChangeText={setDescription} multiline />
-					<Muted>役割の割り当ては変更できません。作り直す場合は削除してから共有し直してください。</Muted>
-				</Card>
-				<Button
-					title='保存'
-					icon='check'
-					loading={busy}
-					disabled={!title.trim()}
-					onPress={() => {
-						setBusy(true);
-						// 失敗したときは入力を残したまま開いておく (トーストで理由を出す)。
-						void onSave({ title, description }).then(ok => {
-							setBusy(false);
-							if (ok) onClose();
-						});
-					}}
-				/>
-			</ScrollView>
+			<KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
+					<Card>
+						<Muted>タイトル</Muted>
+						<Input value={title} onChangeText={setTitle} />
+						<Muted>説明</Muted>
+						<Input value={description} onChangeText={setDescription} multiline />
+						<Muted>役割の割り当ては変更できません。作り直す場合は削除してから共有し直してください。</Muted>
+					</Card>
+					<Button
+						title='保存'
+						icon='check'
+						loading={busy}
+						disabled={!title.trim()}
+						onPress={() => {
+							setBusy(true);
+							// 失敗したときは入力を残したまま開いておく (トーストで理由を出す)。
+							void onSave({ title, description }).then(ok => {
+								setBusy(false);
+								if (ok) onClose();
+							});
+						}}
+					/>
+				</ScrollView>
+			</KeyboardAvoidingView>
 		</Sheet>
 	);
 };
