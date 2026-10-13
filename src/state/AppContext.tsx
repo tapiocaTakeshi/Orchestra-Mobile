@@ -27,7 +27,7 @@ import { Connection, Snapshot } from '../api/types';
 import { useToast } from '../components/ui';
 import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
-import { remoteSessionNotice } from '../lib/remoteSession';
+import { claimRemoteSyncNotice, remoteSessionNotice } from '../lib/remoteSession';
 import { useDivisionAuth } from './DivisionAuthContext';
 import {
 	loadActiveUrl,
@@ -180,7 +180,10 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			const syncNotice = remoteSessionNotice(previous, next);
 			if (syncNotice) {
 				toast.show(`${syncNotice.title}: ${syncNotice.body}`, 'success');
-				if (syncNotice.notify) void notifyRemoteEvent(syncNotice.title, syncNotice.body, 'session-synced');
+				// Realtime ですでに同じ同期を知らせていれば、端末の通知は出さない
+				if (syncNotice.notify && next.remoteSession && claimRemoteSyncNotice(next.remoteSession.syncedAt)) {
+					void notifyRemoteEvent(syncNotice.title, syncNotice.body, 'session-synced');
+				}
 			}
 			snapshotRef.current = next;
 			// revision が同じなら中身も同じ。参照を保って無駄な再描画を避ける。

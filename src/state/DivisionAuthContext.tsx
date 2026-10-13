@@ -1,8 +1,9 @@
 /**
  * Division アカウントのログイン状態を保持する Provider。
  *
- * ログイン中は RemoteSession テーブルへの新規 INSERT を購読し、新しいデバイスが
- * 追加されたらローカル通知を出す (Phase 1: アプリがフォアグラウンド/起動中のみ。
+ * ログイン中は RemoteSession テーブルを購読し、新しいデバイスが追加されたときと、
+ * PC で `/remote-control` が実行されたとき (syncedAt の更新) にローカル通知を出す
+ * (Phase 1: アプリがフォアグラウンド/起動中のみ。
  * アプリを完全に閉じていても届く本物の push 通知は将来のフェーズで扱う)。
  */
 
@@ -15,9 +16,11 @@ import {
 	restoreDivisionSession,
 	signInWithDivision,
 	signOutDivision,
-	subscribeToNewRemoteSessions,
+	subscribeToRemoteSessions,
 } from '../lib/divisionAuth';
 import { clearDivisionSession, loadDivisionSession, saveDivisionSession } from '../lib/divisionSession';
+import { notifyRemoteEvent } from '../lib/remoteNotifications';
+import { claimRemoteSyncNotice, freshRemoteSync } from '../lib/remoteSession';
 
 type DivisionAuthContextValue = {
 	session: DivisionSession | null;
@@ -66,6 +69,13 @@ const notifyNewSession = async (row: RemoteSessionRow): Promise<void> => {
 	}
 };
 
+const notifyRemoteSync = (row: RemoteSessionRow): Promise<void> =>
+	notifyRemoteEvent(
+		'PC のセッションを同期しました',
+		`${row.deviceLabel || row.lanUrl} で /remote-control が実行されました。開いて続けられます。`,
+		'session-synced',
+	);
+
 export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }) => {
 	const [session, setSession] = useState<DivisionSession | null>(null);
 	const [isRestoring, setIsRestoring] = useState(true);
@@ -99,9 +109,19 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 		unsubscribeRef.current = null;
 		if (!session) return;
 
-		unsubscribeRef.current = subscribeToNewRemoteSessions(session, (row) => {
-			setNewSessionIds(ids => (ids.includes(row.id) ? ids : [...ids, row.id]));
-			void notifyNewSession(row);
+		const lastSyncs = new Map<string, number>();
+		unsubscribeRef.current = subscribeToRemoteSessions(session, {
+			onInsert: (row) => {
+				setNewSessionIds(ids => (ids.includes(row.id) ? ids : [...ids, row.id]));
+				void notifyNewSession(row);
+				// 新しい行でもう同期済みなら、次のハートビートで二重に知らせない
+				freshRemoteSync(row, lastSyncs);
+			},
+			// PC で `/remote-control` を送った時点で知らせる (接続していなくても届く)
+			onUpdate: (row) => {
+				const syncedAt = freshRemoteSync(row, lastSyncs);
+				if (syncedAt !== null && claimRemoteSyncNotice(syncedAt)) void notifyRemoteSync(row);
+			},
 		});
 		return () => { unsubscribeRef.current?.(); unsubscribeRef.current = null; };
 	}, [session]);

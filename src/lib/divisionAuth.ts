@@ -109,6 +109,8 @@ export type RemoteSessionRow = {
 	token: string;
 	protocolVersion: number;
 	lastSeenAt: string;
+	/** PC で `/remote-control` を実行した時刻。ハートビートでは変わらない */
+	syncedAt?: string | null;
 };
 
 const DEFAULT_STALE_AFTER_MS = 2 * 60 * 1000; // ハートビート間隔 (約25秒) の余裕を見て2分
@@ -139,30 +141,28 @@ export const listRemoteSessions = async (
 export type RemoteSessionChangeCallback = (row: RemoteSessionRow) => void;
 
 /**
- * ログイン中アカウントの RemoteSession に新しい行が増えたら通知する (INSERT のみ購読)。
+ * ログイン中アカウントの RemoteSession の変化を購読する。
+ *   - onInsert … 新しい行 (新しい PC が見つかった)
+ *   - onUpdate … 既存の行の更新 (ハートビートと、PC での `/remote-control`。どちらかは syncedAt で見分ける)
  * IDE 側の subscribeToProfileChanges と同じ postgres_changes の仕組みを使う。
  */
-export const subscribeToNewRemoteSessions = (
+export const subscribeToRemoteSessions = (
 	session: DivisionSession,
-	callback: RemoteSessionChangeCallback,
+	handlers: { onInsert?: RemoteSessionChangeCallback; onUpdate?: RemoteSessionChangeCallback },
 ): (() => void) => {
 	const sb = getDivisionSupabase();
+	const filter = { schema: 'public', table: DIVISION_REMOTE_SESSION_TABLE, filter: `userId=eq.${session.userId}` };
 
 	const channel = sb
 		.channel(`remote-session-${session.userId}`)
-		.on(
-			'postgres_changes',
-			{
-				event: 'INSERT',
-				schema: 'public',
-				table: DIVISION_REMOTE_SESSION_TABLE,
-				filter: `userId=eq.${session.userId}`,
-			},
-			(payload) => {
-				const row = payload.new as RemoteSessionRow | undefined;
-				if (row) callback(row);
-			},
-		)
+		.on('postgres_changes', { event: 'INSERT', ...filter }, (payload) => {
+			const row = payload.new as RemoteSessionRow | undefined;
+			if (row) handlers.onInsert?.(row);
+		})
+		.on('postgres_changes', { event: 'UPDATE', ...filter }, (payload) => {
+			const row = payload.new as RemoteSessionRow | undefined;
+			if (row) handlers.onUpdate?.(row);
+		})
 		.subscribe();
 
 	return () => { void channel.unsubscribe(); };

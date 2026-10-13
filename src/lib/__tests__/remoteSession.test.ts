@@ -1,5 +1,5 @@
 import { Snapshot } from '../../api/types';
-import { remoteSessionNotice } from '../remoteSession';
+import { claimRemoteSyncNotice, freshRemoteSync, remoteSessionNotice } from '../remoteSession';
 
 const snapshot = (remoteSession?: Snapshot['remoteSession']): Snapshot => ({
 	ide: { protocolVersion: 1, appName: 'Orchestra', version: '1', workspaceName: '', workspaceFolders: [], uiLanguage: 'ja' },
@@ -39,5 +39,42 @@ describe('remoteSessionNotice', () => {
 
 	it('同じ同期のままなら何もしない', () => {
 		expect(remoteSessionNotice(snapshot(synced(1)), snapshot(synced(1)))).toBeNull();
+	});
+});
+
+describe('freshRemoteSync', () => {
+	const now = Date.parse('2026-10-13T12:00:00.000Z');
+	const at = (iso: string | null) => ({ id: 'pc1', syncedAt: iso });
+
+	it('fires once for a new /remote-control and ignores heartbeats that keep the same syncedAt', () => {
+		const seen = new Map<string, number>();
+		expect(freshRemoteSync(at('2026-10-13T11:59:58.123+00:00'), seen, now)).toBe(Date.parse('2026-10-13T11:59:58.123Z'));
+		expect(freshRemoteSync(at('2026-10-13T11:59:58.123+00:00'), seen, now)).toBeNull();
+		expect(freshRemoteSync(at('2026-10-13T11:59:59.000Z'), seen, now)).toBe(Date.parse('2026-10-13T11:59:59.000Z'));
+	});
+
+	it('ignores rows that were never synced and syncs from before the app was listening', () => {
+		const seen = new Map<string, number>();
+		expect(freshRemoteSync(at(null), seen, now)).toBeNull();
+		expect(freshRemoteSync({ id: 'pc1' }, seen, now)).toBeNull();
+		expect(freshRemoteSync(at('2026-10-13T11:50:00.000Z'), seen, now)).toBeNull();
+		// 同じ古い値のハートビートでも出さない
+		expect(freshRemoteSync(at('2026-10-13T11:50:00.000Z'), seen, now)).toBeNull();
+	});
+
+	it('tracks each PC separately', () => {
+		const seen = new Map<string, number>();
+		const iso = '2026-10-13T11:59:30.000Z';
+		expect(freshRemoteSync({ id: 'a', syncedAt: iso }, seen, now)).not.toBeNull();
+		expect(freshRemoteSync({ id: 'b', syncedAt: iso }, seen, now)).not.toBeNull();
+	});
+});
+
+describe('claimRemoteSyncNotice', () => {
+	it('lets only the first notifier of the same sync through', () => {
+		const syncedAt = 1_791_900_000_123;
+		expect(claimRemoteSyncNotice(syncedAt)).toBe(true);
+		expect(claimRemoteSyncNotice(syncedAt)).toBe(false);
+		expect(claimRemoteSyncNotice(syncedAt + 1)).toBe(true);
 	});
 });
