@@ -98,6 +98,10 @@ import {
 	canSendMessage,
 	chatBlocks,
 	classifyPatchLines,
+	CloudGoalLoopMode,
+	DEFAULT_GOAL_LOOP,
+	GOAL_LOOP_HINTS,
+	GOAL_LOOP_LABELS,
 	cloudErrorText,
 	cloudModelLabel,
 	cloudSource,
@@ -118,6 +122,8 @@ import {
 	mergeEvents,
 	modelSelectionIssue,
 	outputPreview,
+	pausedReviewSeq,
+	reviewOutcomeLabel,
 	pullRequestActionLabel,
 	pullRequestStateFor,
 	sectionForChange,
@@ -126,7 +132,9 @@ import {
 	stopCloudSession,
 	sumCloudCosts,
 	taskHeaderLabel,
+	toCloudGoal,
 	toCloudPlan,
+	toCloudReview,
 	toCloudTaskEvent,
 	repoLabel,
 	toolCallParts,
@@ -154,8 +162,10 @@ import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import {
 	clearLastCloudRepo,
+	loadLastCloudGoalLoop,
 	loadLastCloudModel,
 	loadLastCloudRepo,
+	saveLastCloudGoalLoop,
 	saveLastCloudModel,
 	saveLastCloudRepo,
 } from '../state/cloudStorage';
@@ -301,6 +311,8 @@ type Draft = {
 	 * 「プロジェクト」の欄はこれに固定される (モデルとプロジェクトが食い違わないよう 1 つの値で持つ)。
 	 */
 	projectId: string;
+	/** 目標ループ (目標を立てて、達成するまでラウンドを繰り返す) */
+	goalLoop: CloudGoalLoopMode;
 	showAdvanced: boolean;
 };
 
@@ -320,8 +332,12 @@ const EMPTY_DRAFT: Draft = {
 	model: '',
 	title: '',
 	projectId: '',
+	goalLoop: DEFAULT_GOAL_LOOP,
 	showAdvanced: false,
 };
+
+const GOAL_LOOP_OPTIONS: { value: CloudGoalLoopMode; label: string }[] =
+	(['auto', 'confirm', 'off'] as const).map(value => ({ value, label: GOAL_LOOP_LABELS[value] }));
 
 const COUNT_OPTIONS = Array.from({ length: MAX_PARALLEL_SESSIONS }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
@@ -527,6 +543,15 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }
 				</View>
 
 				<View style={styles.field}>
+					<SectionTitle>目標ループ</SectionTitle>
+					<SegmentedControl options={GOAL_LOOP_OPTIONS} value={draft.goalLoop} onChange={value => set('goalLoop', value)} />
+					<Muted>
+						{GOAL_LOOP_HINTS[draft.goalLoop]}
+						{draft.goalLoop !== 'off' ? '。最初にリーダーが目標と確認できる達成条件を立て、ラウンドごとにレビュアーがサンドボックスで確かめます。' : '。'}
+					</Muted>
+				</View>
+
+				<View style={styles.field}>
 					<SectionTitle>プロジェクト</SectionTitle>
 					<CloudProjectPicker
 						projects={projects}
@@ -644,6 +669,12 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen
 							label={draftModelLabel(draft, projects.projects)}
 							warn={!!modelSelectionIssue(modelSelectionOf(draft))}
 							accessibilityLabel={`モデル: ${draftModelLabel(draft, projects.projects)}。変更する`}
+							onPress={() => onOptionsOpen(true)}
+						/>
+						<ComposerChip
+							icon='repeat'
+							label={`ループ · ${GOAL_LOOP_LABELS[draft.goalLoop]}`}
+							accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[draft.goalLoop]}。変更する`}
 							onPress={() => onOptionsOpen(true)}
 						/>
 						{count > 1 ? (
@@ -954,12 +985,96 @@ const TaskEventView = ({ data, position }: { data: Record<string, unknown>; posi
 	);
 };
 
-const EventView = ({ event, timeline, onShowChanges, doneAction }: {
+/** goal イベント: リーダーが立てた目標と達成条件。 */
+const GoalCard = ({ data }: { data: Record<string, unknown> }) => {
+	const goal = toCloudGoal(data);
+	return (
+		<View style={[styles.plan, styles.goal]} accessibilityLabel={`目標: ${goal.goal}。達成条件 ${goal.criteria.length} 件`}>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name='target' size={14} color={colors.accentText} /></View>
+				<Text style={styles.planTitle}>
+					目標
+					<Text style={styles.planCount}>  {GOAL_LOOP_LABELS[goal.mode]}{goal.maxRounds ? ` · 最大 ${goal.maxRounds} ラウンド` : ''}</Text>
+				</Text>
+			</View>
+			<Text selectable style={[styles.doneText, styles.indent]}>{goal.goal}</Text>
+			{goal.criteria.length ? <Text style={[styles.planMeta, styles.indent]}>達成条件</Text> : null}
+			{goal.criteria.map((c, i) => (
+				<View key={i} style={[styles.line, styles.indent]}>
+					<Text style={styles.criterionIndex}>{i + 1}.</Text>
+					<Text selectable style={styles.criterionText}>{c}</Text>
+				</View>
+			))}
+			{goal.model ? <Text style={[styles.planMeta, styles.indent]} numberOfLines={1}>リーダー: {goal.model}</Text> : null}
+		</View>
+	);
+};
+
+/** review イベント: start はラウンドのレビューの区切り、done は条件ごとの判定と次にどうなるか。 */
+const ReviewEventView = ({ data, roleName, onContinue, continuing }: {
+	data: Record<string, unknown>;
+	roleName: string;
+	/** 確認待ちの最新のレビューなら「次のラウンドへ進む」 */
+	onContinue?: () => void;
+	continuing?: boolean;
+}) => {
+	const review = toCloudReview(data);
+	if (!review) return null;
+	if (review.status === 'start') {
+		return (
+			<View style={styles.taskHeader} accessibilityRole='header' accessibilityLabel={`ラウンド ${review.round} のレビュー`}>
+				<View style={styles.taskHeaderLine} />
+				<Text style={styles.taskHeaderText}>
+					<Text style={styles.taskHeaderArrow}>◎ </Text>
+					ラウンド {review.round} のレビュー · {roleName}
+					{review.model ? <Text style={styles.taskHeaderModel}> ({review.model})</Text> : null}
+				</Text>
+			</View>
+		);
+	}
+	const color = review.next === 'achieved' ? colors.success : review.next === 'limit' ? colors.danger : colors.warning;
+	return (
+		<View style={[styles.done, { borderColor: withAlpha(color, '55') }]}>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name='target' size={14} color={colors.fgMuted} /></View>
+				<Text style={styles.doneTitle}>
+					目標との照合
+					<Text style={styles.doneCount}>  ラウンド {review.round}</Text>
+				</Text>
+			</View>
+			{review.criteria.map(c => (
+				<View key={c.index} style={styles.line} accessibilityLabel={`${c.index}. ${c.text}: ${c.met ? '達成' : '未達'}${c.reason ? `。${c.reason}` : ''}`}>
+					<View style={styles.gutter}><Icon name={c.met ? 'check' : 'x'} size={13} color={c.met ? colors.success : colors.danger} /></View>
+					<Text selectable style={styles.criterionText}>
+						{c.index}. {c.text}
+						{c.reason ? <Text style={styles.criterionReason}> — {c.reason}</Text> : null}
+					</Text>
+				</View>
+			))}
+			{review.summary ? <Text selectable style={styles.doneText}>{review.summary}</Text> : null}
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name={review.next === 'achieved' ? 'check-circle' : review.next === 'limit' ? 'x-circle' : 'repeat'} size={14} color={color} /></View>
+				<Text style={[styles.doneTitle, { color }]}>{reviewOutcomeLabel(review)}</Text>
+			</View>
+			{onContinue ? (
+				<>
+					<Button title='次のラウンドへ進む' size='sm' icon='repeat' loading={continuing} disabled={continuing} onPress={onContinue} style={styles.alignStart} />
+					<Muted>入力欄に書いた内容は、追加の指示として次のラウンドに渡します。普通に送信すると新しい依頼になります。</Muted>
+				</>
+			) : null}
+		</View>
+	);
+};
+
+const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal, continuing }: {
 	event: CloudSessionEvent;
 	timeline: DivisionTimeline;
 	onShowChanges: () => void;
 	/** Extra button on the completion card (the PR button, only on the latest one) */
 	doneAction?: React.ReactNode;
+	/** このイベントが確認待ちのレビューなら、次のラウンドへ進める */
+	onContinueGoal?: () => void;
+	continuing?: boolean;
 }) => {
 	const data = event.data;
 	switch (event.type) {
@@ -968,10 +1083,12 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 		case 'assistant': {
 			const value = text(data.text).trim();
 			if (!value) return null;
-			const role = text(data.role);
+			// 目標ループのレビュアーの発言には phase: 'review' が付く (Division Project ならロールも)
+			const review = data.phase === 'review';
+			const role = text(data.role) || (review ? 'reviewer' : '');
 			return (
 				<View style={styles.assistantBody}>
-					{role ? <RoleChip label={timeline.roleNames.get(role) ?? role} /> : null}
+					{role ? <RoleChip label={timeline.roleNames.get(role) ?? (review ? 'レビュー' : role)} /> : null}
 					<Text selectable style={styles.assistantText}>{value}</Text>
 				</View>
 			);
@@ -1011,6 +1128,7 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 						<View style={styles.gutter}><Icon name='check-circle' size={14} color={colors.success} /></View>
 						<Text style={styles.doneTitle}>
 							完了
+							{typeof data.round === 'number' ? <Text style={styles.doneCount}>  ラウンド {data.round}</Text> : null}
 							{changed !== null ? <Text style={styles.doneCount}>  {changed} ファイル変更</Text> : null}
 						</Text>
 					</View>
@@ -1024,6 +1142,12 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 		}
 		case 'pull_request':
 			return <PullRequestEventCard data={data} />;
+		case 'goal':
+			return <GoalCard data={data} />;
+		case 'review': {
+			const role = text(data.role) || 'reviewer';
+			return <ReviewEventView data={data} roleName={timeline.roleNames.get(role) ?? 'レビュー'} onContinue={onContinueGoal} continuing={continuing} />;
+		}
 		default:
 			return null;
 	}
@@ -1344,6 +1468,22 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		}
 	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
 
+	// 目標ループが「毎回確認」で止まっているとき、次のラウンドへ進める (入力欄の内容は追加の指示になる)
+	const continueGoal = useCallback(async () => {
+		if (sending) return;
+		setSending(true);
+		try {
+			applySession(await sendCloudMessage(auth, id, draft, { continueGoal: true }));
+			setDraft('');
+			follow.current = true;
+			void loadEvents();
+		} catch (e) {
+			toast.show(cloudErrorText(e), 'error');
+		} finally {
+			setSending(false);
+		}
+	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
+
 	const source = cloudSource(current);
 	const active = isActive(current.status);
 	const sendable = canSendMessage(current);
@@ -1369,6 +1509,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		// Picks up the session's pullRequest and the new pull_request event
 		void loadEvents();
 	}, [applyPrResult, loadEvents]);
+	const pausedSeq = useMemo(() => (active ? null : pausedReviewSeq(events)), [events, active]);
 	const lastDoneSeq = useMemo(() => {
 		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'done') return events[i].seq;
 		return null;
@@ -1445,6 +1586,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 												timeline={timeline}
 												onShowChanges={() => setTab('changes')}
 												doneAction={item.event.seq === lastDoneSeq ? prDoneAction : undefined}
+												onContinueGoal={sendable && item.event.seq === pausedSeq ? () => void continueGoal() : undefined}
+												continuing={sending}
 											/>
 										)))}
 										{active && isLast ? <TypingBubble status={current.status} since={workingSince} /> : null}
@@ -1571,6 +1714,17 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 		return () => { cancelled = true; };
 	}, [session?.userId]);
 
+	// 前回選んだ目標ループ
+	useEffect(() => {
+		const userId = session?.userId;
+		if (!userId) return;
+		let cancelled = false;
+		void loadLastCloudGoalLoop(userId).then(last => {
+			if (!cancelled && last) setDraft(d => ({ ...d, goalLoop: last }));
+		});
+		return () => { cancelled = true; };
+	}, [session?.userId]);
+
 	const loadList = useCallback(async () => {
 		if (!session) return;
 		try {
@@ -1658,6 +1812,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 		// 次に開いたとき同じモデル (Division Project ならそのプロジェクト) を選んだ状態にする
 		const selection = modelSelectionOf(draft);
 		void saveLastCloudModel(session.userId, selection);
+		void saveLastCloudGoalLoop(session.userId, draft.goalLoop);
 		try {
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
@@ -1666,6 +1821,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
+				goalLoop: draft.goalLoop,
 				// 1 つだけ起動したときは、作れた時点でそのセッションのチャットを開く (サンドボックスの用意はチャットの中で待つ)
 				onCreated: count === 1
 					? created => {
@@ -2122,6 +2278,10 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgElevated,
 	},
 	planTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 22 },
+	goal: { borderColor: withAlpha(colors.accentText, '55') },
+	criterionIndex: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 20, width: GUTTER, fontVariant: ['tabular-nums'] },
+	criterionText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
+	criterionReason: { color: colors.fgFaint },
 	planCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	planMeta: { color: colors.fgFaint, fontSize: fontSize.xs },
 	planMarker: { width: 22, height: 20, alignItems: 'flex-start', justifyContent: 'center' },
