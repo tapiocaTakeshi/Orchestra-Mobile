@@ -11,14 +11,14 @@ export type PageEntry = {
 	key: PageKey;
 	label: string;
 	icon: IconName;
-	/** PC に繋いでいないと開けないページ (クラウド・共有・コストは Division 直結なので未接続でも開ける) */
+	/** PC に繋いでいないと開けないページ (Division・クラウド・共有・コストは Division 直結なので未接続でも開ける) */
 	needsConnection: boolean;
 };
 
 /** メニューに並べる順番。 */
 export const PAGES: PageEntry[] = [
 	{ key: 'kanban', label: 'カンバン', icon: 'columns', needsConnection: true },
-	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: true },
+	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: false },
 	{ key: 'cloud', label: 'クラウド', icon: 'cloud', needsConnection: false },
 	{ key: 'social', label: '共有', icon: 'share-2', needsConnection: false },
 	{ key: 'tuning', label: 'コスト', icon: 'bar-chart-2', needsConnection: false },

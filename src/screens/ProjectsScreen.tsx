@@ -1,9 +1,12 @@
 /**
  * Division プロジェクト管理のタブ。
  *
- * ワークスペースの .division/projects.json をそのまま編集する。プロジェクトを
+ * PC に繋いでいるときは、ワークスペースの .division/projects.json をそのまま編集する。プロジェクトを
  * 有効にすると IDE 側の roleAssignments (どの役割をどのモデルに振るか) が
  * 切り替わるので、外出先から「今日はコーダーを Opus にする」といった調整ができる。
+ *
+ * PC に繋いでいなくても (または切り替えて)、Division アカウントのクラウドのプロジェクトを
+ * Division API で直接作成・編集・削除できる。クラウドエージェントはこちらの割り当てを使う。
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -41,6 +44,14 @@ import {
 import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
 import { publishAssignmentPost } from '../lib/divisionSocial';
 import { defaultPostTitle, toPostAssignments } from '../lib/social';
+import {
+	createCloudProject,
+	deleteCloudProject,
+	listCloudModels,
+	listCloudProjects,
+	renameCloudProject,
+	saveCloudAssignments,
+} from '../lib/divisionCloudProjects';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
@@ -334,7 +345,226 @@ const ShareSheet = ({
 	);
 };
 
+const errorMessage = (e: unknown): string =>
+	e instanceof OrchestraApiError ? e.userMessage : e instanceof Error ? e.message : String(e);
+
+type Source = 'pc' | 'cloud';
+
+/** PC とクラウドの切り替え。PC に繋いでいるときだけ出す。 */
+const SourceSwitch = ({ value, onChange }: { value: Source; onChange: (next: Source) => void }) => (
+	<View style={styles.sourceSwitch}>
+		{([['pc', 'PC', 'monitor'], ['cloud', 'クラウド', 'cloud']] as const).map(([key, label, icon]) => {
+			const selected = value === key;
+			return (
+				<Pressable
+					key={key}
+					accessibilityRole='button'
+					accessibilityState={{ selected }}
+					accessibilityLabel={`${label} のプロジェクト`}
+					onPress={() => onChange(key)}
+					style={[styles.sourceChip, selected && styles.modelChipSelected]}
+				>
+					<Icon name={icon} size={14} color={selected ? colors.fg : colors.fgMuted} />
+					<Text style={[styles.modelChipText, selected && { color: colors.fg }]}>{label}</Text>
+				</Pressable>
+			);
+		})}
+	</View>
+);
+
 export const ProjectsScreen = () => {
+	const { client } = useApp();
+	const [source, setSource] = useState<Source>(client ? 'pc' : 'cloud');
+
+	// 接続が切れたらクラウドに、繋がったら PC に戻す。
+	useEffect(() => { setSource(client ? 'pc' : 'cloud'); }, [client]);
+
+	const sourceSwitch = client ? <SourceSwitch value={source} onChange={setSource} /> : null;
+	return source === 'pc' && client
+		? <PcProjects sourceSwitch={sourceSwitch} />
+		: <CloudProjects sourceSwitch={sourceSwitch} />;
+};
+
+/** Division アカウントのクラウドのプロジェクト (PC がなくても使える)。 */
+const CloudProjects = ({ sourceSwitch }: { sourceSwitch: React.ReactNode }) => {
+	const { session } = useDivisionAuth();
+	const toast = useToast();
+	const [projects, setProjects] = useState<DivisionProject[] | null>(null);
+	const [providers, setProviders] = useState<ProviderModels[]>([]);
+	const [error, setError] = useState<string | null>(null);
+	const [refreshing, setRefreshing] = useState(false);
+	const [editingId, setEditingId] = useState<string | null>(null);
+	const [sharingId, setSharingId] = useState<string | null>(null);
+	const [adding, setAdding] = useState(false);
+	const [newName, setNewName] = useState('');
+	const [creating, setCreating] = useState(false);
+
+	const editing = useMemo(() => projects?.find(p => p.projectId === editingId) ?? null, [projects, editingId]);
+	const sharing = useMemo(() => projects?.find(p => p.projectId === sharingId) ?? null, [projects, sharingId]);
+
+	const load = useCallback(async () => {
+		if (!session) return;
+		setRefreshing(true);
+		try {
+			setProjects(await listCloudProjects(session));
+			setError(null);
+		} catch (e) {
+			setError(errorMessage(e));
+		} finally {
+			setRefreshing(false);
+		}
+	}, [session]);
+
+	useEffect(() => {
+		setProjects(null);
+		void load();
+	}, [load]);
+
+	// モデル一覧は滅多に変わらないので、アカウントごとに 1 回だけ取る。
+	useEffect(() => {
+		if (!session) return;
+		let cancelled = false;
+		listCloudModels(session)
+			.then(list => { if (!cancelled) setProviders(list); })
+			.catch(() => { /* 取得できなくてもプロジェクト名の編集はできる */ });
+		return () => { cancelled = true; };
+	}, [session]);
+
+	const replace = useCallback((project: DivisionProject) => {
+		setProjects(prev => (prev ?? []).map(p => (p.projectId === project.projectId ? project : p)));
+	}, []);
+
+	if (!session) {
+		return (
+			<Screen>
+				<ScreenHeader title='Division' />
+				{sourceSwitch}
+				<EmptyState icon='layers' title='Division アカウントでログインしてください' />
+			</Screen>
+		);
+	}
+
+	return (
+		<Screen>
+			<ScreenHeader title='Division' />
+			{sourceSwitch}
+			{error ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
+
+			{projects === null && !error ? (
+				<Loading label='プロジェクトを読み込んでいます…' />
+			) : (
+				<ScrollView
+					contentContainerStyle={styles.content}
+					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load()} tintColor={colors.fgMuted} />}
+				>
+					{projects?.length === 0 ? (
+						<EmptyState icon='layers' title='クラウドにプロジェクトがありません' />
+					) : null}
+
+					{(projects ?? []).map(project => (
+						<Card key={project.projectId}>
+							<Row style={styles.spread}>
+								<View style={styles.flex}>
+									<Body numberOfLines={1}>{project.name}</Body>
+									<Muted numberOfLines={1}>{project.projectId} · {project.agents.length} 役割</Muted>
+								</View>
+								<IconButton
+									icon='share-2'
+									accessibilityLabel={`${project.name} の割り当てを共有`}
+									disabled={project.agents.length === 0}
+									onPress={() => setSharingId(project.projectId)}
+								/>
+								<IconButton icon='edit-2' accessibilityLabel={`${project.name} を編集`} onPress={() => setEditingId(project.projectId)} />
+							</Row>
+							<View style={styles.agentPreview}>
+								{project.agents.slice(0, 4).map((a, i) => (
+									<Text key={`${a.role}-${i}`} style={styles.agentPreviewText} numberOfLines={1}>
+										{roleTitle(a.role)} → {a.model || '(未設定)'}
+									</Text>
+								))}
+								{project.agents.length > 4 ? <Muted>他 {project.agents.length - 4} 件</Muted> : null}
+							</View>
+						</Card>
+					))}
+
+					{adding ? (
+						<Card>
+							<SectionTitle>プロジェクトを追加</SectionTitle>
+							<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' autoFocus />
+							<Muted>役割の割り当ては一番上のプロジェクトからコピーします。追加したあとに変更できます。</Muted>
+							<Row>
+								<Button
+									title='追加'
+									style={styles.flex}
+									loading={creating}
+									disabled={!newName.trim()}
+									onPress={() => {
+										setCreating(true);
+										void createCloudProject(session, newName, projects?.[0]?.agents ?? [])
+											.then(project => {
+												setProjects(prev => [project, ...(prev ?? [])]);
+												setNewName('');
+												setAdding(false);
+												toast.show('プロジェクトを追加しました', 'success');
+											})
+											.catch(e => toast.show(errorMessage(e), 'error'))
+											.finally(() => setCreating(false));
+									}}
+								/>
+								<Button title='やめる' variant='secondary' onPress={() => setAdding(false)} />
+							</Row>
+						</Card>
+					) : (
+						<Button title='プロジェクトを追加' icon='plus' variant='secondary' onPress={() => setAdding(true)} />
+					)}
+				</ScrollView>
+			)}
+
+			{editing ? (
+				<ProjectEditor
+					project={editing}
+					providers={providers}
+					onClose={() => setEditingId(null)}
+					onSave={async (name, agents) => {
+						try {
+							if (name.trim() !== editing.name) await renameCloudProject(session, editing.projectId, name);
+							const saved = JSON.stringify(agents) !== JSON.stringify(editing.agents)
+								? await saveCloudAssignments(session, editing.projectId, agents)
+								: editing;
+							replace({ ...saved, name: name.trim() });
+							toast.show('保存しました', 'success');
+							setEditingId(null);
+						} catch (e) {
+							toast.show(errorMessage(e), 'error');
+							void load();
+						}
+					}}
+					onDelete={async () => {
+						try {
+							await deleteCloudProject(session, editing.projectId);
+							setProjects(prev => (prev ?? []).filter(p => p.projectId !== editing.projectId));
+							toast.show('プロジェクトを削除しました', 'success');
+							setEditingId(null);
+						} catch (e) {
+							toast.show(errorMessage(e), 'error');
+						}
+					}}
+				/>
+			) : null}
+
+			{sharing ? (
+				<ShareSheet
+					project={sharing}
+					onClose={() => setSharingId(null)}
+					onDone={message => toast.show(message, 'success')}
+				/>
+			) : null}
+		</Screen>
+	);
+};
+
+/** PC の .division/projects.json のプロジェクト。 */
+const PcProjects = ({ sourceSwitch }: { sourceSwitch: React.ReactNode }) => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
 	const toast = useToast();
@@ -378,7 +608,7 @@ export const ProjectsScreen = () => {
 			invalidate();
 			return true;
 		} catch (e) {
-			toast.show(e instanceof OrchestraApiError ? e.userMessage : String(e), 'error');
+			toast.show(errorMessage(e), 'error');
 			return false;
 		}
 	}, [invalidate, toast]);
@@ -386,6 +616,7 @@ export const ProjectsScreen = () => {
 	if (!snapshot || !client || !division) {
 		return (
 			<Screen>
+				{sourceSwitch}
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 				<Loading label='プロジェクトを読み込んでいます…' />
 			</Screen>
@@ -419,6 +650,7 @@ export const ProjectsScreen = () => {
 					</>
 				)}
 			/>
+			{sourceSwitch}
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView
@@ -535,6 +767,22 @@ const styles = StyleSheet.create({
 	spread: { justifyContent: 'space-between' },
 	centered: { alignSelf: 'center' },
 	bannerFlush: { margin: 0 },
+	sourceSwitch: {
+		flexDirection: 'row',
+		gap: spacing.xs,
+		paddingHorizontal: spacing.lg,
+		paddingBottom: spacing.sm,
+	},
+	sourceChip: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 4,
+		minHeight: 36,
+		borderWidth: 1,
+		borderColor: colors.border,
+		borderRadius: 999,
+		paddingHorizontal: spacing.md,
+	},
 	roleChips: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',

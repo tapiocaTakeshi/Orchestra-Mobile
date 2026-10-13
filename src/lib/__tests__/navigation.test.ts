@@ -17,9 +17,9 @@ describe('pushPage', () => {
 });
 
 describe('canOpenPage', () => {
-	it('keeps kanban and projects behind the PC connection, but not cost or cloud', () => {
+	it('keeps kanban behind the PC connection, but not projects, cost or cloud', () => {
 		expect(canOpenPage('kanban', false)).toBe(false);
-		expect(canOpenPage('projects', false)).toBe(false);
+		expect(canOpenPage('projects', false)).toBe(true);
 		expect(canOpenPage('tuning', false)).toBe(true);
 		expect(canOpenPage('cloud', false)).toBe(true);
 		expect(canOpenPage('kanban', true)).toBe(true);
