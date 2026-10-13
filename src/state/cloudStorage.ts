@@ -12,7 +12,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CloudModelSelection, toModelSelection } from '../lib/divisionCloud';
 import { GitHubRepo } from '../lib/divisionGitHub';
 
+/** 旧形式 (1 件だけ)。読み込み時に REPOS_KEY の一覧へ引き継ぎ、次に保存するときに消す。 */
 const LAST_REPO_KEY = 'orchestra.cloudLastRepo.v1';
+const REPOS_KEY = 'orchestra.cloudRepos.v2';
 const LAST_MODEL_KEY = 'orchestra.cloudLastModel.v1';
 
 export type LastCloudRepo = { repo: GitHubRepo; branch: string };
@@ -27,29 +29,93 @@ const isRepo = (value: unknown): value is GitHubRepo => {
 		&& typeof r.defaultBranch === 'string';
 };
 
-export const loadLastCloudRepo = async (userId: string): Promise<LastCloudRepo | null> => {
+/** 保存しておくリポジトリの上限。古いものから押し出す。 */
+export const MAX_SAVED_CLOUD_REPOS = 10;
+
+const sameRepo = (a: GitHubRepo, b: GitHubRepo): boolean => a.fullName.toLowerCase() === b.fullName.toLowerCase();
+
+const toEntry = (value: unknown): LastCloudRepo | null => {
+	if (!value || typeof value !== 'object') return null;
+	const v = value as { repo?: unknown; branch?: unknown };
+	if (!isRepo(v.repo)) return null;
+	return { repo: v.repo, branch: typeof v.branch === 'string' ? v.branch : '' };
+};
+
+/** 追加・編集 (ブランチの変更)。同じリポジトリがあれば置き換えて先頭 (= 最近使った) に動かし、上限を超えた分は捨てる。 */
+export const upsertCloudRepo = (list: LastCloudRepo[], entry: LastCloudRepo): LastCloudRepo[] =>
+	[entry, ...list.filter(e => !sameRepo(e.repo, entry.repo))].slice(0, MAX_SAVED_CLOUD_REPOS);
+
+/** 削除。無ければそのまま。 */
+export const removeCloudRepoFrom = (list: LastCloudRepo[], fullName: string): LastCloudRepo[] =>
+	list.filter(e => e.repo.fullName.toLowerCase() !== fullName.toLowerCase());
+
+/** 旧形式 (1 件だけの orchestra.cloudLastRepo.v1) を読む。別ユーザーのものや壊れたものは null。 */
+const loadLegacyRepo = async (userId: string): Promise<LastCloudRepo | null> => {
+	const raw = await AsyncStorage.getItem(LAST_REPO_KEY);
+	if (!raw) return null;
+	const parsed = JSON.parse(raw) as { userId?: unknown };
+	return parsed.userId === userId ? toEntry(parsed) : null;
+};
+
+/**
+ * 保存済みのリポジトリ一覧 (最近使った順)。別のユーザーのものや壊れたものは空。
+ * 新形式が無ければ旧形式の 1 件を引き継ぐ (旧キーは次に保存するときに消す)。
+ */
+export const loadCloudRepos = async (userId: string): Promise<LastCloudRepo[]> => {
 	try {
-		const raw = await AsyncStorage.getItem(LAST_REPO_KEY);
-		if (!raw) return null;
-		const parsed = JSON.parse(raw) as { userId?: unknown; repo?: unknown; branch?: unknown };
-		if (parsed.userId !== userId || !isRepo(parsed.repo)) return null;
-		return { repo: parsed.repo, branch: typeof parsed.branch === 'string' ? parsed.branch : '' };
+		const raw = await AsyncStorage.getItem(REPOS_KEY);
+		if (raw) {
+			const parsed = JSON.parse(raw) as { userId?: unknown; repos?: unknown };
+			if (parsed.userId !== userId || !Array.isArray(parsed.repos)) return [];
+			let list: LastCloudRepo[] = [];
+			// 壊れた要素は読み飛ばし、重複は先に出てきた方を残す
+			for (const item of parsed.repos) {
+				const entry = toEntry(item);
+				if (entry && !list.some(e => sameRepo(e.repo, entry.repo))) list = [...list, entry];
+			}
+			return list.slice(0, MAX_SAVED_CLOUD_REPOS);
+		}
+		const legacy = await loadLegacyRepo(userId);
+		return legacy ? [legacy] : [];
 	} catch {
-		return null;
+		return [];
 	}
 };
 
-export const saveLastCloudRepo = async (userId: string, value: LastCloudRepo): Promise<void> => {
+const writeCloudRepos = async (userId: string, repos: LastCloudRepo[]): Promise<void> => {
+	await AsyncStorage.setItem(REPOS_KEY, JSON.stringify({ userId, repos }));
+	// 一覧に取り込んだので旧キーはもう要らない
+	await AsyncStorage.removeItem(LAST_REPO_KEY);
+};
+
+/** リポジトリを追加・更新する (起動したときと、設定で編集したとき)。 */
+export const saveCloudRepo = async (userId: string, value: LastCloudRepo): Promise<void> => {
 	try {
-		await AsyncStorage.setItem(LAST_REPO_KEY, JSON.stringify({ userId, repo: value.repo, branch: value.branch }));
+		await writeCloudRepos(userId, upsertCloudRepo(await loadCloudRepos(userId), value));
 	} catch {
 		// 保存できなくても困らない。次回は選び直すだけ。
 	}
 };
 
+/** 一覧から外す。 */
+export const removeCloudRepo = async (userId: string, fullName: string): Promise<void> => {
+	try {
+		await writeCloudRepos(userId, removeCloudRepoFrom(await loadCloudRepos(userId), fullName));
+	} catch {
+		// 同上
+	}
+};
+
+/** 前回 (いちばん最近) 選んだリポジトリ。 */
+export const loadLastCloudRepo = async (userId: string): Promise<LastCloudRepo | null> =>
+	(await loadCloudRepos(userId))[0] ?? null;
+
+export const saveLastCloudRepo = saveCloudRepo;
+
+/** GitHub の連携を解除したときなど、保存したリポジトリをすべて消す。 */
 export const clearLastCloudRepo = async (): Promise<void> => {
 	try {
-		await AsyncStorage.removeItem(LAST_REPO_KEY);
+		await AsyncStorage.multiRemove([REPOS_KEY, LAST_REPO_KEY]);
 	} catch {
 		// 同上
 	}
