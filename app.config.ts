@@ -16,6 +16,8 @@
  */
 
 import type { ConfigContext, ExpoConfig } from 'expo/config';
+import { execFileSync } from 'node:child_process';
+import { resolve } from 'node:path';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/;
@@ -55,6 +57,9 @@ const resolveIosOverrides = (): { appleTeamId?: string; buildNumber?: string } =
 };
 
 export default ({ config }: ConfigContext): ExpoConfig => {
+	// Make sure the iOS-only padded icon exists before Expo resolves asset paths.
+	// This also covers clean EAS/Xcode Cloud checkouts and local expo prebuild.
+	execFileSync(process.execPath, [resolve(process.cwd(), 'scripts/generate-ios-icon.cjs')], { stdio: 'inherit' });
 	const eas = (config.extra?.eas ?? {}) as Record<string, unknown>;
 	const projectId = resolveProjectId(eas.projectId);
 	const owner = readEnv('EXPO_OWNER') || config.owner;
@@ -68,6 +73,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 		...(owner ? { owner } : {}),
 		ios: {
 			...config.ios,
+			icon: './assets/icon-ios.png',
 			...iosOverrides,
 		},
 		extra: {
