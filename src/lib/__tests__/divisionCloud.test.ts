@@ -33,6 +33,7 @@ import {
 	listCloudSessions,
 	listPollInterval,
 	mergeEvents,
+	outputPreview,
 	recentCostedSessions,
 	repoFolderName,
 	repoLabel,
@@ -44,6 +45,7 @@ import {
 	stopCloudSession,
 	sumCloudCosts,
 	toCloudSession,
+	toolCallParts,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -400,6 +402,30 @@ describe('toolCallSummary', () => {
 		const long = toolCallSummary('run_command', { command: 'x'.repeat(200) });
 		expect(long.length).toBe(80);
 		expect(long.endsWith('…')).toBe(true);
+	});
+});
+
+describe('toolCallParts', () => {
+	it('splits the tool name from the argument shown in parentheses', () => {
+		expect(toolCallParts('read_file', { path: 'src/a.ts' })).toEqual({ name: 'read_file', arg: 'src/a.ts' });
+		expect(toolCallParts('run_command', { command: 'npm\n  test' })).toEqual({ name: 'run_command', arg: 'npm test' });
+		expect(toolCallParts('list_dir', {})).toEqual({ name: 'list_dir', arg: '' });
+		expect(toolCallParts('', null)).toEqual({ name: 'tool', arg: '' });
+	});
+});
+
+describe('outputPreview', () => {
+	it('shows the first non-empty line and counts the rest', () => {
+		expect(outputPreview('\n\nline 1\nline 2\nline 3\n\n')).toEqual({ first: 'line 1', more: 2 });
+		expect(outputPreview('only\r\n')).toEqual({ first: 'only', more: 0 });
+		expect(outputPreview('')).toEqual({ first: '', more: 0 });
+		expect(outputPreview('  \n \n')).toEqual({ first: '', more: 0 });
+	});
+
+	it('collapses a long first line', () => {
+		const preview = outputPreview(`${'x'.repeat(300)}\nnext`, 50);
+		expect(preview.first.length).toBe(50);
+		expect(preview.more).toBe(1);
 	});
 });
 

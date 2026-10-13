@@ -605,15 +605,31 @@ const SUMMARY_KEYS = [
 	'pattern', 'query', 'regex', 'glob', 'url',
 ];
 
-/** ツール呼び出しを 1 行にする。例: `read_file src/a.ts` / `run_command npm test`。 */
-export const toolCallSummary = (name: string, args: unknown, max = 80): string => {
-	const toolName = name || 'tool';
-	if (!args || typeof args !== 'object') return oneLine(toolName, max);
+/** ツール呼び出しの名前と、要約に出す引数 (1 行に畳んだもの。無ければ空)。 */
+export const toolCallParts = (name: string, args: unknown, max = 80): { name: string; arg: string } => {
+	const toolName = oneLine(name || 'tool', max);
+	if (!args || typeof args !== 'object') return { name: toolName, arg: '' };
 	const record = args as Record<string, unknown>;
 	const key = SUMMARY_KEYS.find(k => typeof record[k] === 'string' && (record[k] as string).trim())
 		?? Object.keys(record).find(k => typeof record[k] === 'string' && (record[k] as string).trim());
-	const value = key ? String(record[key]) : '';
-	return oneLine(value ? `${toolName} ${value}` : toolName, max);
+	return { name: toolName, arg: key ? oneLine(String(record[key]), max) : '' };
+};
+
+/** ツール呼び出しを 1 行にする。例: `read_file src/a.ts` / `run_command npm test`。 */
+export const toolCallSummary = (name: string, args: unknown, max = 80): string => {
+	const parts = toolCallParts(name, args, max);
+	return oneLine(parts.arg ? `${parts.name} ${parts.arg}` : parts.name, max);
+};
+
+/**
+ * ツールの出力を Claude Code の「⎿ 1 行目 … +N 行」のように畳む。
+ * 先頭の空行は飛ばし、残りの行数 (末尾の空行は数えない) を more に入れる。
+ */
+export const outputPreview = (output: string, max = 120): { first: string; more: number } => {
+	const lines = output.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+	const start = lines.findIndex(line => line.trim() !== '');
+	if (start < 0) return { first: '', more: 0 };
+	return { first: oneLine(lines[start], max), more: lines.length - start - 1 };
 };
 
 // ---------------------------------------------------------------------------
