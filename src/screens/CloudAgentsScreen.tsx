@@ -1720,7 +1720,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 			page: 'projects',
 			label: 'プロジェクト',
 			icon: 'layers',
-			detail: projects.source === 'pc' && projects.projects.length > 0 ? `${projects.projects.length} 件` : 'Division',
+			detail: projects.projects.length > 0 ? `${projects.projects.length} 件` : 'Division',
 		},
 		{ page: 'tuning', label: 'コスト', icon: 'bar-chart-2', detail: cost.known > 0 ? `${formatUsdCompact(cost.totalUsd)}` : '料金と残高' },
 		{ page: 'kanban', label: 'カンバン', icon: 'columns', detail: typeof kanbanTasks === 'number' ? `${kanbanTasks} タスク` : null },

@@ -2,18 +2,17 @@
  * クラウドエージェントで使う Division プロジェクトの一覧。
  *
  * プロジェクトを指定してセッションを作ると、サーバーはそのプロジェクトの「コーダー」の割り当てを
- * モデルとして使う (POST /api/cloud-sessions の projectId)。一覧の出どころは 2 つ:
+ * モデルとして使う (POST /api/cloud-sessions の projectId)。一覧の出どころは 2 つで、両方を合わせて出す:
  *   - PC に接続しているとき … PC の Orchestra の .division/projects.json (接続 API の division.projects)
- *   - 接続していないとき    … Supabase の Project テーブルを直接読む (デスクトップと同じ問い合わせ)
- *       GET /rest/v1/Project?or=(ownerId.eq.<uid>,userId.eq.<uid>)&select=id,name,updatedAt&order=updatedAt.desc
- *     RLS で自分の行しか読めないので、ユーザーの JWT でセッションを張ってから読む。
+ *   - Division API          … GET /api/projects (ユーザーの JWT で、自分のプロジェクトだけ返る)
+ *     Supabase の Project テーブルは RLS でクライアントから読めない (サーバー専用) ので、直接は読まない。
  *
  * 後半の純粋関数 (並べ替え・名前の引き当て) は UI 非依存なのでそのままテストできる。
  */
 
 import { DivisionProject } from '../api/types';
-import { DivisionSession, getDivisionSupabase } from './divisionAuth';
-import { DIVISION_PROJECT_TABLE } from './divisionAuthConfig';
+import { DivisionSession } from './divisionAuth';
+import { divisionApiRequest } from './divisionCloud';
 
 export type CloudProjectOption = {
 	id: string;
@@ -23,25 +22,8 @@ export type CloudProjectOption = {
 	updatedAt?: string;
 };
 
-export type CloudProjectSource = 'pc' | 'supabase';
-
-export const PROJECT_COLUMNS = 'id,name,updatedAt';
-
-/** デスクトップと同じ「自分が持ち主のプロジェクト」の条件 (ownerId と userId のどちらか)。 */
-export const ownedProjectFilter = (userId: string): string => `ownerId.eq.${userId},userId.eq.${userId}`;
-
-/** RLS を通すため、Supabase クライアントがこのユーザーのセッションを持っていなければ張り直す。 */
-const supabaseFor = async (session: DivisionSession) => {
-	const sb = getDivisionSupabase();
-	try {
-		const { data } = await sb.auth.getSession();
-		if (data.session?.access_token && data.session.user?.id === session.userId) return sb;
-	} catch {
-		// 下で張り直す
-	}
-	await sb.auth.setSession({ access_token: session.accessToken, refresh_token: session.refreshToken });
-	return sb;
-};
+/** 一覧に PC のプロジェクトが含まれていれば 'pc'、Division API のものだけなら 'division'。 */
+export type CloudProjectSource = 'pc' | 'division';
 
 type ProjectRow = { id?: unknown; name?: unknown; updatedAt?: unknown };
 
@@ -52,21 +34,25 @@ export const toProjectOption = (row: ProjectRow): CloudProjectOption | null => {
 	return { id, name, ...(typeof row.updatedAt === 'string' ? { updatedAt: row.updatedAt } : {}) };
 };
 
-/** Supabase から自分のプロジェクトを新しい順に読む。 */
-export const listSupabaseProjects = async (session: DivisionSession): Promise<CloudProjectOption[]> => {
-	const sb = await supabaseFor(session);
-	const { data, error } = await sb
-		.from(DIVISION_PROJECT_TABLE)
-		.select(PROJECT_COLUMNS)
-		.or(ownedProjectFilter(session.userId))
-		.order('updatedAt', { ascending: false });
-	if (error) {
-		if (error.code === '42501') throw new Error('プロジェクトを読む権限がありません。');
-		throw new Error(`プロジェクトを取得できませんでした: ${error.message}`);
+/** Division API から自分のプロジェクトを新しく更新した順に読む。 */
+export const listServerProjects = async (session: DivisionSession): Promise<CloudProjectOption[]> => {
+	let data: unknown;
+	try {
+		data = await divisionApiRequest<unknown>(session, '/api/projects');
+	} catch (e) {
+		throw new Error(`プロジェクトを取得できませんでした: ${e instanceof Error ? e.message : String(e)}`);
 	}
-	return ((data ?? []) as ProjectRow[])
-		.map(toProjectOption)
-		.filter((p): p is CloudProjectOption => p !== null);
+	const rows = Array.isArray(data) ? (data as ProjectRow[]) : [];
+	return rows
+		.map(row => (row && typeof row === 'object' ? toProjectOption(row) : null))
+		.filter((p): p is CloudProjectOption => p !== null)
+		.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+};
+
+/** PC の一覧を先に、そこに無い Division のプロジェクトを後ろに足す。 */
+export const mergeProjectOptions = (pc: CloudProjectOption[], server: CloudProjectOption[]): CloudProjectOption[] => {
+	const seen = new Set(pc.map(p => p.id));
+	return [...pc, ...server.filter(p => !seen.has(p.id))];
 };
 
 /** PC の一覧から選択肢を作る。ID の無いプロジェクト (Supabase に保存していない) は選べないので外す。 */

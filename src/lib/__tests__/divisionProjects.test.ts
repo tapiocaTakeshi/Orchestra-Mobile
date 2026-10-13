@@ -1,40 +1,17 @@
 /**
- * クラウドエージェントのプロジェクト選び。Supabase への問い合わせの形 (デスクトップと同じ条件) と、
- * PC の一覧からの変換・名前の引き当てを確認する。Supabase クライアントはフェイクに差し替える。
+ * クラウドエージェントのプロジェクト選び。Division API (GET /api/projects) の読み方と、
+ * PC の一覧からの変換・合わせ方・名前の引き当てを確認する。JWT の取得はフェイク、fetch はテストごとに差し替える。
  */
 
-type Call = { method: string; args: unknown[] };
-
-const fake = {
-	calls: [] as Call[],
-	setSessionCalls: [] as unknown[],
-	currentSession: null as unknown,
-	result: { data: [] as unknown[] | null, error: null as { code?: string; message: string } | null },
-};
-
 jest.mock('../divisionAuth', () => ({
-	getDivisionSupabase: () => {
-		const builder: Record<string, unknown> = {};
-		for (const method of ['select', 'or', 'order']) {
-			builder[method] = (...args: unknown[]) => {
-				fake.calls.push({ method, args });
-				return method === 'order' ? Promise.resolve(fake.result) : builder;
-			};
-		}
-		return {
-			auth: {
-				getSession: async () => ({ data: { session: fake.currentSession } }),
-				setSession: async (value: unknown) => { fake.setSessionCalls.push(value); return { data: {}, error: null }; },
-			},
-			from: (table: string) => { fake.calls.push({ method: 'from', args: [table] }); return builder; },
-		};
-	},
+	getDivisionSupabase: () => ({ auth: { getSession: async () => ({ data: { session: null } }) } }),
+	getDivisionAccessToken: jest.fn(async () => 'jwt-token'),
 }));
 
 import { DivisionProject } from '../../api/types';
 import {
-	listSupabaseProjects,
-	ownedProjectFilter,
+	listServerProjects,
+	mergeProjectOptions,
 	projectLabel,
 	projectOptionsFromPc,
 	singleActiveProjectId,
@@ -43,64 +20,47 @@ import {
 
 const auth = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
-beforeEach(() => {
-	fake.calls = [];
-	fake.setSessionCalls = [];
-	fake.currentSession = null;
-	fake.result = { data: [], error: null };
-});
+type FetchCall = { url: string; init: RequestInit };
+let calls: FetchCall[] = [];
+const respond = (status: number, body: unknown) => {
+	(global as unknown as { fetch: unknown }).fetch = jest.fn(async (url: string, init: RequestInit) => {
+		calls.push({ url, init });
+		return { ok: status >= 200 && status < 300, status, json: async () => body } as Response;
+	});
+};
 
-describe('listSupabaseProjects', () => {
-	it('queries the user\'s own projects like the desktop does', async () => {
-		fake.result = {
-			data: [
-				{ id: 'p2', name: 'Newer', updatedAt: '2026-10-02T00:00:00.000Z' },
-				{ id: 'p1', name: ' Older ', updatedAt: '2026-10-01T00:00:00.000Z' },
-			],
-			error: null,
-		};
-		const projects = await listSupabaseProjects(auth);
-		// GET /rest/v1/Project?or=(ownerId.eq.u1,userId.eq.u1)&select=id,name,updatedAt&order=updatedAt.desc
-		expect(fake.calls).toEqual([
-			{ method: 'from', args: ['Project'] },
-			{ method: 'select', args: ['id,name,updatedAt'] },
-			{ method: 'or', args: ['ownerId.eq.u1,userId.eq.u1'] },
-			{ method: 'order', args: ['updatedAt', { ascending: false }] },
+beforeEach(() => { calls = []; });
+
+describe('listServerProjects', () => {
+	it('reads the user\'s projects from the Division API, most recently updated first', async () => {
+		respond(200, [
+			{ id: 'p1', name: ' Older ', updatedAt: '2026-10-01T00:00:00.000Z', userId: 'u1' },
+			{ id: 'p2', name: 'Newer', updatedAt: '2026-10-02T00:00:00.000Z', userId: 'u1' },
 		]);
+		const projects = await listServerProjects(auth);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].url).toBe('https://api.division.he-ro.jp/api/projects');
+		expect(calls[0].init.method).toBe('GET');
+		expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer jwt-token');
 		expect(projects).toEqual([
 			{ id: 'p2', name: 'Newer', updatedAt: '2026-10-02T00:00:00.000Z' },
 			{ id: 'p1', name: 'Older', updatedAt: '2026-10-01T00:00:00.000Z' },
 		]);
 	});
 
-	it('sets the user\'s JWT session first unless the client already holds it', async () => {
-		await listSupabaseProjects(auth);
-		expect(fake.setSessionCalls).toEqual([{ access_token: 'at', refresh_token: 'rt' }]);
-
-		fake.setSessionCalls = [];
-		fake.currentSession = { access_token: 'fresh', user: { id: 'u1' } };
-		await listSupabaseProjects(auth);
-		expect(fake.setSessionCalls).toEqual([]);
-
-		fake.currentSession = { access_token: 'other', user: { id: 'someone-else' } };
-		await listSupabaseProjects(auth);
-		expect(fake.setSessionCalls).toHaveLength(1);
+	it('drops rows without an id and names unnamed projects', async () => {
+		respond(200, [{ id: '', name: 'x' }, { name: 'no id' }, null, { id: 'p3', name: '' }]);
+		expect(await listServerProjects(auth)).toEqual([{ id: 'p3', name: '名前のないプロジェクト' }]);
 	});
 
-	it('drops rows without an id and names unnamed projects', async () => {
-		fake.result = { data: [{ id: '', name: 'x' }, { name: 'no id' }, { id: 'p3', name: '' }], error: null };
-		expect(await listSupabaseProjects(auth)).toEqual([{ id: 'p3', name: '名前のないプロジェクト' }]);
+	it('treats a non-array body as no projects', async () => {
+		respond(200, { error: 'weird' });
+		expect(await listServerProjects(auth)).toEqual([]);
 	});
 
 	it('turns errors into Japanese messages', async () => {
-		fake.result = { data: null, error: { code: '42501', message: 'permission denied' } };
-		await expect(listSupabaseProjects(auth)).rejects.toThrow('権限');
-		fake.result = { data: null, error: { code: 'XX', message: 'boom' } };
-		await expect(listSupabaseProjects(auth)).rejects.toThrow('プロジェクトを取得できませんでした: boom');
-	});
-
-	it('builds the owner filter for both columns', () => {
-		expect(ownedProjectFilter('abc')).toBe('ownerId.eq.abc,userId.eq.abc');
+		respond(500, { error: 'boom' });
+		await expect(listServerProjects(auth)).rejects.toThrow('プロジェクトを取得できませんでした: boom');
 	});
 });
 
@@ -128,6 +88,19 @@ describe('project options', () => {
 		expect(singleActiveProjectId([{ id: 'a', name: 'A', active: true }, { id: 'b', name: 'B' }])).toBe('a');
 		expect(singleActiveProjectId([{ id: 'a', name: 'A', active: true }, { id: 'b', name: 'B', active: true }])).toBe('');
 		expect(singleActiveProjectId([])).toBe('');
+	});
+
+	it('puts PC projects first and adds the Division ones the PC does not have', () => {
+		const merged = mergeProjectOptions(
+			[{ id: 'b', name: 'Beta', active: true }, { id: 'a', name: 'Alpha (PC)', active: false }],
+			[{ id: 'n', name: 'New on the web' }, { id: 'a', name: 'Alpha' }],
+		);
+		expect(merged).toEqual([
+			{ id: 'b', name: 'Beta', active: true },
+			{ id: 'a', name: 'Alpha (PC)', active: false },
+			{ id: 'n', name: 'New on the web' },
+		]);
+		expect(mergeProjectOptions([], [{ id: 'n', name: 'N' }])).toEqual([{ id: 'n', name: 'N' }]);
 	});
 
 	it('reads a row defensively', () => {
