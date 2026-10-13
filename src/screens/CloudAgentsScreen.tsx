@@ -1610,10 +1610,18 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 	}, [session, foreground, loadList]);
 
 
+	// Division のプロジェクトは画面を開いたときに一度読むだけなので、PC やウェブで新しく作ったものが
+	// 出てくるよう、オプションを開いたときと前面に戻ったときに読み直す。
+	const reloadProjects = projects.reload;
+	useEffect(() => {
+		if (optionsOpen && foreground) reloadProjects();
+	}, [optionsOpen, foreground, reloadProjects]);
+
 	const onPull = useCallback(async () => {
 		setRefreshing(true);
+		reloadProjects();
 		try { await loadList(); } finally { setRefreshing(false); }
-	}, [loadList]);
+	}, [loadList, reloadProjects]);
 
 	const patchSession = useCallback((next: CloudSession) => {
 		setSessions(prev => prev.map(s => (s.id === next.id ? next : s)));
