@@ -10,7 +10,7 @@
  *   GET  /api/cloud-sessions/:id/events      ?after=<seq> 以降のイベント
  *   POST /api/cloud-sessions                 作成 (サンドボックスを用意するので数分かかることがある)
  *   POST /api/cloud-sessions/:id/start       開始 (repo を渡すとそのリポジトリを clone、無ければ空のフォルダ)
- *   POST /api/cloud-sessions/:id/messages    追加の指示 (止まっていれば再開する)
+ *   POST /api/cloud-sessions/:id/messages    追加の指示 (止まっていれば再開する)。{ continueGoal: true } で目標ループの次のラウンドへ
  *   POST /api/cloud-sessions/:id/stop        停止
  *   POST /api/cloud-sessions/:id/archive     サンドボックスを消して一覧から隠す
  *   GET  /api/cloud-sessions/:id/changes     変更ファイルと unified diff
@@ -25,6 +25,10 @@
  * モデルに 'division-project' (DIVISION_PROJECT_MODEL) と projectId を渡すと、セッションは Division Project
  * (マルチエージェント) として動く: リーダーの計画 (plan イベント) → 役割ごとのタスク (task イベント、間の assistant に role)
  * → まとめ (done)。計画ごとのタスクの状態は divisionTimeline で組み立てる。
+ *
+ * 目標ループ (作成時の goalLoop。既定 'auto'): 作業の前にリーダーが目標と達成条件を立て (goal イベント)、
+ * ラウンドごとにレビュアーが確かめて (review イベント)、目標を達成するまで作業を繰り返す。
+ * 'confirm' は未達のラウンドごとに止まり、continueGoal で次のラウンドへ進む。
  *
  * 後半の純粋関数 (状態の表示名・イベントの結合・ツールの要約・URL の検証など) は UI 非依存なので
  * そのままテストできる。
@@ -79,6 +83,26 @@ export type CloudSession = {
 	costUsd?: number;
 	/** The PR opened from this session (GitHub-repo sessions only). Absent = no PR yet */
 	pullRequest?: CloudPullRequest | null;
+	/** 目標ループ。古いサーバー・セッションには無い (= 'off') */
+	goalLoop: CloudGoalLoopMode;
+	/** 目標ループのラウンド数の上限 (無ければ null) */
+	goalMaxRounds: number | null;
+};
+
+/**
+ * 目標ループ (PC の Orchestra の「ループ」と同じ):
+ *   auto    … 目標を達成するまで、未達なら自動で次のラウンドへ進む
+ *   confirm … 未達のラウンドが終わるたびに止まり、「次のラウンドへ進む」を待つ
+ *   off     … 目標を立てずに 1 回だけ作業する
+ */
+export type CloudGoalLoopMode = 'auto' | 'confirm' | 'off';
+export const DEFAULT_GOAL_LOOP: CloudGoalLoopMode = 'auto';
+export const isGoalLoopMode = (v: unknown): v is CloudGoalLoopMode => v === 'auto' || v === 'confirm' || v === 'off';
+export const GOAL_LOOP_LABELS: Record<CloudGoalLoopMode, string> = { auto: '自動', confirm: '毎回確認', off: 'オフ' };
+export const GOAL_LOOP_HINTS: Record<CloudGoalLoopMode, string> = {
+	auto: '目標を達成するまで、未達なら自動で次のラウンドに進みます',
+	confirm: '未達のラウンドが終わるたびに止まり、続けるかを確認します',
+	off: '目標を立てずに 1 回だけ作業します',
 };
 
 /** A pull request opened from a session (same shape as Division's PullRequestInfo). */
@@ -102,6 +126,8 @@ export type CloudPullRequest = {
  */
 export type CloudSessionEventType =
 	| 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task'
+	// 目標ループ: goal は { goal, criteria, maxRounds, mode, model }、review は { round, status: 'start' | 'done', ... } (toCloudGoal / toCloudReview)
+	| 'goal' | 'review'
 	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
 	| 'pull_request';
 
@@ -348,6 +374,8 @@ export const toCloudSession = (raw: unknown): CloudSession => {
 		completedAt: strOrNull(s.completedAt),
 		...(typeof s.costUsd === 'number' && Number.isFinite(s.costUsd) && s.costUsd >= 0 ? { costUsd: s.costUsd } : {}),
 		...(pullRequest ? { pullRequest } : {}),
+		goalLoop: isGoalLoopMode(s.goalLoop) ? s.goalLoop : 'off',
+		goalMaxRounds: typeof s.goalMaxRounds === 'number' && Number.isFinite(s.goalMaxRounds) ? s.goalMaxRounds : null,
 	};
 };
 
@@ -410,6 +438,8 @@ export type CreateCloudSessionInput = {
 	model?: string;
 	projectId?: string;
 	workspaceName?: string;
+	/** 省略時はサーバーの既定 ('auto') */
+	goalLoop?: CloudGoalLoopMode;
 };
 
 /**
@@ -437,6 +467,7 @@ export const createSessionBody = (input: CreateCloudSessionInput): Record<string
 	if (input.model?.trim()) body.model = input.model.trim();
 	if (input.projectId?.trim()) body.projectId = input.projectId.trim();
 	if (input.workspaceName?.trim()) body.workspaceName = input.workspaceName.trim();
+	if (isGoalLoopMode(input.goalLoop)) body.goalLoop = input.goalLoop;
 	return body;
 };
 
@@ -466,8 +497,15 @@ export const startCloudSession = async (session: DivisionSession, id: string, op
 	return toCloudSession(data.session);
 };
 
-export const sendCloudMessage = async (session: DivisionSession, id: string, text: string): Promise<CloudSession> => {
-	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/messages`, { method: 'POST', body: { text } });
+/** POST .../messages の body。continueGoal なら text は空でもよい (書いてあれば次のラウンドへの追加の指示)。 */
+export const messageBody = (text: string, options: { continueGoal?: boolean } = {}): Record<string, unknown> => {
+	const trimmed = text.trim();
+	if (options.continueGoal) return { continueGoal: true, ...(trimmed ? { text: trimmed } : {}) };
+	return { text: trimmed };
+};
+
+export const sendCloudMessage = async (session: DivisionSession, id: string, text: string, options: { continueGoal?: boolean } = {}): Promise<CloudSession> => {
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/messages`, { method: 'POST', body: messageBody(text, options) });
 	return toCloudSession(data.session);
 };
 
@@ -730,6 +768,71 @@ export const toCloudTaskEvent = (data: Record<string, unknown>): CloudTaskEvent 
 		status,
 		...(typeof data.summary === 'string' && data.summary.trim() ? { summary: data.summary.trim() } : {}),
 	};
+};
+
+// ---------------------------------------------------------------------------
+// 目標ループ (goal / review イベント)
+// ---------------------------------------------------------------------------
+
+export type CloudGoal = { goal: string; criteria: string[]; maxRounds: number | null; mode: CloudGoalLoopMode; model: string };
+
+export const toCloudGoal = (data: Record<string, unknown>): CloudGoal => ({
+	goal: str(data.goal),
+	criteria: (Array.isArray(data.criteria) ? data.criteria : []).filter((c): c is string => typeof c === 'string' && !!c.trim()),
+	maxRounds: typeof data.maxRounds === 'number' && Number.isFinite(data.maxRounds) ? data.maxRounds : null,
+	mode: data.mode === 'confirm' ? 'confirm' : 'auto',
+	model: str(data.model),
+});
+
+export type CloudReviewCriterion = { index: number; text: string; met: boolean; reason: string };
+export type CloudReviewNext = 'continue' | 'achieved' | 'limit' | 'paused';
+
+export type CloudReview =
+	| { status: 'start'; round: number; model: string; role: string }
+	| { status: 'done'; round: number; model: string; role: string; achieved: boolean; criteria: CloudReviewCriterion[]; summary: string; next: CloudReviewNext; maxRounds: number | null };
+
+/** review の data を取り出す。status が分からなければ null (表示しない)。 */
+export const toCloudReview = (data: Record<string, unknown>): CloudReview | null => {
+	const round = typeof data.round === 'number' && data.round >= 1 ? data.round : 1;
+	const base = { round, model: str(data.model), role: str(data.role) };
+	if (data.status === 'start') return { status: 'start', ...base };
+	if (data.status !== 'done') return null;
+	const criteria = (Array.isArray(data.criteria) ? data.criteria : [])
+		.filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+		.map((c, i): CloudReviewCriterion => ({ index: typeof c.index === 'number' ? c.index : i + 1, text: str(c.text), met: c.met === true, reason: str(c.reason) }));
+	const next = (['continue', 'achieved', 'limit', 'paused'] as const).find(n => n === data.next) ?? 'limit';
+	return {
+		status: 'done',
+		...base,
+		achieved: data.achieved === true,
+		criteria,
+		summary: str(data.summary),
+		next,
+		maxRounds: typeof data.maxRounds === 'number' && Number.isFinite(data.maxRounds) ? data.maxRounds : null,
+	};
+};
+
+/** レビューの結果の一文 (例: 「未達のため、ラウンド 2/5 に進みます」)。 */
+export const reviewOutcomeLabel = (review: Extract<CloudReview, { status: 'done' }>): string => {
+	const max = review.maxRounds ?? '?';
+	switch (review.next) {
+		case 'achieved': return `目標を達成しました (ラウンド ${review.round})`;
+		case 'continue': return `未達のため、ラウンド ${review.round + 1}/${max} に進みます`;
+		case 'paused': return `目標はまだ達成されていません (ラウンド ${review.round}/${max} 完了)`;
+		default: return `上限の ${review.round} ラウンドで未達のまま終了しました`;
+	}
+};
+
+/**
+ * 「次のラウンドへ進む」を出すレビューの seq: 最後のレビューが paused で、そのあとにユーザーの発言や新しい目標が無い。無ければ null。
+ */
+export const pausedReviewSeq = (events: CloudSessionEvent[]): number | null => {
+	for (let i = events.length - 1; i >= 0; i--) {
+		const e = events[i];
+		if (e.type === 'user' || e.type === 'goal') return null;
+		if (e.type === 'review' && e.data.status === 'done') return e.data.next === 'paused' ? e.seq : null;
+	}
+	return null;
 };
 
 /**
@@ -1162,6 +1265,8 @@ export type LaunchInput = {
 	title?: string;
 	/** Division のプロジェクト ID。指定するとそのプロジェクトの「コーダー」のモデルで動く (model が優先) */
 	projectId?: string;
+	/** 目標ループ。省略時はサーバーの既定 */
+	goalLoop?: CloudGoalLoopMode;
 	/** 作成できた時点 (開始の前) で呼ぶ。開始は clone などで数分かかるので、先にセッションを開けるようにする */
 	onCreated?: (created: CloudSession, index: number) => void;
 };
@@ -1216,7 +1321,7 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 	return Promise.all(titles.map(async (title, index): Promise<LaunchResult> => {
 		let created: CloudSession | undefined;
 		try {
-			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName });
+			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName, goalLoop: input.goalLoop });
 			try { input.onCreated?.(created, index); } catch { /* 通知側の失敗で起動は止めない */ }
 			const started = await startCloudSession(session, created.id, { repo });
 			return { index, title, session: started };

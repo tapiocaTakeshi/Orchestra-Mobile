@@ -1,5 +1,5 @@
 /**
- * クラウドエージェントの「前回選んだリポジトリ」と「前回選んだモデル」の保存。接続情報 (storage.ts) とは別ファイルに分けてある。
+ * クラウドエージェントの「前回選んだリポジトリ」「前回選んだモデル」「前回選んだ目標ループ」の保存。接続情報 (storage.ts) とは別ファイルに分けてある。
  *
  * 次に新しいセッションを開いたとき、同じリポジトリとブランチ・同じモデル (Division Project ならそのプロジェクト) を
  * 選んだ状態にするだけの便利機能。
@@ -9,13 +9,14 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { CloudModelSelection, toModelSelection } from '../lib/divisionCloud';
+import { CloudGoalLoopMode, CloudModelSelection, isGoalLoopMode, toModelSelection } from '../lib/divisionCloud';
 import { GitHubRepo } from '../lib/divisionGitHub';
 
 /** 旧形式 (1 件だけ)。読み込み時に REPOS_KEY の一覧へ引き継ぎ、次に保存するときに消す。 */
 const LAST_REPO_KEY = 'orchestra.cloudLastRepo.v1';
 const REPOS_KEY = 'orchestra.cloudRepos.v2';
 const LAST_MODEL_KEY = 'orchestra.cloudLastModel.v1';
+const LAST_GOAL_LOOP_KEY = 'orchestra.cloudLastGoalLoop.v1';
 
 export type LastCloudRepo = { repo: GitHubRepo; branch: string };
 
@@ -137,6 +138,26 @@ export const saveLastCloudModel = async (userId: string, selection: CloudModelSe
 	try {
 		const { mode, model, projectId } = selection;
 		await AsyncStorage.setItem(LAST_MODEL_KEY, JSON.stringify({ userId, selection: { mode, model, projectId } }));
+	} catch {
+		// 保存できなくても困らない。次回は選び直すだけ。
+	}
+};
+
+/** 前回選んだ目標ループ。別のユーザーのものや知らない値は null。 */
+export const loadLastCloudGoalLoop = async (userId: string): Promise<CloudGoalLoopMode | null> => {
+	try {
+		const raw = await AsyncStorage.getItem(LAST_GOAL_LOOP_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw) as { userId?: unknown; mode?: unknown };
+		return parsed.userId === userId && isGoalLoopMode(parsed.mode) ? parsed.mode : null;
+	} catch {
+		return null;
+	}
+};
+
+export const saveLastCloudGoalLoop = async (userId: string, mode: CloudGoalLoopMode): Promise<void> => {
+	try {
+		await AsyncStorage.setItem(LAST_GOAL_LOOP_KEY, JSON.stringify({ userId, mode }));
 	} catch {
 		// 保存できなくても困らない。次回は選び直すだけ。
 	}
