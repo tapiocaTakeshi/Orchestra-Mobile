@@ -21,7 +21,9 @@
  *
  * 見た目は Claude Code (Web / アプリ) に合わせる:
  *   - 一覧の下に入力欄を固定し、そこから指示を書いてすぐ起動する。リポジトリ・モデル・並列数は入力欄の下のチップから設定する
- *   - 詳細のログはターミナル風。返答は「●」、ツールは「● 名前(引数)」と「⎿ 出力の 1 行目 … +N 行」、指示は「>」で始まる
+ *   - 1 つだけ起動したときは、そのままセッションのチャットを開く
+ *   - 詳細はチャット。自分の指示は右の吹き出し、エージェントの返答は左にアイコン付きでまとめ、
+ *     続けて実行したツールは「ツールを N 回実行」に畳む (開くと「● 名前(引数)」「⎿ 出力 … +N 行」)
  *   - 差分は見出しの「±」から開く。動いているあいだは入力欄の送信ボタンが停止ボタンになる
  *
  * 変更を手元のワークスペースに取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -94,6 +96,7 @@ import {
 	PlanTaskState,
 	archiveCloudSession,
 	canSendMessage,
+	chatBlocks,
 	classifyPatchLines,
 	cloudErrorText,
 	cloudModelLabel,
@@ -105,6 +108,7 @@ import {
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	isDivisionProjectModel,
 	isFullNameRepo,
 	lastSeqOf,
 	launchModelFields,
@@ -722,13 +726,90 @@ const Bullet = ({ color = colors.fg }: { color?: string }) => (
 	<View style={styles.gutter}><Text style={[styles.bullet, { color }]}>●</Text></View>
 );
 
-/** 指示は Claude Code のターミナルと同じく「>」で始め、薄い地で囲む。 */
-const UserPrompt = ({ value }: { value: string }) => (
-	<View accessibilityLabel={`あなた: ${value}`} style={styles.userPrompt}>
-		<Text style={styles.userMark}>{'>'}</Text>
-		<Text selectable style={styles.userText}>{value || '(内容なし)'}</Text>
+/** 自分の指示は右寄せの吹き出し。 */
+const UserBubble = ({ value }: { value: string }) => (
+	<View style={styles.userWrap}>
+		<View accessibilityLabel={`あなた: ${value}`} style={styles.userBubble}>
+			<Text selectable style={styles.userText}>{value || '(内容なし)'}</Text>
+		</View>
 	</View>
 );
+
+/** エージェントの印 (返答の頭に出す丸いアイコン)。 */
+const AgentAvatar = () => (
+	<View style={styles.avatar}><Text style={styles.avatarGlyph}>✻</Text></View>
+);
+
+/** エージェントの 1 回分の返答。アイコンと名前を頭に 1 度だけ出し、中身を下に並べる。 */
+const AgentTurn = ({ name, children }: { name: string; children: React.ReactNode }) => (
+	<View style={styles.agentTurn}>
+		<View style={styles.agentHead}>
+			<AgentAvatar />
+			<Text style={styles.agentName}>{name}</Text>
+		</View>
+		<View style={styles.agentBody}>{children}</View>
+	</View>
+);
+
+/**
+ * 続けて実行したツールを「ツールを 3 回実行」の 1 行に畳む (1 回だけならその要約)。押すと 1 つずつの行を開く。
+ */
+const ToolGroup = ({ events }: { events: CloudSessionEvent[] }) => {
+	const [open, setOpen] = useState(false);
+	const failed = events.filter(e => e.data.ok === false).length;
+	const last = events[events.length - 1].data;
+	const lastSummary = toolCallSummary(text(last.name), last.args, 60);
+	const label = events.length === 1 ? lastSummary : `ツールを ${events.length} 回実行`;
+	return (
+		<View style={styles.toolGroup}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityState={{ expanded: open }}
+				accessibilityLabel={`${label}${failed > 0 ? `、${failed} 件失敗` : ''}。${open ? '閉じる' : '詳しく見る'}`}
+				onPress={() => setOpen(v => !v)}
+				style={({ pressed }) => [styles.toolGroupHead, pressed && styles.rowPressed]}
+			>
+				<Icon name='tool' size={13} color={failed > 0 ? colors.danger : colors.fgFaint} />
+				<Text style={styles.toolGroupLabel} numberOfLines={1}>
+					{label}
+					{events.length > 1 && !open ? <Text style={styles.toolGroupLast}>  {lastSummary}</Text> : null}
+				</Text>
+				{failed > 0 ? <Text style={styles.toolGroupFailed}>{failed} 失敗</Text> : null}
+				<Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} color={colors.fgFaint} />
+			</Pressable>
+			{open ? (
+				<View style={styles.toolGroupBody}>
+					{events.map(event => <ToolRow key={event.seq} data={event.data} />)}
+				</View>
+			) : null}
+		</View>
+	);
+};
+
+/** 「作業中」の吹き出し。点が順に光り、経過時間を数える。 */
+const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: string }) => {
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const timer = setInterval(() => setTick(t => t + 1), 400);
+		return () => clearInterval(timer);
+	}, []);
+	const started = Date.parse(since);
+	const elapsed = Number.isNaN(started) ? null : Math.max(0, Date.now() - started);
+	const label = status === 'running' ? '作業中' : cloudStatusLabel(status);
+	return (
+		<View style={styles.typing} accessibilityLiveRegion='polite' accessibilityLabel={`${label}…`}>
+			<View style={styles.typingDots}>
+				{[0, 1, 2].map(i => (
+					<View key={i} style={[styles.typingDot, tick % 3 === i && styles.typingDotOn]} />
+				))}
+			</View>
+			<Text style={styles.typingText}>
+				{label}
+				{elapsed !== null ? <Text style={styles.workingElapsed}> · {durationText(elapsed)}</Text> : null}
+			</Text>
+		</View>
+	);
+};
 
 /**
  * ツールの実行は「● 名前(引数)」と「⎿ 出力の 1 行目 … +N 行」の 2 行にし、押すと出力を全部開く。
@@ -809,7 +890,7 @@ const PlanCard = ({ progress }: { progress: PlanProgress }) => {
 	return (
 		<View style={styles.plan} accessibilityLabel={`計画 ${total} タスク、${progress.done} 件完了`}>
 			<View style={styles.line}>
-				<Bullet />
+				<View style={styles.gutter}><Icon name='list' size={14} color={colors.accentText} /></View>
 				<Text style={styles.planTitle}>
 					計画
 					<Text style={styles.planCount}>  {progress.done}/{total} 完了{progress.failed > 0 ? ` · ${progress.failed} 失敗` : ''}</Text>
@@ -823,7 +904,6 @@ const PlanCard = ({ progress }: { progress: PlanProgress }) => {
 					style={styles.line}
 					accessibilityLabel={`${i + 1}. ${item.roleName}: ${item.title}。${PLAN_STATE_LABELS[item.state]}`}
 				>
-					<View style={styles.gutter}>{i === 0 ? <Text style={styles.elbow}>⎿</Text> : null}</View>
 					<PlanMarker state={item.state} />
 					<View style={styles.flex}>
 						<Text
@@ -865,7 +945,6 @@ const TaskEventView = ({ data, position }: { data: Record<string, unknown>; posi
 	const ok = task.status === 'done';
 	return (
 		<View style={styles.line}>
-			<View style={styles.gutter}><Text style={styles.elbow}>⎿</Text></View>
 			<Icon name={ok ? 'check' : 'x'} size={13} color={ok ? colors.success : colors.danger} />
 			<Text selectable style={styles.taskResultText} numberOfLines={3}>
 				<Text style={{ color: ok ? colors.fgMuted : colors.danger }}>{task.roleName}{ok ? ' 完了' : ' 失敗'}</Text>
@@ -885,18 +964,15 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 	const data = event.data;
 	switch (event.type) {
 		case 'user':
-			return <UserPrompt value={text(data.text)} />;
+			return <UserBubble value={text(data.text)} />;
 		case 'assistant': {
 			const value = text(data.text).trim();
 			if (!value) return null;
 			const role = text(data.role);
 			return (
-				<View style={styles.line}>
-					<Bullet />
-					<View style={[styles.flex, styles.assistantBody]}>
-						{role ? <RoleChip label={timeline.roleNames.get(role) ?? role} /> : null}
-						<Text selectable style={styles.assistantText}>{value}</Text>
-					</View>
+				<View style={styles.assistantBody}>
+					{role ? <RoleChip label={timeline.roleNames.get(role) ?? role} /> : null}
+					<Text selectable style={styles.assistantText}>{value}</Text>
 				</View>
 			);
 		}
@@ -914,16 +990,16 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 			const status = text(data.status) as CloudSessionStatus;
 			const message = text(data.message);
 			return (
-				<View style={styles.line}>
-					<View style={styles.gutter}><Text style={styles.noteMark}>※</Text></View>
+				<View style={styles.note}>
+					<Icon name='info' size={12} color={colors.fgFaint} />
 					<Text style={styles.noteText}>{cloudStatusLabel(status)}{message ? ` · ${message}` : ''}</Text>
 				</View>
 			);
 		}
 		case 'error':
 			return (
-				<View style={styles.line}>
-					<Bullet color={colors.danger} />
+				<View style={styles.errorRow}>
+					<Icon name='alert-circle' size={14} color={colors.danger} />
 					<Text selectable style={styles.errorText}>{text(data.message) || 'エラーが発生しました'}</Text>
 				</View>
 			);
@@ -932,13 +1008,13 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 			return (
 				<View style={styles.done}>
 					<View style={styles.line}>
-						<Bullet color={colors.success} />
+						<View style={styles.gutter}><Icon name='check-circle' size={14} color={colors.success} /></View>
 						<Text style={styles.doneTitle}>
 							完了
 							{changed !== null ? <Text style={styles.doneCount}>  {changed} ファイル変更</Text> : null}
 						</Text>
 					</View>
-					{text(data.summary) ? <Text selectable style={[styles.doneText, styles.indent]}>{text(data.summary)}</Text> : null}
+					{text(data.summary) ? <Text selectable style={styles.doneText}>{text(data.summary)}</Text> : null}
 					<Row style={styles.doneActions}>
 						<Button title='差分を見る' variant='secondary' size='sm' icon='file-text' onPress={onShowChanges} style={styles.alignStart} />
 						{doneAction}
@@ -1121,29 +1197,6 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, archivi
 	);
 };
 
-/** Claude Code の「✻ 作業中… (12 秒)」。印がくるくる変わり、経過時間を数える。 */
-const SPINNER_GLYPHS = ['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢'];
-
-const WorkingLine = ({ status, since }: { status: CloudSessionStatus; since: string }) => {
-	const [tick, setTick] = useState(0);
-	useEffect(() => {
-		const timer = setInterval(() => setTick(t => t + 1), 150);
-		return () => clearInterval(timer);
-	}, []);
-	const started = Date.parse(since);
-	const elapsed = Number.isNaN(started) ? null : Math.max(0, Date.now() - started);
-	const label = status === 'running' ? '作業中…' : `${cloudStatusLabel(status)}…`;
-	return (
-		<View style={styles.line} accessibilityLiveRegion='polite' accessibilityLabel={label}>
-			<View style={styles.gutter}><Text style={styles.spinnerGlyph}>{SPINNER_GLYPHS[tick % SPINNER_GLYPHS.length]}</Text></View>
-			<Text style={styles.workingText}>
-				{label}
-				{elapsed !== null ? <Text style={styles.workingElapsed}>  ({durationText(elapsed)})</Text> : null}
-			</Text>
-		</View>
-	);
-};
-
 const sessionKey = (s: CloudSession): string =>
 	`${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}|${s.pullRequest?.number ?? ''}|${s.pullRequest?.updatedAt ?? ''}`;
 
@@ -1298,6 +1351,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
 	const canSend = sendable && !!draft.trim() && !sending;
 	// 「作業中」の経過時間の起点。最後の指示から、無ければ開始から数える
+	const blocks = useMemo(() => chatBlocks(events), [events]);
+	// 返答の頭に出す名前。Division Project ならそう出し、それ以外は「エージェント」
+	const agentName = isDivisionProjectModel(current.model) ? 'Division Project' : 'エージェント';
 	const workingSince = useMemo(() => {
 		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'user') return events[i].createdAt;
 		return current.startedAt ?? current.createdAt;
@@ -1375,16 +1431,31 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						{!loaded ? <Loading label='ログを読み込んでいます…' /> : null}
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
 						<View style={styles.conversation}>
-							{events.map(event => (
-								<EventView
-									key={event.seq}
-									event={event}
-									timeline={timeline}
-									onShowChanges={() => setTab('changes')}
-									doneAction={event.seq === lastDoneSeq ? prDoneAction : undefined}
-								/>
-							))}
-							{active ? <WorkingLine status={current.status} since={workingSince} /> : null}
+							{blocks.map(block => {
+								if (block.kind === 'user') return <UserBubble key={block.event.seq} value={text(block.event.data.text)} />;
+								const isLast = block === blocks[blocks.length - 1];
+								return (
+									<AgentTurn key={block.key} name={agentName}>
+										{block.items.map(item => (item.kind === 'tools' ? (
+											<ToolGroup key={`t${item.key}`} events={item.events} />
+										) : (
+											<EventView
+												key={item.event.seq}
+												event={item.event}
+												timeline={timeline}
+												onShowChanges={() => setTab('changes')}
+												doneAction={item.event.seq === lastDoneSeq ? prDoneAction : undefined}
+											/>
+										)))}
+										{active && isLast ? <TypingBubble status={current.status} since={workingSince} /> : null}
+									</AgentTurn>
+								);
+							})}
+							{active && blocks[blocks.length - 1]?.kind !== 'agent' ? (
+								<AgentTurn name={agentName}>
+									<TypingBubble status={current.status} since={workingSince} />
+								</AgentTurn>
+							) : null}
 						</View>
 					</ScrollView>
 
@@ -1587,6 +1658,13 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
+				// 1 つだけ起動したときは、作れた時点でそのセッションのチャットを開く (サンドボックスの用意はチャットの中で待つ)
+				onCreated: count === 1
+					? created => {
+						setSessions(prev => (prev.some(s => s.id === created.id) ? prev : [created, ...prev]));
+						setSelectedId(created.id);
+					}
+					: undefined,
 			});
 			const failed = results.filter(r => r.error);
 			const succeeded = results.length - failed.length;
@@ -1939,31 +2017,43 @@ const styles = StyleSheet.create({
 	statusInline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	statusLabel: { fontSize: fontSize.xs, fontWeight: '600' },
 
-	// ログ (ターミナル風)
+	// ログ (チャット)
 	logContent: {
 		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.lg,
 		paddingBottom: spacing.lg,
 	},
-	conversation: { gap: spacing.md + 2 },
+	conversation: { gap: spacing.lg + 4 },
 	line: { flexDirection: 'row', alignItems: 'flex-start' },
 	gutter: { width: GUTTER, minHeight: 22, alignItems: 'flex-start', justifyContent: 'center' },
 	indent: { marginLeft: GUTTER },
-	bullet: { fontSize: 10, lineHeight: 22 },
 	elbow: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 20, paddingLeft: 3 },
-	userPrompt: {
-		flexDirection: 'row',
-		alignItems: 'flex-start',
-		paddingHorizontal: spacing.sm + 2,
-		paddingVertical: spacing.sm,
-		borderRadius: radius.md,
+	bullet: { fontSize: 10, lineHeight: 22 },
+	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
+	userBubble: {
+		borderRadius: 20,
+		borderBottomRightRadius: 6,
+		paddingHorizontal: spacing.md + 2,
+		paddingVertical: spacing.sm + 2,
 		backgroundColor: colors.bgHover,
 	},
-	userMark: { width: GUTTER - 2, color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.sm, lineHeight: 22 },
-	userText: { flex: 1, color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
+	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
+	agentTurn: { gap: spacing.sm },
+	agentHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+	avatar: {
+		width: 26,
+		height: 26,
+		borderRadius: 13,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: withAlpha(colors.accentText, '26'),
+	},
+	avatarGlyph: { color: colors.accentText, fontSize: 14, lineHeight: 18 },
+	agentName: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	agentBody: { gap: spacing.md, paddingLeft: 34 },
 	assistantBody: { gap: spacing.xs },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
 	roleChip: {
 		alignSelf: 'flex-start',
 		maxWidth: 160,
@@ -1973,6 +2063,31 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgHover,
 	},
 	roleChipText: { color: colors.fgMuted, fontSize: fontSize.xs - 1, fontWeight: '600' },
+	toolGroup: {
+		borderRadius: radius.md,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bgElevated,
+		overflow: 'hidden',
+	},
+	toolGroupHead: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.sm,
+		minHeight: 38,
+		paddingHorizontal: spacing.md,
+	},
+	toolGroupLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
+	toolGroupLast: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
+	toolGroupFailed: { color: colors.danger, fontSize: fontSize.xs },
+	toolGroupBody: {
+		gap: spacing.md,
+		paddingHorizontal: spacing.md,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.md,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: colors.border,
+	},
 	tool: { gap: 2 },
 	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 22 },
 	toolName: { color: colors.fgStrong, fontWeight: '700' },
@@ -1982,14 +2097,22 @@ const styles = StyleSheet.create({
 		flex: 1,
 		padding: spacing.sm,
 		borderRadius: radius.sm,
-		backgroundColor: colors.bgElevated,
+		backgroundColor: colors.bg,
 	},
 	monoText: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs, lineHeight: 20 },
 	moreText: { color: colors.fgFaint, fontStyle: 'italic' },
-	noteMark: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18 },
+	note: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
+	errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
 	errorText: { color: colors.danger, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
-	plan: { gap: 4 },
+	plan: {
+		gap: spacing.xs + 2,
+		padding: spacing.md,
+		borderRadius: radius.lg,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bgElevated,
+	},
 	planTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 22 },
 	planCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	planMeta: { color: colors.fgFaint, fontSize: fontSize.xs },
@@ -2006,13 +2129,32 @@ const styles = StyleSheet.create({
 	taskHeaderPos: { color: colors.accentText, fontVariant: ['tabular-nums'] },
 	taskHeaderModel: { color: colors.fgFaint, fontWeight: '400' },
 	taskResultText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 20, flexShrink: 1, marginLeft: spacing.xs },
-	done: { gap: spacing.sm },
+	done: {
+		gap: spacing.sm,
+		padding: spacing.md,
+		borderRadius: radius.lg,
+		borderWidth: 1,
+		borderColor: withAlpha(colors.success, '44'),
+	},
 	doneTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 22 },
 	doneCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	doneText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	doneActions: { flexWrap: 'wrap', marginLeft: GUTTER },
-	spinnerGlyph: { color: colors.running, fontSize: fontSize.sm, lineHeight: 22 },
-	workingText: { color: colors.running, fontSize: fontSize.xs + 1, lineHeight: 22 },
+	doneActions: { flexWrap: 'wrap' },
+	typing: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		alignSelf: 'flex-start',
+		gap: spacing.sm,
+		paddingHorizontal: spacing.md,
+		paddingVertical: spacing.sm,
+		borderRadius: 18,
+		borderTopLeftRadius: 6,
+		backgroundColor: colors.bgElevated,
+	},
+	typingDots: { flexDirection: 'row', gap: 4 },
+	typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint, opacity: 0.4 },
+	typingDotOn: { backgroundColor: colors.running, opacity: 1 },
+	typingText: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	workingElapsed: { color: colors.fgFaint },
 
 	// 変更

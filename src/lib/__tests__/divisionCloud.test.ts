@@ -19,6 +19,7 @@ import {
 	DivisionCloudError,
 	archiveCloudSession,
 	canSendMessage,
+	chatBlocks,
 	classifyPatchLines,
 	cloudSource,
 	cloudStatusLabel,
@@ -740,5 +741,26 @@ describe('projects and cost', () => {
 		];
 		expect(recentCostedSessions(rows, 2).map(s => s.id)).toEqual(['new', 'mid']);
 		expect(recentCostedSessions(rows).map(s => s.id)).toEqual(['new', 'mid', 'old']);
+	});
+});
+
+describe('chatBlocks', () => {
+	const e = (seq: number, type: string) => ({ seq, type, data: {}, createdAt: '' }) as never;
+
+	it('splits on user messages and folds consecutive tool runs', () => {
+		const blocks = chatBlocks([
+			e(1, 'user'), e(2, 'status'), e(3, 'assistant'), e(4, 'tool'), e(5, 'tool'), e(6, 'assistant'), e(7, 'tool'),
+			e(8, 'user'), e(9, 'done'),
+		]);
+		expect(blocks.map(b => b.kind)).toEqual(['user', 'agent', 'user', 'agent']);
+		const agent = blocks[1];
+		if (agent.kind !== 'agent') throw new Error('expected agent');
+		expect(agent.items.map(i => (i.kind === 'tools' ? `tools:${i.events.length}` : i.event.type)))
+			.toEqual(['status', 'assistant', 'tools:2', 'assistant', 'tools:1']);
+	});
+
+	it('starts with an agent block when the log has no prompt yet', () => {
+		expect(chatBlocks([e(1, 'status')]).map(b => b.kind)).toEqual(['agent']);
+		expect(chatBlocks([])).toEqual([]);
 	});
 });

@@ -632,6 +632,41 @@ export const outputPreview = (output: string, max = 120): { first: string; more:
 	return { first: oneLine(lines[start], max), more: lines.length - start - 1 };
 };
 
+/** チャットの 1 吹き出し分。指示はそれだけで 1 つ、それ以外は次の指示までをエージェントの 1 回の返答にまとめる。 */
+export type ChatBlock =
+	| { kind: 'user'; event: CloudSessionEvent }
+	| { kind: 'agent'; key: number; items: ChatItem[] };
+
+/** エージェントの返答の中身。続けて実行したツールは 1 つにまとめて畳む。 */
+export type ChatItem =
+	| { kind: 'event'; event: CloudSessionEvent }
+	| { kind: 'tools'; key: number; events: CloudSessionEvent[] };
+
+/** ログをチャットの吹き出しの並びにする (古い順)。 */
+export const chatBlocks = (events: CloudSessionEvent[]): ChatBlock[] => {
+	const blocks: ChatBlock[] = [];
+	let agent: Extract<ChatBlock, { kind: 'agent' }> | null = null;
+	for (const event of events) {
+		if (event.type === 'user') {
+			agent = null;
+			blocks.push({ kind: 'user', event });
+			continue;
+		}
+		if (!agent) {
+			agent = { kind: 'agent', key: event.seq, items: [] };
+			blocks.push(agent);
+		}
+		const last = agent.items[agent.items.length - 1];
+		if (event.type === 'tool') {
+			if (last?.kind === 'tools') last.events.push(event);
+			else agent.items.push({ kind: 'tools', key: event.seq, events: [event] });
+		} else {
+			agent.items.push({ kind: 'event', event });
+		}
+	}
+	return blocks;
+};
+
 // ---------------------------------------------------------------------------
 // Division Project の計画とタスク (plan / task イベント)
 // ---------------------------------------------------------------------------
