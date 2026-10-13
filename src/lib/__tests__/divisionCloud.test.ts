@@ -19,6 +19,7 @@ import {
 	DivisionCloudError,
 	archiveCloudSession,
 	canSendMessage,
+	chatBlocks,
 	classifyPatchLines,
 	cloudSource,
 	cloudStatusLabel,
@@ -33,6 +34,7 @@ import {
 	listCloudSessions,
 	listPollInterval,
 	mergeEvents,
+	outputPreview,
 	recentCostedSessions,
 	repoFolderName,
 	repoLabel,
@@ -44,6 +46,7 @@ import {
 	stopCloudSession,
 	sumCloudCosts,
 	toCloudSession,
+	toolCallParts,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -403,6 +406,30 @@ describe('toolCallSummary', () => {
 	});
 });
 
+describe('toolCallParts', () => {
+	it('splits the tool name from the argument shown in parentheses', () => {
+		expect(toolCallParts('read_file', { path: 'src/a.ts' })).toEqual({ name: 'read_file', arg: 'src/a.ts' });
+		expect(toolCallParts('run_command', { command: 'npm\n  test' })).toEqual({ name: 'run_command', arg: 'npm test' });
+		expect(toolCallParts('list_dir', {})).toEqual({ name: 'list_dir', arg: '' });
+		expect(toolCallParts('', null)).toEqual({ name: 'tool', arg: '' });
+	});
+});
+
+describe('outputPreview', () => {
+	it('shows the first non-empty line and counts the rest', () => {
+		expect(outputPreview('\n\nline 1\nline 2\nline 3\n\n')).toEqual({ first: 'line 1', more: 2 });
+		expect(outputPreview('only\r\n')).toEqual({ first: 'only', more: 0 });
+		expect(outputPreview('')).toEqual({ first: '', more: 0 });
+		expect(outputPreview('  \n \n')).toEqual({ first: '', more: 0 });
+	});
+
+	it('collapses a long first line', () => {
+		const preview = outputPreview(`${'x'.repeat(300)}\nnext`, 50);
+		expect(preview.first.length).toBe(50);
+		expect(preview.more).toBe(1);
+	});
+});
+
 describe('repo validation', () => {
 	it('accepts public https URLs', () => {
 		expect(validateRepoUrl('https://github.com/o/r.git')).toBeNull();
@@ -714,5 +741,26 @@ describe('projects and cost', () => {
 		];
 		expect(recentCostedSessions(rows, 2).map(s => s.id)).toEqual(['new', 'mid']);
 		expect(recentCostedSessions(rows).map(s => s.id)).toEqual(['new', 'mid', 'old']);
+	});
+});
+
+describe('chatBlocks', () => {
+	const e = (seq: number, type: string) => ({ seq, type, data: {}, createdAt: '' }) as never;
+
+	it('splits on user messages and folds consecutive tool runs', () => {
+		const blocks = chatBlocks([
+			e(1, 'user'), e(2, 'status'), e(3, 'assistant'), e(4, 'tool'), e(5, 'tool'), e(6, 'assistant'), e(7, 'tool'),
+			e(8, 'user'), e(9, 'done'),
+		]);
+		expect(blocks.map(b => b.kind)).toEqual(['user', 'agent', 'user', 'agent']);
+		const agent = blocks[1];
+		if (agent.kind !== 'agent') throw new Error('expected agent');
+		expect(agent.items.map(i => (i.kind === 'tools' ? `tools:${i.events.length}` : i.event.type)))
+			.toEqual(['status', 'assistant', 'tools:2', 'assistant', 'tools:1']);
+	});
+
+	it('starts with an agent block when the log has no prompt yet', () => {
+		expect(chatBlocks([e(1, 'status')]).map(b => b.kind)).toEqual(['agent']);
+		expect(chatBlocks([])).toEqual([]);
 	});
 });

@@ -19,6 +19,13 @@
  *   - PR        … Sessions started from a GitHub repo can open / update a pull request from the detail header
  *                 (and the last completion card); `pull_request` log events render as a card. See CloudPullRequest.tsx
  *
+ * 見た目は Claude Code (Web / アプリ) に合わせる:
+ *   - 一覧の下に入力欄を固定し、そこから指示を書いてすぐ起動する。リポジトリ・モデル・並列数は入力欄の下のチップから設定する
+ *   - 1 つだけ起動したときは、そのままセッションのチャットを開く
+ *   - 詳細はチャット。自分の指示は右の吹き出し、エージェントの返答は左にアイコン付きでまとめ、
+ *     続けて実行したツールは「ツールを N 回実行」に畳む (開くと「● 名前(引数)」「⎿ 出力 … +N 行」)
+ *   - 差分は見出しの「±」から開く。動いているあいだは入力欄の送信ボタンが停止ボタンになる
+ *
  * 変更を手元のワークスペースに取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
  * Division API 直結なので、PC に接続していなくても使える。
  */
@@ -43,9 +50,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
 	BackProvider,
 	Badge,
-	Body,
 	Button,
-	Card,
 	ChipGroup,
 	Dot,
 	EmptyState,
@@ -63,6 +68,7 @@ import {
 	SegmentedControl,
 	Sheet,
 	confirmAction,
+	useBack,
 	useToast,
 } from '../components/ui';
 import { CloudModelPicker } from '../components/CloudModelPicker';
@@ -83,7 +89,6 @@ import {
 	CloudSession,
 	CloudSessionEvent,
 	CloudSessionStatus,
-	CloudSource,
 	DivisionTimeline,
 	MAX_PARALLEL_SESSIONS,
 	PatchSection,
@@ -91,6 +96,7 @@ import {
 	PlanTaskState,
 	archiveCloudSession,
 	canSendMessage,
+	chatBlocks,
 	classifyPatchLines,
 	cloudErrorText,
 	cloudModelLabel,
@@ -111,6 +117,7 @@ import {
 	listPollInterval,
 	mergeEvents,
 	modelSelectionIssue,
+	outputPreview,
 	pullRequestActionLabel,
 	pullRequestStateFor,
 	sectionForChange,
@@ -121,6 +128,8 @@ import {
 	taskHeaderLabel,
 	toCloudPlan,
 	toCloudTaskEvent,
+	repoLabel,
+	toolCallParts,
 	toolCallSummary,
 	truncateLines,
 	validateBranch,
@@ -135,6 +144,7 @@ import { OpenPage, PageKey, canOpenPage } from '../navigation';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import {
 	GitHubAccountRow,
+	GitHubConnection,
 	GitHubConnectPanel,
 	GitHubRepoPicker,
 	GitHubRepoSelection,
@@ -172,11 +182,6 @@ const useForeground = (): boolean => {
 	return foreground;
 };
 
-const SOURCE_ICONS: Record<CloudSource['kind'], IconName> = { repo: 'git-branch', workspace: 'monitor', empty: 'folder' };
-
-/** Division Project (マルチエージェント) は人の集まりの印、それ以外はチップの印。 */
-const modelIcon = (session: Pick<CloudSession, 'model'>): IconName => (isDivisionProjectModel(session.model) ? 'users' : 'cpu');
-
 /** 状態の印。動いているあいだはくるくる、止まっていれば色の点。 */
 const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
 	isActive(status)
@@ -190,38 +195,33 @@ const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
 
 type Shortcut = { page: PageKey; label: string; icon: IconName; detail: string | null };
 
+/** 一覧の上に並べる小さな丸いボタン。PC 接続が要るものは鍵の印にして押すと案内を出す。 */
 const ShortcutRow = ({ items, connected, onOpen }: {
 	items: Shortcut[];
 	connected: boolean;
 	onOpen: (page: PageKey) => void;
 }) => {
 	const toast = useToast();
-	const locked = items.filter(item => !canOpenPage(item.page, connected));
 	return (
-		<View style={styles.shortcuts}>
-			<View style={styles.shortcutRow}>
-				{items.map(item => {
-					const enabled = canOpenPage(item.page, connected);
-					return (
-						<Pressable
-							key={item.page}
-							accessibilityRole='button'
-							accessibilityState={{ disabled: !enabled }}
-							accessibilityLabel={enabled ? `${item.label}を開く` : `${item.label}。PC に接続すると使えます`}
-							onPress={() => (enabled ? onOpen(item.page) : toast.show('PC に接続すると使えます', 'info'))}
-							style={({ pressed }) => [styles.shortcut, !enabled && styles.shortcutDisabled, pressed && enabled && styles.rowPressed]}
-						>
-							<Icon name={enabled ? item.icon : 'lock'} size={18} color={enabled ? colors.fg : colors.fgFaint} />
-							<Text style={[styles.shortcutLabel, !enabled && { color: colors.fgFaint }]} numberOfLines={1}>{item.label}</Text>
-							<Text style={styles.shortcutDetail} numberOfLines={1}>{enabled ? item.detail ?? ' ' : 'PC 接続が必要'}</Text>
-						</Pressable>
-					);
-				})}
-			</View>
-			{locked.length > 0 ? (
-				<Muted>{locked.map(item => item.label).join('と')}は PC に接続すると使えます。</Muted>
-			) : null}
-		</View>
+		<ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.noGrow} contentContainerStyle={styles.shortcutRow}>
+			{items.map(item => {
+				const enabled = canOpenPage(item.page, connected);
+				return (
+					<Pressable
+						key={item.page}
+						accessibilityRole='button'
+						accessibilityState={{ disabled: !enabled }}
+						accessibilityLabel={enabled ? `${item.label}を開く` : `${item.label}。PC に接続すると使えます`}
+						onPress={() => (enabled ? onOpen(item.page) : toast.show(`${item.label}は PC に接続すると使えます`, 'info'))}
+						style={({ pressed }) => [styles.shortcut, !enabled && styles.shortcutDisabled, pressed && enabled && styles.rowPressed]}
+					>
+						<Icon name={enabled ? item.icon : 'lock'} size={14} color={enabled ? colors.fgMuted : colors.fgFaint} />
+						<Text style={[styles.shortcutLabel, !enabled && { color: colors.fgFaint }]} numberOfLines={1}>{item.label}</Text>
+						{enabled && item.detail ? <Text style={styles.shortcutDetail} numberOfLines={1}>{item.detail}</Text> : null}
+					</Pressable>
+				);
+			})}
+		</ScrollView>
 	);
 };
 
@@ -229,6 +229,7 @@ const ShortcutRow = ({ items, connected, onOpen }: {
 // 一覧の行
 // ---------------------------------------------------------------------------
 
+/** Claude Code のセッション一覧のように、題名と「リポジトリ · 時刻」の 2 行だけにする。 */
 const SessionRow = ({ item, projectName, onPress, onStop, stopping }: {
 	item: CloudSession;
 	/** プロジェクトを指定して起動したセッションなら、その名前 */
@@ -238,32 +239,38 @@ const SessionRow = ({ item, projectName, onPress, onStop, stopping }: {
 	stopping: boolean;
 }) => {
 	const source = cloudSource(item);
+	const active = isActive(item.status);
 	const meta = [
-		cloudStatusLabel(item.status),
-		relativeTimeFromIso(item.updatedAt),
-		item.changedFiles > 0 ? `${item.changedFiles} ファイル変更` : null,
+		source.label,
+		projectName,
+		item.changedFiles > 0 ? `${item.changedFiles} ファイル` : null,
 		typeof item.costUsd === 'number' ? formatUsdCompact(item.costUsd) : null,
 	].filter(Boolean).join(' · ');
 	return (
 		<Pressable
 			accessibilityRole='button'
-			accessibilityLabel={`${item.title}、${cloudStatusLabel(item.status)}`}
+			accessibilityLabel={`${item.title}、${cloudStatusLabel(item.status)}、${cloudModelLabel(item)}`}
 			onPress={onPress}
 			style={({ pressed }) => [styles.sessionRow, pressed && styles.rowPressed]}
 		>
 			<StatusMark status={item.status} />
 			<View style={styles.flex}>
-				<Text style={styles.rowTitle} numberOfLines={2}>{item.title}</Text>
-				<Text style={[styles.rowMeta, { color: cloudStatusColor(item.status) }]} numberOfLines={1}>{meta}</Text>
-				<Row style={styles.rowBadges}>
-					<Badge label={cloudModelLabel(item)} icon={modelIcon(item)} />
-					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
-					{projectName ? <Badge label={projectName} icon='layers' /> : null}
+				<Row style={styles.rowTop}>
+					<Text style={[styles.rowTitle, styles.flex]} numberOfLines={1}>{item.title}</Text>
+					<Text style={styles.rowTime}>{relativeTimeFromIso(item.updatedAt)}</Text>
 				</Row>
+				<Text style={styles.rowMeta} numberOfLines={1}>
+					{active || item.status === 'failed'
+						? <Text style={{ color: cloudStatusColor(item.status) }}>{cloudStatusLabel(item.status)} · </Text>
+						: null}
+					{meta}
+				</Text>
 			</View>
-			{isActive(item.status)
-				? <Button title='停止' variant='ghost' size='sm' loading={stopping} onPress={onStop} accessibilityLabel={`${item.title} を停止`} />
-				: <Icon name='chevron-right' size={16} color={colors.fgFaint} />}
+			{active ? (
+				stopping
+					? <ActivityIndicator size='small' color={colors.fgMuted} />
+					: <IconButton icon='square' accessibilityLabel={`${item.title} を停止`} onPress={onStop} />
+			) : null}
 		</Pressable>
 	);
 };
@@ -331,16 +338,38 @@ const SOURCE_OPTIONS: { value: Draft['source']; label: string }[] = [
  */
 type RepoMode = 'picker' | 'manual' | 'loading';
 
-const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUrl: string | null; branch: string | null; ok: boolean } => {
-	const prompt = !!draft.prompt.trim() && !modelSelectionIssue(modelSelectionOf(draft));
-	if (draft.source !== 'repo') return { repoUrl: null, branch: null, ok: prompt };
+/** 起動の設定 (指示以外) の問題。settings が false なら設定のシートを開いて直してもらう。 */
+const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUrl: string | null; branch: string | null; settings: boolean } => {
+	const model = !modelSelectionIssue(modelSelectionOf(draft));
+	if (draft.source !== 'repo') return { repoUrl: null, branch: null, settings: model };
 	if (mode === 'manual') {
 		const repoUrl = validateRepoUrl(draft.repoUrl);
 		const branch = validateBranch(draft.branch);
-		return { repoUrl, branch, ok: prompt && !repoUrl && !branch };
+		return { repoUrl, branch, settings: model && !repoUrl && !branch };
 	}
 	const branch = validateBranch(draft.repoBranch);
-	return { repoUrl: null, branch, ok: prompt && mode === 'picker' && connected && !!draft.repo && !branch };
+	return { repoUrl: null, branch, settings: model && mode === 'picker' && connected && !!draft.repo && !branch };
+};
+
+const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): RepoMode => {
+	const status = github.status;
+	if (draft.manualUrl || (status && !status.configured) || (!status && github.error)) return 'manual';
+	return status ? 'picker' : 'loading';
+};
+
+/** 入力欄の下のチップに出す「始める場所」。 */
+const draftSourceLabel = (draft: Draft, mode: RepoMode): string => {
+	if (draft.source === 'empty') return '空のフォルダ';
+	if (mode === 'manual') return draft.repoUrl.trim() ? repoLabel(draft.repoUrl) : 'リポジトリの URL';
+	if (draft.repo) return draft.repoBranch.trim() ? `${draft.repo.fullName} @ ${draft.repoBranch.trim()}` : draft.repo.fullName;
+	return mode === 'loading' ? 'GitHub を確認中…' : 'リポジトリを選ぶ';
+};
+
+/** 入力欄の下のチップに出すモデル。 */
+const draftModelLabel = (draft: Draft, projects: CloudProjectOption[]): string => {
+	if (draft.modelMode === 'division') return `Division Project${draft.projectId ? ` · ${projectLabel(projects, draft.projectId)}` : ''}`;
+	if (draft.modelMode === 'custom') return draft.model.trim() || 'モデルを指定';
+	return '既定のモデル';
 };
 
 /** 起動に使うリポジトリ。一覧から選んでいれば { fullName }、直接入力なら { url }。 */
@@ -350,34 +379,22 @@ const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
 	return { url: draft.repoUrl, branch: draft.branch.trim() || undefined };
 };
 
-const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }: {
+/** 起動の設定 (始める場所・モデル・プロジェクト・並列数・題名)。指示は画面下の入力欄で書く。 */
+const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }: {
 	auth: DivisionSession;
+	github: GitHubConnection;
 	projects: CloudProjects;
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
 	onClose: () => void;
-	onLaunch: (repo: CloudRepo | undefined) => void;
 }) => {
-	const github = useGitHubConnection(auth);
 	const status = github.status;
 	const configured = !!status?.configured;
 	const connected = !!status?.connected;
-	const mode: RepoMode = draft.manualUrl || (status && !configured) || (!status && github.error)
-		? 'manual'
-		: status ? 'picker' : 'loading';
+	const mode = repoModeOf(draft, github);
 	const issues = draftIssues(draft, mode, connected);
 	const set = <K extends keyof Draft>(key: K, value: Draft[K]) => onChange(d => ({ ...d, [key]: value }));
 	const count = Number(draft.count);
-
-	// 連携済みなら、前回選んだリポジトリとブランチを選んだ状態にする (シートを開くたびに 1 回だけ)。
-	const preselectTried = useRef(false);
-	useEffect(() => {
-		if (!connected || draft.repo || preselectTried.current) return;
-		preselectTried.current = true;
-		void loadLastCloudRepo(auth.userId).then(last => {
-			if (last) onChange(d => (d.repo ? d : { ...d, repo: last.repo, repoBranch: last.branch }));
-		});
-	}, [connected, draft.repo, auth.userId, onChange]);
 
 	const markDisconnected = github.markDisconnected;
 	const onNotConnected = useCallback(() => {
@@ -398,26 +415,8 @@ const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }:
 	const setRepoBranch = useCallback((value: string) => onChange(d => ({ ...d, repoBranch: value })), [onChange]);
 
 	return (
-		<Sheet title='新しいセッション' eyebrow='クラウドエージェント' onClose={onClose}>
+		<Sheet title='起動の設定' eyebrow='クラウドエージェント' onClose={onClose}>
 			<ScrollView contentContainerStyle={styles.sheetContent} keyboardShouldPersistTaps='handled'>
-				<View style={styles.field}>
-					<SectionTitle>指示</SectionTitle>
-					<Input
-						value={draft.prompt}
-						onChangeText={value => set('prompt', value)}
-						placeholder='エージェントにやってほしいこと'
-						multiline
-						accessibilityLabel='エージェントへの指示'
-						style={styles.promptInput}
-					/>
-				</View>
-
-				<View style={styles.field}>
-					<SectionTitle>並列数</SectionTitle>
-					<ChipGroup options={COUNT_OPTIONS} value={draft.count} onChange={value => set('count', value)} />
-					<Muted>同じ指示を別々のサンドボックスで {count} 個同時に動かします{count > 1 ? '。題名の末尾に #1〜#' + count + ' が付きます' : ''}。</Muted>
-				</View>
-
 				<View style={styles.field}>
 					<SectionTitle>始める場所</SectionTitle>
 					<SegmentedControl options={SOURCE_OPTIONS} value={draft.source} onChange={value => set('source', value)} />
@@ -542,6 +541,12 @@ const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }:
 					/>
 				</View>
 
+				<View style={styles.field}>
+					<SectionTitle>並列数</SectionTitle>
+					<ChipGroup options={COUNT_OPTIONS} value={draft.count} onChange={value => set('count', value)} />
+					<Muted>同じ指示を別々のサンドボックスで {count} 個同時に動かします{count > 1 ? '。題名の末尾に #1〜#' + count + ' が付きます' : ''}。</Muted>
+				</View>
+
 				<Pressable
 					accessibilityRole='button'
 					accessibilityState={{ expanded: draft.showAdvanced }}
@@ -563,21 +568,165 @@ const NewSessionSheet = ({ auth, projects, draft, onChange, onClose, onLaunch }:
 				) : null}
 
 				<Muted>Orchestra Plus とクレジットが必要です。モデルの利用料金はセッションごとにかかります。</Muted>
-				<Button
-					title={count > 1 ? `${count} 個のセッションを起動` : 'セッションを起動'}
-					icon='play'
-					disabled={!issues.ok}
-					onPress={() => onLaunch(draftRepo(draft, mode))}
-				/>
+				<Button title='完了' icon='check' onPress={onClose} />
 			</ScrollView>
 		</Sheet>
 	);
 };
 
+/**
+ * Claude Code のホームと同じく、画面の下に固定した入力欄。指示を書いて送ると、その場でセッションを起動する。
+ * 下のチップ (始める場所・モデル・並列数) を押すと起動の設定を開く。設定が足りないまま送ったときも設定を開く。
+ */
+const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen, onOptionsOpen }: {
+	auth: DivisionSession;
+	projects: CloudProjects;
+	draft: Draft;
+	onChange: React.Dispatch<React.SetStateAction<Draft>>;
+	onLaunch: (repo: CloudRepo | undefined) => void;
+	optionsOpen: boolean;
+	onOptionsOpen: (open: boolean) => void;
+}) => {
+	const toast = useToast();
+	const github = useGitHubConnection(auth);
+	const mode = repoModeOf(draft, github);
+	const count = Number(draft.count);
+	const prompt = draft.prompt.trim();
+	const connected = !!github.status?.connected;
+	const issues = draftIssues(draft, mode, connected);
+
+	// 連携済みなら、前回選んだリポジトリとブランチを選んだ状態にする (1 回だけ)。
+	const preselectTried = useRef(false);
+	useEffect(() => {
+		if (!connected || draft.repo || preselectTried.current) return;
+		preselectTried.current = true;
+		void loadLastCloudRepo(auth.userId).then(last => {
+			if (last) onChange(d => (d.repo ? d : { ...d, repo: last.repo, repoBranch: last.branch }));
+		});
+	}, [connected, draft.repo, auth.userId, onChange]);
+
+	const sourceMissing = draft.source === 'repo' && (mode === 'picker' ? !draft.repo : mode === 'manual' ? !!issues.repoUrl || !!issues.branch : false);
+
+	const submit = () => {
+		if (!prompt) return;
+		if (!issues.settings) {
+			toast.show(mode === 'loading' ? 'GitHub の連携を確認しています。少し待ってから送ってください' : '起動の設定を確認してください', 'info');
+			if (mode !== 'loading') onOptionsOpen(true);
+			return;
+		}
+		onLaunch(draftRepo(draft, mode));
+	};
+
+	return (
+		<View style={styles.composerWrap}>
+			<View style={styles.composerBox}>
+				<TextInput
+					value={draft.prompt}
+					onChangeText={value => onChange(d => ({ ...d, prompt: value }))}
+					placeholder='エージェントに頼みたいことを書く…'
+					placeholderTextColor={colors.fgFaint}
+					selectionColor={colors.accentText}
+					accessibilityLabel='エージェントへの指示'
+					multiline
+					style={styles.composerInput}
+				/>
+				<View style={styles.composerBar}>
+					<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps='handled' style={styles.flex} contentContainerStyle={styles.composerChips}>
+						<ComposerChip
+							icon={draft.source === 'empty' ? 'folder' : 'git-branch'}
+							label={draftSourceLabel(draft, mode)}
+							warn={sourceMissing && mode !== 'loading'}
+							accessibilityLabel={`始める場所: ${draftSourceLabel(draft, mode)}。変更する`}
+							onPress={() => onOptionsOpen(true)}
+						/>
+						<ComposerChip
+							icon={draft.modelMode === 'division' ? 'users' : 'cpu'}
+							label={draftModelLabel(draft, projects.projects)}
+							warn={!!modelSelectionIssue(modelSelectionOf(draft))}
+							accessibilityLabel={`モデル: ${draftModelLabel(draft, projects.projects)}。変更する`}
+							onPress={() => onOptionsOpen(true)}
+						/>
+						{count > 1 ? (
+							<ComposerChip icon='copy' label={`×${count}`} accessibilityLabel={`並列数 ${count}。変更する`} onPress={() => onOptionsOpen(true)} />
+						) : null}
+					</ScrollView>
+					<SendButton
+						icon='arrow-up'
+						disabled={!prompt}
+						accessibilityLabel={count > 1 ? `${count} 個のセッションを起動` : 'セッションを起動'}
+						onPress={submit}
+					/>
+				</View>
+			</View>
+			{optionsOpen ? (
+				<LaunchOptionsSheet
+					auth={auth}
+					github={github}
+					projects={projects}
+					draft={draft}
+					onChange={onChange}
+					onClose={() => onOptionsOpen(false)}
+				/>
+			) : null}
+		</View>
+	);
+};
+
+/** 入力欄の下の設定チップ。 */
+const ComposerChip = ({ icon, label, warn, accessibilityLabel, onPress }: {
+	icon: IconName;
+	label: string;
+	warn?: boolean;
+	accessibilityLabel: string;
+	onPress: () => void;
+}) => (
+	<Pressable
+		accessibilityRole='button'
+		accessibilityLabel={accessibilityLabel}
+		hitSlop={{ top: 6, bottom: 6 }}
+		onPress={onPress}
+		style={({ pressed }) => [styles.composerChip, warn && styles.composerChipWarn, pressed && styles.rowPressed]}
+	>
+		<Icon name={icon} size={13} color={warn ? colors.warning : colors.fgMuted} />
+		<Text style={[styles.composerChipText, warn && { color: colors.warning }]} numberOfLines={1}>{label}</Text>
+		<Icon name='chevron-down' size={12} color={colors.fgFaint} />
+	</Pressable>
+);
+
+/** 入力欄の右下の丸いボタン (送信 / 停止)。 */
+const SendButton = ({ icon, disabled, loading, accessibilityLabel, onPress }: {
+	icon: IconName;
+	disabled?: boolean;
+	loading?: boolean;
+	accessibilityLabel: string;
+	onPress: () => void;
+}) => (
+	<Pressable
+		accessibilityRole='button'
+		accessibilityLabel={accessibilityLabel}
+		accessibilityState={{ disabled: !!disabled || !!loading, busy: !!loading }}
+		disabled={!!disabled || !!loading}
+		hitSlop={8}
+		onPress={onPress}
+		style={({ pressed }) => [styles.sendButton, (disabled || loading) && styles.sendButtonDisabled, pressed && styles.rowPressed]}
+	>
+		{loading ? <ActivityIndicator size='small' color={colors.bg} /> : <Icon name={icon} size={18} color={colors.bg} />}
+	</Pressable>
+);
+
 // ---------------------------------------------------------------------------
 // ログ
 // ---------------------------------------------------------------------------
 
+/** 行頭の印 (● / ⎿ / >) の幅。続く本文はこの幅だけ下げて揃える。 */
+const GUTTER = 18;
+
+/** 行頭の「●」。色で返答・成功・失敗を分ける。 */
+const Bullet = ({ color = colors.fg }: { color?: string }) => (
+	<View style={styles.gutter}><Text style={[styles.bullet, { color }]}>●</Text></View>
+);
+
+/** 自分の指示は右寄せの吹き出し。 */
 const UserBubble = ({ value }: { value: string }) => (
 	<View style={styles.userWrap}>
 		<View accessibilityLabel={`あなた: ${value}`} style={styles.userBubble}>
@@ -586,32 +735,122 @@ const UserBubble = ({ value }: { value: string }) => (
 	</View>
 );
 
-/** ツールの実行は 1 行 (例: read_file src/a.ts) にし、押すと出力を開く。 */
+/** エージェントの印 (返答の頭に出す丸いアイコン)。 */
+const AgentAvatar = () => (
+	<View style={styles.avatar}><Text style={styles.avatarGlyph}>✻</Text></View>
+);
+
+/** エージェントの 1 回分の返答。アイコンと名前を頭に 1 度だけ出し、中身を下に並べる。 */
+const AgentTurn = ({ name, children }: { name: string; children: React.ReactNode }) => (
+	<View style={styles.agentTurn}>
+		<View style={styles.agentHead}>
+			<AgentAvatar />
+			<Text style={styles.agentName}>{name}</Text>
+		</View>
+		<View style={styles.agentBody}>{children}</View>
+	</View>
+);
+
+/**
+ * 続けて実行したツールを「ツールを 3 回実行」の 1 行に畳む (1 回だけならその要約)。押すと 1 つずつの行を開く。
+ */
+const ToolGroup = ({ events }: { events: CloudSessionEvent[] }) => {
+	const [open, setOpen] = useState(false);
+	const failed = events.filter(e => e.data.ok === false).length;
+	const last = events[events.length - 1].data;
+	const lastSummary = toolCallSummary(text(last.name), last.args, 60);
+	const label = events.length === 1 ? lastSummary : `ツールを ${events.length} 回実行`;
+	return (
+		<View style={styles.toolGroup}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityState={{ expanded: open }}
+				accessibilityLabel={`${label}${failed > 0 ? `、${failed} 件失敗` : ''}。${open ? '閉じる' : '詳しく見る'}`}
+				onPress={() => setOpen(v => !v)}
+				style={({ pressed }) => [styles.toolGroupHead, pressed && styles.rowPressed]}
+			>
+				<Icon name='tool' size={13} color={failed > 0 ? colors.danger : colors.fgFaint} />
+				<Text style={styles.toolGroupLabel} numberOfLines={1}>
+					{label}
+					{events.length > 1 && !open ? <Text style={styles.toolGroupLast}>  {lastSummary}</Text> : null}
+				</Text>
+				{failed > 0 ? <Text style={styles.toolGroupFailed}>{failed} 失敗</Text> : null}
+				<Icon name={open ? 'chevron-up' : 'chevron-down'} size={14} color={colors.fgFaint} />
+			</Pressable>
+			{open ? (
+				<View style={styles.toolGroupBody}>
+					{events.map(event => <ToolRow key={event.seq} data={event.data} />)}
+				</View>
+			) : null}
+		</View>
+	);
+};
+
+/** 「作業中」の吹き出し。点が順に光り、経過時間を数える。 */
+const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: string }) => {
+	const [tick, setTick] = useState(0);
+	useEffect(() => {
+		const timer = setInterval(() => setTick(t => t + 1), 400);
+		return () => clearInterval(timer);
+	}, []);
+	const started = Date.parse(since);
+	const elapsed = Number.isNaN(started) ? null : Math.max(0, Date.now() - started);
+	const label = status === 'running' ? '作業中' : cloudStatusLabel(status);
+	return (
+		<View style={styles.typing} accessibilityLiveRegion='polite' accessibilityLabel={`${label}…`}>
+			<View style={styles.typingDots}>
+				{[0, 1, 2].map(i => (
+					<View key={i} style={[styles.typingDot, tick % 3 === i && styles.typingDotOn]} />
+				))}
+			</View>
+			<Text style={styles.typingText}>
+				{label}
+				{elapsed !== null ? <Text style={styles.workingElapsed}> · {durationText(elapsed)}</Text> : null}
+			</Text>
+		</View>
+	);
+};
+
+/**
+ * ツールの実行は「● 名前(引数)」と「⎿ 出力の 1 行目 … +N 行」の 2 行にし、押すと出力を全部開く。
+ */
 const ToolRow = ({ data }: { data: Record<string, unknown> }) => {
 	const [open, setOpen] = useState(false);
 	const ok = data.ok !== false;
 	const output = text(data.output);
 	const duration = typeof data.durationMs === 'number' ? durationText(data.durationMs) : null;
-	const summary = toolCallSummary(text(data.name), data.args);
+	const parts = toolCallParts(text(data.name), data.args);
+	const preview = useMemo(() => outputPreview(output), [output]);
+	const expandable = preview.more > 0 || output.length > preview.first.length;
 	return (
 		<Pressable
 			accessibilityRole='button'
 			accessibilityState={{ expanded: open }}
-			accessibilityLabel={`ツール ${summary}。${ok ? '' : '失敗。'}${open ? '出力を閉じる' : '出力を見る'}`}
+			accessibilityLabel={`ツール ${toolCallSummary(text(data.name), data.args)}。${ok ? '' : '失敗。'}${open ? '出力を閉じる' : '出力を見る'}`}
 			onPress={() => setOpen(v => !v)}
 			style={styles.tool}
 		>
-			<View style={styles.toolHeader}>
-				<View style={[styles.toolDot, { backgroundColor: ok ? colors.fgFaint : colors.danger }]} />
-				<Text style={styles.toolName} numberOfLines={open ? undefined : 1}>{summary}</Text>
+			<View style={styles.line}>
+				<Bullet color={ok ? colors.success : colors.danger} />
+				<Text style={styles.toolCall} numberOfLines={open ? undefined : 2}>
+					<Text style={styles.toolName}>{parts.name}</Text>
+					{parts.arg ? <Text style={styles.toolArg}>({parts.arg})</Text> : null}
+				</Text>
 				{duration ? <Text style={styles.toolDuration}>{duration}</Text> : null}
-				<Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} color={colors.fgFaint} />
 			</View>
-			{open ? (
-				<View style={styles.toolOutput}>
-					<Text selectable style={[styles.monoText, !ok && { color: colors.danger }]}>{output || '(出力なし)'}</Text>
-				</View>
-			) : null}
+			<View style={styles.line}>
+				<View style={styles.gutter}><Text style={styles.elbow}>⎿</Text></View>
+				{open ? (
+					<View style={styles.toolOutput}>
+						<Text selectable style={[styles.monoText, !ok && { color: colors.danger }]}>{output || '(出力なし)'}</Text>
+					</View>
+				) : (
+					<Text style={[styles.monoText, styles.flex, !ok && { color: colors.danger }]} numberOfLines={1}>
+						{preview.first || '(出力なし)'}
+						{expandable ? <Text style={styles.moreText}>{preview.more > 0 ? `  … +${preview.more} 行` : '  …'}</Text> : null}
+					</Text>
+				)}
+			</View>
 		</Pressable>
 	);
 };
@@ -635,46 +874,49 @@ const PLAN_STATE_LABELS: Record<PlanTaskState, string> = {
 	interrupted: '中断',
 };
 
-/** チェックリストの印。✓ 完了 / ✕ 失敗 / くるくる 実行中 / 白抜き 未着手 / − 中断。 */
+/** チェックリストの印 (Claude Code の Todo と同じく四角)。☑ 完了 / ☒ 失敗 / くるくる 実行中 / ☐ 未着手 / ⊟ 中断。 */
 const PlanMarker = ({ state }: { state: PlanTaskState }) => (
 	<View style={styles.planMarker}>
-		{state === 'done' ? <Icon name='check' size={15} color={colors.success} />
-			: state === 'failed' ? <Icon name='x' size={15} color={colors.danger} />
+		{state === 'done' ? <Icon name='check-square' size={14} color={colors.success} />
+			: state === 'failed' ? <Icon name='x-square' size={14} color={colors.danger} />
 				: state === 'running' ? <ActivityIndicator size='small' color={colors.running} />
-					: state === 'interrupted' ? <Icon name='minus' size={15} color={colors.fgFaint} />
-						: <View style={styles.planHollow} />}
+					: state === 'interrupted' ? <Icon name='minus-square' size={14} color={colors.fgFaint} />
+						: <Icon name='square' size={14} color={colors.fgFaint} />}
 	</View>
 );
 
 const PlanCard = ({ progress }: { progress: PlanProgress }) => {
 	const total = progress.items.length;
 	return (
-		<View style={styles.planCard} accessibilityLabel={`計画 ${total} タスク、${progress.done} 件完了`}>
-			<Row>
-				<Icon name='list' size={16} color={colors.accentText} />
-				<Text style={styles.planTitle}>計画 · {total} タスク</Text>
-				<View style={styles.flex} />
-				<Muted>{progress.done}/{total} 完了{progress.failed > 0 ? ` · ${progress.failed} 失敗` : ''}</Muted>
-			</Row>
-			{progress.leaderModel ? <Text style={styles.planMeta} numberOfLines={1}>リーダー: {progress.leaderModel}</Text> : null}
-			{total === 0 ? <Muted>タスクはありません。</Muted> : null}
+		<View style={styles.plan} accessibilityLabel={`計画 ${total} タスク、${progress.done} 件完了`}>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name='list' size={14} color={colors.accentText} /></View>
+				<Text style={styles.planTitle}>
+					計画
+					<Text style={styles.planCount}>  {progress.done}/{total} 完了{progress.failed > 0 ? ` · ${progress.failed} 失敗` : ''}</Text>
+				</Text>
+			</View>
+			{progress.leaderModel ? <Text style={[styles.planMeta, styles.indent]} numberOfLines={1}>リーダー: {progress.leaderModel}</Text> : null}
+			{total === 0 ? <Muted style={styles.indent}>タスクはありません。</Muted> : null}
 			{progress.items.map((item, i) => (
 				<View
 					key={`${item.index}-${i}`}
-					style={styles.planItem}
+					style={styles.line}
 					accessibilityLabel={`${i + 1}. ${item.roleName}: ${item.title}。${PLAN_STATE_LABELS[item.state]}`}
 				>
 					<PlanMarker state={item.state} />
 					<View style={styles.flex}>
-						<View style={styles.planItemHead}>
-							<RoleChip label={item.roleName} />
-							<Text
-								style={[styles.planItemTitle, item.state === 'done' && styles.planItemDone]}
-								numberOfLines={2}
-							>
-								{item.title || '(題名なし)'}
-							</Text>
-						</View>
+						<Text
+							style={[
+								styles.planItemTitle,
+								item.state === 'running' && styles.planItemRunning,
+								(item.state === 'done' || item.state === 'interrupted') && styles.planItemDone,
+							]}
+							numberOfLines={2}
+						>
+							<Text style={styles.planRole}>{item.roleName} </Text>
+							{item.title || '(題名なし)'}
+						</Text>
 						{item.model ? <Text style={styles.planItemModel} numberOfLines={1}>{item.model}</Text> : null}
 					</View>
 				</View>
@@ -691,6 +933,7 @@ const TaskEventView = ({ data, position }: { data: Record<string, unknown>; posi
 			<View style={styles.taskHeader} accessibilityRole='header' accessibilityLabel={taskHeaderLabel(task, position)}>
 				<View style={styles.taskHeaderLine} />
 				<Text style={styles.taskHeaderText}>
+					<Text style={styles.taskHeaderArrow}>▸ </Text>
 					{position ? <Text style={styles.taskHeaderPos}>{position.position}/{position.total} · </Text> : null}
 					{task.roleName}
 					{task.model ? <Text style={styles.taskHeaderModel}> ({task.model})</Text> : null}
@@ -701,8 +944,8 @@ const TaskEventView = ({ data, position }: { data: Record<string, unknown>; posi
 	}
 	const ok = task.status === 'done';
 	return (
-		<View style={styles.taskResult}>
-			<Icon name={ok ? 'check' : 'x'} size={14} color={ok ? colors.success : colors.danger} />
+		<View style={styles.line}>
+			<Icon name={ok ? 'check' : 'x'} size={13} color={ok ? colors.success : colors.danger} />
 			<Text selectable style={styles.taskResultText} numberOfLines={3}>
 				<Text style={{ color: ok ? colors.fgMuted : colors.danger }}>{task.roleName}{ok ? ' 完了' : ' 失敗'}</Text>
 				{task.summary ? ` · ${oneLine(task.summary, 240)}` : ''}
@@ -726,10 +969,9 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 			const value = text(data.text).trim();
 			if (!value) return null;
 			const role = text(data.role);
-			if (!role) return <Text selectable style={styles.assistantText}>{value}</Text>;
 			return (
-				<View style={styles.assistantWithRole}>
-					<RoleChip label={timeline.roleNames.get(role) ?? role} />
+				<View style={styles.assistantBody}>
+					{role ? <RoleChip label={timeline.roleNames.get(role) ?? role} /> : null}
 					<Text selectable style={styles.assistantText}>{value}</Text>
 				</View>
 			);
@@ -748,8 +990,8 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 			const status = text(data.status) as CloudSessionStatus;
 			const message = text(data.message);
 			return (
-				<View style={styles.noteRow}>
-					<View style={styles.noteLine} />
+				<View style={styles.note}>
+					<Icon name='info' size={12} color={colors.fgFaint} />
 					<Text style={styles.noteText}>{cloudStatusLabel(status)}{message ? ` · ${message}` : ''}</Text>
 				</View>
 			);
@@ -764,15 +1006,17 @@ const EventView = ({ event, timeline, onShowChanges, doneAction }: {
 		case 'done': {
 			const changed = typeof data.changedFiles === 'number' ? data.changedFiles : null;
 			return (
-				<View style={styles.doneCard}>
-					<Row>
-						<Icon name='check-circle' size={16} color={colors.success} />
-						<Text style={styles.doneTitle}>完了</Text>
-						{changed !== null ? <Muted>{changed} ファイル変更</Muted> : null}
-					</Row>
+				<View style={styles.done}>
+					<View style={styles.line}>
+						<View style={styles.gutter}><Icon name='check-circle' size={14} color={colors.success} /></View>
+						<Text style={styles.doneTitle}>
+							完了
+							{changed !== null ? <Text style={styles.doneCount}>  {changed} ファイル変更</Text> : null}
+						</Text>
+					</View>
 					{text(data.summary) ? <Text selectable style={styles.doneText}>{text(data.summary)}</Text> : null}
-					<Row style={styles.wrapRow}>
-						<Button title='変更を見る' variant='secondary' size='sm' icon='file-text' onPress={onShowChanges} style={styles.alignStart} />
+					<Row style={styles.doneActions}>
+						<Button title='差分を見る' variant='secondary' size='sm' icon='file-text' onPress={onShowChanges} style={styles.alignStart} />
 						{doneAction}
 					</Row>
 				</View>
@@ -915,6 +1159,43 @@ const ChangesView = ({ data, loading, error, onReload }: {
 // ---------------------------------------------------------------------------
 // 詳細
 // ---------------------------------------------------------------------------
+
+/** 詳細の見出し。題名の下に「リポジトリ · モデル」、右に差分の切り替えとアーカイブ。 */
+const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, archiving, onArchive }: {
+	session: CloudSession;
+	subtitle: string;
+	showChanges: boolean;
+	onToggleChanges: () => void;
+	archiving: boolean;
+	onArchive: () => void;
+}) => {
+	const back = useBack();
+	return (
+		<View style={styles.detailHeader}>
+			{back ? <IconButton icon='chevron-left' accessibilityLabel='戻る' onPress={back} /> : null}
+			<View style={[styles.flex, !back && styles.detailHeaderTitlePad]}>
+				<Text accessibilityRole='header' style={styles.detailTitle} numberOfLines={1}>{session.title}</Text>
+				<Text style={styles.detailSubtitle} numberOfLines={1}>{subtitle}</Text>
+			</View>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityState={{ selected: showChanges }}
+				accessibilityLabel={showChanges ? 'ログに戻る' : `差分を見る (${session.changedFiles} ファイル)`}
+				hitSlop={6}
+				onPress={onToggleChanges}
+				style={({ pressed }) => [styles.diffPill, showChanges && styles.diffPillActive, pressed && styles.rowPressed]}
+			>
+				<Icon name={showChanges ? 'message-square' : 'git-commit'} size={14} color={showChanges ? colors.bg : colors.fgMuted} />
+				<Text style={[styles.diffPillText, showChanges && { color: colors.bg }]}>
+					{showChanges ? 'ログ' : session.changedFiles > 0 ? `${session.changedFiles}` : '差分'}
+				</Text>
+			</Pressable>
+			{archiving
+				? <View style={styles.headerSpinner}><ActivityIndicator size='small' color={colors.fgMuted} /></View>
+				: <IconButton icon='archive' accessibilityLabel='アーカイブ' onPress={onArchive} />}
+		</View>
+	);
+};
 
 const sessionKey = (s: CloudSession): string =>
 	`${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}|${s.pullRequest?.number ?? ''}|${s.pullRequest?.updatedAt ?? ''}`;
@@ -1069,6 +1350,14 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	// Division Project の計画ごとのタスクの状態 (plan / task イベントが無ければ空)
 	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
 	const canSend = sendable && !!draft.trim() && !sending;
+	// 「作業中」の経過時間の起点。最後の指示から、無ければ開始から数える
+	const blocks = useMemo(() => chatBlocks(events), [events]);
+	// 返答の頭に出す名前。Division Project ならそう出し、それ以外は「エージェント」
+	const agentName = isDivisionProjectModel(current.model) ? 'Division Project' : 'エージェント';
+	const workingSince = useMemo(() => {
+		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'user') return events[i].createdAt;
+		return current.startedAt ?? current.createdAt;
+	}, [events, current.startedAt, current.createdAt]);
 
 	// Pull request (GitHub-repo sessions only; nothing is fetched or shown otherwise)
 	const prState = usePullRequestInfo(auth, current);
@@ -1094,53 +1383,38 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		/>
 	) : null;
 
+	const showChanges = tab === 'changes';
+	// 動いていて何も書いていなければ、送信ボタンを停止ボタンにする (Claude Code と同じ)
+	const stopMode = active && !draft.trim();
+
 	return (
 		<KeyboardAvoidingView
 			style={styles.flex}
 			behavior={Platform.OS === 'ios' ? 'padding' : undefined}
 			keyboardVerticalOffset={insets.top}
 		>
-			<ScreenHeader title={current.title} />
+			<DetailHeader
+				session={current}
+				subtitle={[source.label, cloudModelLabel(current), current.projectId ? projectLabel(projects, current.projectId) : null]
+					.filter(Boolean).join(' · ')}
+				showChanges={showChanges}
+				onToggleChanges={() => setTab(showChanges ? 'log' : 'changes')}
+				archiving={archiving}
+				onArchive={() => void archive()}
+			/>
 
-			<View style={styles.detailMeta}>
-				<Row style={styles.wrapRow}>
-					<View style={styles.statusInline} accessibilityLabel={`状態: ${cloudStatusLabel(current.status)}`}>
-						<StatusMark status={current.status} />
-						<Text style={[styles.statusLabel, { color: cloudStatusColor(current.status) }]}>{cloudStatusLabel(current.status)}</Text>
-					</View>
-					<Badge label={cloudModelLabel(current)} icon={modelIcon(current)} />
-					<Badge label={source.label} icon={SOURCE_ICONS[source.kind]} />
-					{current.projectId ? <Badge label={projectLabel(projects, current.projectId) ?? ''} icon='layers' /> : null}
-					{typeof current.costUsd === 'number' ? (
-						<Badge label={formatUsdCompact(current.costUsd)} icon='dollar-sign' color={colors.fgMuted} />
-					) : null}
-				</Row>
-				{current.status === 'failed' && current.errorMsg ? (
-					<Text selectable style={styles.errorText} numberOfLines={4}>{current.errorMsg}</Text>
-				) : null}
-				<Row>
-					{active ? <Button title='停止' variant='secondary' size='sm' icon='square' loading={stopping} onPress={() => void stop()} /> : null}
-					<Button title='アーカイブ' variant='danger' size='sm' icon='archive' loading={archiving} onPress={() => void archive()} />
-					<View style={styles.flex} />
-					<Muted>{relativeTimeFromIso(current.createdAt)}に開始</Muted>
-				</Row>
-				<PullRequestBar auth={auth} session={current} state={prState} onCompose={() => setComposingPr(true)} />
-			</View>
-
-			<View style={styles.toolbar}>
-				<SegmentedControl<'log' | 'changes'>
-					options={[
-						{ value: 'log', label: 'ログ' },
-						{ value: 'changes', label: current.changedFiles > 0 ? `変更 (${current.changedFiles})` : '変更' },
-					]}
-					value={tab}
-					onChange={setTab}
-				/>
-			</View>
+			{current.status === 'failed' && current.errorMsg ? (
+				<Text selectable style={[styles.errorText, styles.detailError]} numberOfLines={4}>{current.errorMsg}</Text>
+			) : null}
+			{current.workspaceInfo?.repoFullName && (prState.available || pullRequest) ? (
+				<View style={styles.prBar}>
+					<PullRequestBar auth={auth} session={current} state={prState} onCompose={() => setComposingPr(true)} />
+				</View>
+			) : null}
 
 			{error ? <ErrorBanner message={error} onRetry={() => void loadEvents()} /> : null}
 
-			{tab === 'log' ? (
+			{!showChanges ? (
 				<>
 					<ScrollView
 						ref={scrollRef}
@@ -1157,38 +1431,63 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						{!loaded ? <Loading label='ログを読み込んでいます…' /> : null}
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
 						<View style={styles.conversation}>
-							{events.map(event => (
-								<EventView
-									key={event.seq}
-									event={event}
-									timeline={timeline}
-									onShowChanges={() => setTab('changes')}
-									doneAction={event.seq === lastDoneSeq ? prDoneAction : undefined}
-								/>
-							))}
-							{current.status === 'running' ? (
-								<View style={styles.working} accessibilityLiveRegion='polite'>
-									<ActivityIndicator size='small' color={colors.running} />
-									<Text style={styles.workingText}>作業中…</Text>
-								</View>
+							{blocks.map(block => {
+								if (block.kind === 'user') return <UserBubble key={block.event.seq} value={text(block.event.data.text)} />;
+								const isLast = block === blocks[blocks.length - 1];
+								return (
+									<AgentTurn key={block.key} name={agentName}>
+										{block.items.map(item => (item.kind === 'tools' ? (
+											<ToolGroup key={`t${item.key}`} events={item.events} />
+										) : (
+											<EventView
+												key={item.event.seq}
+												event={item.event}
+												timeline={timeline}
+												onShowChanges={() => setTab('changes')}
+												doneAction={item.event.seq === lastDoneSeq ? prDoneAction : undefined}
+											/>
+										)))}
+										{active && isLast ? <TypingBubble status={current.status} since={workingSince} /> : null}
+									</AgentTurn>
+								);
+							})}
+							{active && blocks[blocks.length - 1]?.kind !== 'agent' ? (
+								<AgentTurn name={agentName}>
+									<TypingBubble status={current.status} since={workingSince} />
+								</AgentTurn>
 							) : null}
 						</View>
 					</ScrollView>
 
 					<View style={styles.composerWrap}>
-						<View style={styles.composer}>
+						<View style={styles.composerBox}>
 							<TextInput
 								value={draft}
 								onChangeText={setDraft}
 								editable={sendable}
 								placeholder={sendable ? (current.status === 'running' ? '作業中のエージェントに追加で指示する…' : '続きを指示する…') : '準備ができるまで指示は送れません'}
 								placeholderTextColor={colors.fgFaint}
-								selectionColor={colors.fgMuted}
+								selectionColor={colors.accentText}
 								accessibilityLabel='追加の指示'
 								multiline
 								style={styles.composerInput}
 							/>
-							<Button title='送信' size='sm' icon='arrow-up' disabled={!canSend} loading={sending} onPress={() => void send()} />
+							<View style={styles.composerBar}>
+								<View style={styles.composerChips}>
+									<View style={styles.statusInline} accessibilityLabel={`状態: ${cloudStatusLabel(current.status)}`}>
+										<StatusMark status={current.status} />
+										<Text style={[styles.statusLabel, { color: cloudStatusColor(current.status) }]}>{cloudStatusLabel(current.status)}</Text>
+									</View>
+									{typeof current.costUsd === 'number' ? (
+										<Badge label={formatUsdCompact(current.costUsd)} icon='dollar-sign' color={colors.fgFaint} />
+									) : null}
+								</View>
+								{stopMode ? (
+									<SendButton icon='square' loading={stopping} accessibilityLabel='停止' onPress={() => void stop()} />
+								) : (
+									<SendButton icon='arrow-up' disabled={!canSend} loading={sending} accessibilityLabel='送信' onPress={() => void send()} />
+								)}
+							</View>
 						</View>
 					</View>
 				</>
@@ -1222,6 +1521,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 	const { session } = useDivisionAuth();
 	const { connection, snapshot } = useApp();
 	const toast = useToast();
+	const insets = useSafeAreaInsets();
 	const foreground = useForeground();
 	const connected = !!connection;
 	const projects = useCloudProjects(session);
@@ -1231,7 +1531,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 	const [refreshing, setRefreshing] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [selectedId, setSelectedId] = useState<string | null>(initialSessionId ?? null);
-	const [showNew, setShowNew] = useState(false);
+	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
 	const [launching, setLaunching] = useState(0);
 	const [launchError, setLaunchError] = useState<string | null>(null);
@@ -1340,7 +1640,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 	const launch = useCallback(async (repo: CloudRepo | undefined) => {
 		if (!session) return;
 		const count = Number(draft.count);
-		setShowNew(false);
+		setOptionsOpen(false);
 		setLaunchError(null);
 		setLaunching(n => n + count);
 		// 次に開いたとき同じリポジトリを選んだ状態にする
@@ -1358,6 +1658,13 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
+				// 1 つだけ起動したときは、作れた時点でそのセッションのチャットを開く (サンドボックスの用意はチャットの中で待つ)
+				onCreated: count === 1
+					? created => {
+						setSessions(prev => (prev.some(s => s.id === created.id) ? prev : [created, ...prev]));
+						setSelectedId(created.id);
+					}
+					: undefined,
 			});
 			const failed = results.filter(r => r.error);
 			const succeeded = results.length - failed.length;
@@ -1444,93 +1751,99 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 
 	return (
 		<Screen>
-			<ScreenHeader
-				title='クラウド'
-				right={<IconButton icon='plus' accessibilityLabel='新しいセッション' onPress={() => setShowNew(true)} />}
-			/>
-
-			{error ? <ErrorBanner message={error} onRetry={() => void loadList()} /> : null}
-			{launchError ? <ErrorBanner message={launchError} onRetry={() => { setLaunchError(null); setShowNew(true); }} /> : null}
-
-			<ScrollView
-				contentContainerStyle={styles.content}
-				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onPull()} tintColor={colors.fgMuted} />}
+			<KeyboardAvoidingView
+				style={styles.flex}
+				behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+				keyboardVerticalOffset={insets.top}
 			>
-				{onOpenPage ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
+				<ScreenHeader title='クラウド' />
 
-				{launching > 0 ? (
-					<View style={styles.launching} accessibilityLiveRegion='polite'>
-						<ActivityIndicator size='small' color={colors.running} />
-						<View style={styles.flex}>
-							<Body>{launching} 個のセッションを起動しています…</Body>
-							<Muted>サンドボックスの用意に数分かかることがあります。この画面を離れても起動は続きます。</Muted>
+				{error ? <ErrorBanner message={error} onRetry={() => void loadList()} /> : null}
+				{launchError ? <ErrorBanner message={launchError} onRetry={() => { setLaunchError(null); setOptionsOpen(true); }} /> : null}
+
+				<ScrollView
+					style={styles.flex}
+					contentContainerStyle={styles.content}
+					keyboardShouldPersistTaps='handled'
+					keyboardDismissMode='on-drag'
+					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onPull()} tintColor={colors.fgMuted} />}
+				>
+					{onOpenPage ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
+
+					{launching > 0 ? (
+						<View style={styles.launching} accessibilityLiveRegion='polite'>
+							<ActivityIndicator size='small' color={colors.running} />
+							<View style={styles.flex}>
+								<Text style={styles.rowTitle}>{launching} 個のセッションを起動しています…</Text>
+								<Muted>サンドボックスの用意に数分かかることがあります。この画面を離れても起動は続きます。</Muted>
+							</View>
 						</View>
-					</View>
-				) : null}
+					) : null}
 
-				{loading && sessions.length === 0 ? (
-					<Loading label='セッションを読み込んでいます…' />
-				) : sessions.length === 0 ? (
-					<EmptyState
-						icon='cloud'
-						title='クラウドのセッションはまだありません'
-						detail='Git リポジトリか空のフォルダから、エージェントをクラウドで動かせます。PC の Orchestra から起動したセッションもここに出ます。'
-						action={launching > 0 ? undefined : <Button title='新しいセッション' icon='plus' onPress={() => setShowNew(true)} />}
-					/>
-				) : (
-					<>
-						<Card style={styles.summaryCard}>
-							<Row style={styles.spread}>
-								<Muted>{sessions.length} 件{activeCount > 0 ? ` · ${activeCount} 件が動いています` : ''}</Muted>
-								<Button title='新しいセッション' icon='plus' variant='secondary' size='sm' onPress={() => setShowNew(true)} />
-							</Row>
-							{cost.known > 0 ? (
-								<Pressable
-									accessibilityRole='button'
-									accessibilityLabel={`表示中のセッションの料金 合計 ${formatUsdCompact(cost.totalUsd)}${onOpenPage ? '。コストを開く' : ''}`}
-									disabled={!onOpenPage}
-									onPress={() => onOpenPage?.('tuning')}
-									style={({ pressed }) => [styles.costRow, pressed && styles.rowPressed]}
-								>
-									<Icon name='dollar-sign' size={14} color={colors.fgMuted} />
-									<Text style={styles.costLabel}>
-										料金の合計{cost.unknown > 0 ? ` (${cost.known} 件分)` : ''}
-									</Text>
-									<Text style={styles.costValue}>{formatUsdCompact(cost.totalUsd)}</Text>
-									{onOpenPage ? <Text style={styles.linkText}>コスト</Text> : null}
-									{onOpenPage ? <Icon name='chevron-right' size={14} color={colors.accentText} /> : null}
-								</Pressable>
-							) : null}
-						</Card>
-						<View>
-							{sessions.map(item => (
-								<SessionRow
-									key={item.id}
-									item={item}
-									projectName={projectNameOf(item)}
-									stopping={stoppingId === item.id}
-									onPress={() => setSelectedId(item.id)}
-									onStop={() => void stopFromList(item)}
-								/>
-							))}
-						</View>
-						<Muted style={styles.footnote}>
-							PC の Orchestra から起動したセッションも表示されます。変更を手元に取り込むのは PC の Orchestra で行います。
-						</Muted>
-					</>
-				)}
-			</ScrollView>
+					{loading && sessions.length === 0 ? (
+						<Loading label='セッションを読み込んでいます…' />
+					) : sessions.length === 0 ? (
+						launching > 0 ? null : (
+							<View style={styles.welcome}>
+								<Text style={styles.welcomeMark}>✻</Text>
+								<Text style={styles.welcomeTitle}>クラウドでエージェントを動かす</Text>
+								<Muted style={styles.welcomeText}>
+									下の入力欄に頼みたいことを書いて送ると、Git リポジトリか空のフォルダからサンドボックスで動き始めます。
+									PC の Orchestra から起動したセッションもここに出ます。
+								</Muted>
+							</View>
+						)
+					) : (
+						<>
+							<View style={styles.listHeader}>
+								<Text style={styles.listHeaderText}>
+									セッション{activeCount > 0 ? <Text style={{ color: colors.running }}>  {activeCount} 件が動いています</Text> : null}
+								</Text>
+								{cost.known > 0 ? (
+									<Pressable
+										accessibilityRole='button'
+										accessibilityLabel={`表示中のセッションの料金 合計 ${formatUsdCompact(cost.totalUsd)}${onOpenPage ? '。コストを開く' : ''}`}
+										disabled={!onOpenPage}
+										hitSlop={8}
+										onPress={() => onOpenPage?.('tuning')}
+										style={({ pressed }) => [styles.costRow, pressed && styles.rowPressed]}
+									>
+										<Text style={styles.costValue}>
+											{formatUsdCompact(cost.totalUsd)}{cost.unknown > 0 ? ` (${cost.known} 件分)` : ''}
+										</Text>
+										{onOpenPage ? <Icon name='chevron-right' size={12} color={colors.fgFaint} /> : null}
+									</Pressable>
+								) : null}
+							</View>
+							<View>
+								{sessions.map(item => (
+									<SessionRow
+										key={item.id}
+										item={item}
+										projectName={projectNameOf(item)}
+										stopping={stoppingId === item.id}
+										onPress={() => setSelectedId(item.id)}
+										onStop={() => void stopFromList(item)}
+									/>
+								))}
+							</View>
+							<Muted style={styles.footnote}>
+								変更を手元に取り込むのは PC の Orchestra で行います。
+							</Muted>
+						</>
+					)}
+				</ScrollView>
 
-			{showNew ? (
-				<NewSessionSheet
+				<LaunchComposer
 					auth={session}
 					projects={projects}
 					draft={draft}
 					onChange={setDraft}
-					onClose={() => setShowNew(false)}
 					onLaunch={repo => void launch(repo)}
+					optionsOpen={optionsOpen}
+					onOptionsOpen={setOptionsOpen}
 				/>
-			) : null}
+			</KeyboardAvoidingView>
 		</Screen>
 	);
 };
@@ -1540,63 +1853,125 @@ const styles = StyleSheet.create({
 	spread: { justifyContent: 'space-between' },
 	wrapRow: { flexWrap: 'wrap' },
 	alignStart: { alignSelf: 'flex-start' },
+	rowPressed: { opacity: 0.6 },
+	noGrow: { flexGrow: 0 },
+
+	// 一覧
 	content: {
+		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
-		paddingBottom: spacing.xl,
+		paddingBottom: spacing.lg,
 	},
-	summaryCard: { paddingVertical: spacing.sm },
-	costRow: {
+	shortcutRow: { gap: spacing.sm, paddingVertical: spacing.md },
+	shortcut: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.xs,
-		minHeight: 32,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: colors.border,
-		paddingTop: spacing.xs,
-	},
-	costLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
-	costValue: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '600', fontVariant: ['tabular-nums'] },
-	shortcuts: { gap: spacing.xs, marginTop: spacing.md },
-	shortcutRow: { flexDirection: 'row', gap: spacing.sm },
-	shortcut: {
-		flex: 1,
-		gap: 2,
-		minHeight: 72,
-		padding: spacing.sm + 2,
-		borderRadius: radius.md,
-		backgroundColor: colors.bgElevated,
+		gap: spacing.xs + 2,
+		height: 32,
+		paddingHorizontal: spacing.md,
+		borderRadius: 999,
+		borderWidth: 1,
+		borderColor: colors.border,
 	},
 	shortcutDisabled: { opacity: 0.6 },
-	shortcutLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600', marginTop: spacing.xs },
+	shortcutLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '500' },
 	shortcutDetail: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
-	footnote: { marginTop: spacing.lg },
 	launching: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.md,
-		marginTop: spacing.md,
+		marginBottom: spacing.sm,
 		padding: spacing.md,
-		borderRadius: radius.md,
+		borderRadius: radius.lg,
 		borderWidth: 1,
 		borderColor: colors.border,
 	},
+	welcome: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xl * 2 },
+	welcomeMark: { color: colors.accentText, fontSize: fontSize.xl },
+	welcomeTitle: { color: colors.fgStrong, fontSize: fontSize.md, fontWeight: '600', textAlign: 'center' },
+	welcomeText: { textAlign: 'center', lineHeight: 20, maxWidth: 320 },
+	listHeader: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'space-between',
+		paddingTop: spacing.xs,
+		paddingBottom: spacing.xs,
+	},
+	listHeaderText: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '600', letterSpacing: 0.4 },
+	costRow: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 28 },
+	costValue: { color: colors.fgMuted, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	sessionRow: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.md,
-		minHeight: 72,
+		minHeight: 64,
 		paddingVertical: spacing.md,
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.border,
 	},
-	rowPressed: { opacity: 0.6 },
+	rowTop: { gap: spacing.sm },
 	rowTitle: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
-	rowMeta: { fontSize: fontSize.xs, marginTop: 2 },
-	rowBadges: { flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.xs },
+	rowTime: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
+	rowMeta: { color: colors.fgFaint, fontSize: fontSize.xs, fontFamily: MONO, marginTop: 3 },
 	statusDotWrap: { width: 20, alignItems: 'center' },
+	footnote: { marginTop: spacing.lg },
+
+	// 入力欄 (一覧・詳細で共通)
+	composerWrap: {
+		paddingHorizontal: spacing.md,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.sm,
+	},
+	composerBox: {
+		borderRadius: radius.lg + 4,
+		borderWidth: 1,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgElevated,
+		paddingHorizontal: spacing.sm,
+		paddingTop: spacing.xs,
+		paddingBottom: spacing.sm,
+		gap: spacing.xs,
+	},
+	composerInput: {
+		minHeight: 44,
+		maxHeight: 160,
+		paddingHorizontal: spacing.xs + 2,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.xs,
+		color: colors.fg,
+		fontSize: fontSize.sm,
+		lineHeight: 21,
+		textAlignVertical: 'top',
+	},
+	composerBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+	composerChips: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
+	composerChip: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		maxWidth: 220,
+		height: 28,
+		paddingHorizontal: spacing.sm + 2,
+		borderRadius: 999,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bg,
+	},
+	composerChipWarn: { borderColor: withAlpha(colors.warning, '66') },
+	composerChipText: { flexShrink: 1, color: colors.fgMuted, fontSize: fontSize.xs, fontFamily: MONO },
+	sendButton: {
+		width: 34,
+		height: 34,
+		borderRadius: 17,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: colors.fgStrong,
+	},
+	sendButtonDisabled: { backgroundColor: colors.fgFaint, opacity: 0.5 },
+
+	// 起動の設定
 	sheetContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
 	field: { gap: spacing.sm },
-	promptInput: { minHeight: 120 },
 	inputInvalid: { borderColor: colors.danger },
 	invalidText: { color: colors.danger, fontSize: fontSize.xs },
 	githubChecking: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 36 },
@@ -1604,37 +1979,81 @@ const styles = StyleSheet.create({
 	linkText: { color: colors.accentText, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	advancedToggle: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 36 },
 	advancedText: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
-	detailMeta: {
+
+	// 詳細の見出し
+	detailHeader: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		minHeight: 56,
+		paddingLeft: spacing.xs,
+		paddingRight: spacing.sm,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
+	},
+	detailHeaderTitlePad: { paddingLeft: spacing.md },
+	detailTitle: { color: colors.fgStrong, fontSize: fontSize.sm + 1, fontWeight: '600' },
+	detailSubtitle: { color: colors.fgFaint, fontSize: fontSize.xs, fontFamily: MONO, marginTop: 2 },
+	diffPill: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		height: 30,
+		paddingHorizontal: spacing.sm + 2,
+		borderRadius: 999,
+		borderWidth: 1,
+		borderColor: colors.borderStrong,
+	},
+	diffPillActive: { backgroundColor: colors.fgStrong, borderColor: colors.fgStrong },
+	diffPillText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', fontVariant: ['tabular-nums'] },
+	headerSpinner: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+	detailError: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
+	prBar: {
 		paddingHorizontal: spacing.lg,
 		paddingVertical: spacing.sm,
-		gap: spacing.sm,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
 	},
 	statusInline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	statusLabel: { fontSize: fontSize.xs, fontWeight: '600' },
-	toolbar: {
-		paddingHorizontal: spacing.lg,
-		paddingBottom: spacing.sm,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
-	},
+
+	// ログ (チャット)
 	logContent: {
 		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.lg,
-		paddingBottom: spacing.xl,
+		paddingBottom: spacing.lg,
 	},
-	conversation: { gap: spacing.lg },
-	userWrap: { alignItems: 'flex-end' },
+	conversation: { gap: spacing.lg + 4 },
+	line: { flexDirection: 'row', alignItems: 'flex-start' },
+	gutter: { width: GUTTER, minHeight: 22, alignItems: 'flex-start', justifyContent: 'center' },
+	indent: { marginLeft: GUTTER },
+	elbow: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 20, paddingLeft: 3 },
+	bullet: { fontSize: 10, lineHeight: 22 },
+	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
 	userBubble: {
-		maxWidth: '85%',
-		borderRadius: 18,
+		borderRadius: 20,
+		borderBottomRightRadius: 6,
 		paddingHorizontal: spacing.md + 2,
 		paddingVertical: spacing.sm + 2,
 		backgroundColor: colors.bgHover,
 	},
 	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 25 },
-	assistantWithRole: { gap: spacing.xs },
+	agentTurn: { gap: spacing.sm },
+	agentHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+	avatar: {
+		width: 26,
+		height: 26,
+		borderRadius: 13,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: withAlpha(colors.accentText, '26'),
+	},
+	avatarGlyph: { color: colors.accentText, fontSize: 14, lineHeight: 18 },
+	agentName: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	agentBody: { gap: spacing.md, paddingLeft: 34 },
+	assistantBody: { gap: spacing.xs },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
 	roleChip: {
 		alignSelf: 'flex-start',
 		maxWidth: 160,
@@ -1644,89 +2063,101 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgHover,
 	},
 	roleChipText: { color: colors.fgMuted, fontSize: fontSize.xs - 1, fontWeight: '600' },
-	planCard: {
+	toolGroup: {
+		borderRadius: radius.md,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bgElevated,
+		overflow: 'hidden',
+	},
+	toolGroupHead: {
+		flexDirection: 'row',
+		alignItems: 'center',
 		gap: spacing.sm,
+		minHeight: 38,
+		paddingHorizontal: spacing.md,
+	},
+	toolGroupLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
+	toolGroupLast: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
+	toolGroupFailed: { color: colors.danger, fontSize: fontSize.xs },
+	toolGroupBody: {
+		gap: spacing.md,
+		paddingHorizontal: spacing.md,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.md,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: colors.border,
+	},
+	tool: { gap: 2 },
+	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 22 },
+	toolName: { color: colors.fgStrong, fontWeight: '700' },
+	toolArg: { color: colors.fgMuted },
+	toolDuration: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 22, marginLeft: spacing.sm },
+	toolOutput: {
+		flex: 1,
+		padding: spacing.sm,
+		borderRadius: radius.sm,
+		backgroundColor: colors.bg,
+	},
+	monoText: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs, lineHeight: 20 },
+	moreText: { color: colors.fgFaint, fontStyle: 'italic' },
+	note: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
+	errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	errorText: { color: colors.danger, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
+	plan: {
+		gap: spacing.xs + 2,
 		padding: spacing.md,
 		borderRadius: radius.lg,
 		borderWidth: 1,
 		borderColor: colors.border,
 		backgroundColor: colors.bgElevated,
 	},
-	planTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
+	planTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 22 },
+	planCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	planMeta: { color: colors.fgFaint, fontSize: fontSize.xs },
-	planItem: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-	planMarker: { width: 20, height: 22, alignItems: 'center', justifyContent: 'center' },
-	planHollow: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: colors.fgFaint },
-	planItemHead: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.xs },
-	planItemTitle: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
-	planItemDone: { color: colors.fgMuted },
-	planItemModel: { color: colors.fgFaint, fontSize: fontSize.xs, marginTop: 2 },
+	planMarker: { width: 22, height: 20, alignItems: 'flex-start', justifyContent: 'center' },
+	planItemTitle: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20 },
+	planItemRunning: { color: colors.fgStrong, fontWeight: '600' },
+	planItemDone: { color: colors.fgFaint, textDecorationLine: 'line-through' },
+	planRole: { color: colors.fgFaint, fontWeight: '600', textDecorationLine: 'none' },
+	planItemModel: { color: colors.fgFaint, fontSize: fontSize.xs, marginTop: 1 },
 	taskHeader: { gap: spacing.xs, marginTop: spacing.sm },
 	taskHeaderLine: { height: StyleSheet.hairlineWidth, backgroundColor: colors.borderStrong },
 	taskHeaderText: { color: colors.fgStrong, fontSize: fontSize.xs + 1, fontWeight: '600', lineHeight: 20 },
+	taskHeaderArrow: { color: colors.accentText },
 	taskHeaderPos: { color: colors.accentText, fontVariant: ['tabular-nums'] },
 	taskHeaderModel: { color: colors.fgFaint, fontWeight: '400' },
-	taskResult: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-	taskResultText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
-	tool: { gap: spacing.xs },
-	toolHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	toolDot: { width: 6, height: 6, borderRadius: 3 },
-	toolName: { flex: 1, color: colors.fgMuted, fontFamily: MONO, fontSize: fontSize.xs + 1 },
-	toolDuration: { color: colors.fgFaint, fontSize: fontSize.xs },
-	toolOutput: {
-		marginLeft: spacing.md,
-		padding: spacing.sm,
-		borderRadius: radius.sm,
-		backgroundColor: colors.bgElevated,
-	},
-	monoText: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs, lineHeight: 18 },
-	noteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	noteLine: { width: 12, height: StyleSheet.hairlineWidth, backgroundColor: colors.fgFaint },
-	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
-	errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-	errorText: { color: colors.danger, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
-	doneCard: {
+	taskResultText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 20, flexShrink: 1, marginLeft: spacing.xs },
+	done: {
 		gap: spacing.sm,
 		padding: spacing.md,
 		borderRadius: radius.lg,
 		borderWidth: 1,
 		borderColor: withAlpha(colors.success, '44'),
 	},
-	doneTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
-	doneText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
-	working: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	workingText: { color: colors.fgFaint, fontSize: fontSize.xs + 1 },
-	composerWrap: {
-		paddingHorizontal: spacing.md,
-		paddingTop: spacing.xs,
-		paddingBottom: spacing.sm,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: colors.border,
-	},
-	composer: {
+	doneTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', lineHeight: 22 },
+	doneCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
+	doneText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
+	doneActions: { flexWrap: 'wrap' },
+	typing: {
 		flexDirection: 'row',
-		alignItems: 'flex-end',
+		alignItems: 'center',
+		alignSelf: 'flex-start',
 		gap: spacing.sm,
-		borderRadius: 20,
-		borderWidth: 1,
-		borderColor: colors.border,
+		paddingHorizontal: spacing.md,
+		paddingVertical: spacing.sm,
+		borderRadius: 18,
+		borderTopLeftRadius: 6,
 		backgroundColor: colors.bgElevated,
-		paddingLeft: spacing.sm,
-		paddingRight: spacing.xs,
-		paddingVertical: spacing.xs,
 	},
-	composerInput: {
-		flex: 1,
-		minHeight: 40,
-		maxHeight: 140,
-		paddingHorizontal: spacing.sm,
-		paddingTop: spacing.sm,
-		paddingBottom: spacing.sm,
-		color: colors.fg,
-		fontSize: fontSize.sm,
-		lineHeight: 21,
-		textAlignVertical: 'top',
-	},
+	typingDots: { flexDirection: 'row', gap: 4 },
+	typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint, opacity: 0.4 },
+	typingDotOn: { backgroundColor: colors.running, opacity: 1 },
+	typingText: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
+	workingElapsed: { color: colors.fgFaint },
+
+	// 変更
 	changesContent: {
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.md,

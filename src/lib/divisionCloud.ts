@@ -605,15 +605,66 @@ const SUMMARY_KEYS = [
 	'pattern', 'query', 'regex', 'glob', 'url',
 ];
 
-/** ツール呼び出しを 1 行にする。例: `read_file src/a.ts` / `run_command npm test`。 */
-export const toolCallSummary = (name: string, args: unknown, max = 80): string => {
-	const toolName = name || 'tool';
-	if (!args || typeof args !== 'object') return oneLine(toolName, max);
+/** ツール呼び出しの名前と、要約に出す引数 (1 行に畳んだもの。無ければ空)。 */
+export const toolCallParts = (name: string, args: unknown, max = 80): { name: string; arg: string } => {
+	const toolName = oneLine(name || 'tool', max);
+	if (!args || typeof args !== 'object') return { name: toolName, arg: '' };
 	const record = args as Record<string, unknown>;
 	const key = SUMMARY_KEYS.find(k => typeof record[k] === 'string' && (record[k] as string).trim())
 		?? Object.keys(record).find(k => typeof record[k] === 'string' && (record[k] as string).trim());
-	const value = key ? String(record[key]) : '';
-	return oneLine(value ? `${toolName} ${value}` : toolName, max);
+	return { name: toolName, arg: key ? oneLine(String(record[key]), max) : '' };
+};
+
+/** ツール呼び出しを 1 行にする。例: `read_file src/a.ts` / `run_command npm test`。 */
+export const toolCallSummary = (name: string, args: unknown, max = 80): string => {
+	const parts = toolCallParts(name, args, max);
+	return oneLine(parts.arg ? `${parts.name} ${parts.arg}` : parts.name, max);
+};
+
+/**
+ * ツールの出力を Claude Code の「⎿ 1 行目 … +N 行」のように畳む。
+ * 先頭の空行は飛ばし、残りの行数 (末尾の空行は数えない) を more に入れる。
+ */
+export const outputPreview = (output: string, max = 120): { first: string; more: number } => {
+	const lines = output.replace(/\r\n?/g, '\n').replace(/\s+$/, '').split('\n');
+	const start = lines.findIndex(line => line.trim() !== '');
+	if (start < 0) return { first: '', more: 0 };
+	return { first: oneLine(lines[start], max), more: lines.length - start - 1 };
+};
+
+/** チャットの 1 吹き出し分。指示はそれだけで 1 つ、それ以外は次の指示までをエージェントの 1 回の返答にまとめる。 */
+export type ChatBlock =
+	| { kind: 'user'; event: CloudSessionEvent }
+	| { kind: 'agent'; key: number; items: ChatItem[] };
+
+/** エージェントの返答の中身。続けて実行したツールは 1 つにまとめて畳む。 */
+export type ChatItem =
+	| { kind: 'event'; event: CloudSessionEvent }
+	| { kind: 'tools'; key: number; events: CloudSessionEvent[] };
+
+/** ログをチャットの吹き出しの並びにする (古い順)。 */
+export const chatBlocks = (events: CloudSessionEvent[]): ChatBlock[] => {
+	const blocks: ChatBlock[] = [];
+	let agent: Extract<ChatBlock, { kind: 'agent' }> | null = null;
+	for (const event of events) {
+		if (event.type === 'user') {
+			agent = null;
+			blocks.push({ kind: 'user', event });
+			continue;
+		}
+		if (!agent) {
+			agent = { kind: 'agent', key: event.seq, items: [] };
+			blocks.push(agent);
+		}
+		const last = agent.items[agent.items.length - 1];
+		if (event.type === 'tool') {
+			if (last?.kind === 'tools') last.events.push(event);
+			else agent.items.push({ kind: 'tools', key: event.seq, events: [event] });
+		} else {
+			agent.items.push({ kind: 'event', event });
+		}
+	}
+	return blocks;
 };
 
 // ---------------------------------------------------------------------------
