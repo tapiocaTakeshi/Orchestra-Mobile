@@ -18,7 +18,6 @@ import { StatusBar } from 'expo-status-bar';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
-import { ConnectScreen } from './src/screens/ConnectScreen';
 import { DiscoverScreen } from './src/screens/DiscoverScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -51,13 +50,11 @@ const Shell = () => {
 	const [stack, setStack] = useState<PageKey[]>([]);
 	/** クラウドのページを開いたときにすぐ開くセッション (カンバンの「クラウドで開く」から) */
 	const [cloudSessionId, setCloudSessionId] = useState<string | null>(null);
-	const [showManualConnect, setShowManualConnect] = useState(false);
 
 	// アカウントが替わったら、前のアカウントで開いていた画面を持ち越さない。
 	useEffect(() => {
 		setStack([]);
 		setCloudSessionId(null);
-		setShowManualConnect(false);
 	}, [session?.userId]);
 
 	// 接続が切れたら、繋いでいないと使えないページには留まらない。
@@ -83,8 +80,8 @@ const Shell = () => {
 	// 描画のたびに作り直すと戻るキーの登録もやり直しになり、ページ側 (クラウドの詳細など) で
 	// 後から登録した戻るキーより先に呼ばれてしまうので、開いている画面が変わったときだけ作る。
 	const goBack = useMemo(
-		() => (openPage ? popPage : showManualConnect ? () => setShowManualConnect(false) : null),
-		[openPage, popPage, showManualConnect],
+		() => (openPage ? popPage : null),
+		[openPage, popPage],
 	);
 
 	// Android の戻るキーでも、ページから最初の画面へ戻る。
@@ -132,9 +129,7 @@ const Shell = () => {
 			</BackProvider>
 		);
 	} else if (!connection) {
-		content = showManualConnect
-			? <BackProvider value={() => setShowManualConnect(false)}><ConnectScreen /></BackProvider>
-			: <DiscoverScreen onManualConnect={() => setShowManualConnect(true)} onOpenPage={setPage} />;
+		content = <DiscoverScreen onOpenPage={setPage} />;
 	} else {
 		content = <RemoteScreen onOpenPage={setPage} />;
 	}

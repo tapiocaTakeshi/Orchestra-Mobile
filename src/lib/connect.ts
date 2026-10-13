@@ -1,12 +1,11 @@
 /**
- * 接続候補 (ペアリングリンクから作った Connection でも、DiscoverScreen が見つけた
- * RemoteSession でも) を検証してから繋ぐ、共通のロジック。
+ * 接続候補 (DiscoverScreen が見つけた RemoteSession) を検証してから繋ぐ、共通のロジック。
  *
- * ConnectScreen (手動) と DiscoverScreen (アカウント自動検出) の両方から呼ばれる。
+ * DiscoverScreen (アカウント自動検出) から呼ばれる。
  *
  * 繋げるのは、ログイン中の Division アカウントのセッションだけ。PC はリモートコントロールを
  * 有効にするとアカウントの RemoteSession にペアリングのトークンを載せるので、候補のトークンが
- * その一覧にあるかで確かめる。ペアリングリンクや手入力で別アカウントの PC を指定しても繋がない
+ * その一覧にあるかで確かめる。別アカウントの PC の接続情報を渡されても繋がない
  * (PC 側も X-Division-Access-Token のユーザーを見て、違えば 403 account_mismatch を返す)。
  */
 
