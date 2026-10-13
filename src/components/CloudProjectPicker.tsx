@@ -1,13 +1,13 @@
 /**
  * クラウドエージェントの「プロジェクト」選び。新しいセッションのシートとカンバンの「クラウドで実行」で使う。
  *
- * 一覧は PC に接続していれば PC の Orchestra のプロジェクト (有効なものが先頭)、
- * 接続していなければ Supabase の Project テーブル (自分のもの、新しい順) から作る。
+ * 一覧は PC に接続していれば PC の Orchestra のプロジェクト (有効なものが先頭)、その後ろに
+ * Division API の自分のプロジェクト (新しく更新した順) のうち PC に無いものを並べる。
  * プロジェクトを選ぶと、エージェントはそのプロジェクトの「コーダー」のモデルで動く。
  * クラウドのシートでモデルに Division Project を選んだときは、そのプロジェクトに固定する (lockedReason)。
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ErrorBanner, Icon, Muted } from './ui';
@@ -15,7 +15,8 @@ import { DivisionSession } from '../lib/divisionAuth';
 import {
 	CloudProjectOption,
 	CloudProjectSource,
-	listSupabaseProjects,
+	listServerProjects,
+	mergeProjectOptions,
 	projectOptionsFromPc,
 } from '../lib/divisionProjects';
 import { useApp } from '../state/AppContext';
@@ -29,7 +30,10 @@ export type CloudProjects = {
 	reload: () => void;
 };
 
-/** プロジェクトの一覧。PC の一覧が使えないとき (未接続・ID 付きのものが無い) だけ Supabase を読む。 */
+/**
+ * プロジェクトの一覧。PC の一覧 (接続中) と Division API の一覧を合わせる。
+ * PC や Web で作ったばかりのものも出るよう、reload で Division API を読み直す。
+ */
 export const useCloudProjects = (auth: DivisionSession | null): CloudProjects => {
 	const { connection, snapshot } = useApp();
 	const pcProjects = snapshot?.division?.projects;
@@ -37,34 +41,42 @@ export const useCloudProjects = (auth: DivisionSession | null): CloudProjects =>
 		() => (connection && pcProjects ? projectOptionsFromPc(pcProjects) : []),
 		[connection, pcProjects],
 	);
-	// 接続中でもスナップショットが届く前は待つ (すぐに Supabase を読みに行かない)
+	// 接続中でもスナップショットが届く前は「読み込み中」にしておく
 	const waitingForPc = !!connection && !snapshot;
-	const readSupabase = !waitingForPc && pcOptions.length === 0;
 
-	const [supabaseProjects, setSupabaseProjects] = useState<CloudProjectOption[]>([]);
+	const [serverProjects, setServerProjects] = useState<CloudProjectOption[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [nonce, setNonce] = useState(0);
 
+	// auth はトークン更新で別オブジェクトになるので、最新のものを ref で読む
+	const authRef = useRef(auth);
+	authRef.current = auth;
 	const userId = auth?.userId;
 	useEffect(() => {
-		if (!auth || !readSupabase) return;
+		const current = authRef.current;
+		if (!current) { setServerProjects([]); return; }
 		let cancelled = false;
 		setLoading(true);
 		setError(null);
-		void listSupabaseProjects(auth)
-			.then(rows => { if (!cancelled) setSupabaseProjects(rows); })
+		void listServerProjects(current)
+			.then(rows => { if (!cancelled) setServerProjects(rows); })
 			.catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
 			.finally(() => { if (!cancelled) setLoading(false); });
 		return () => { cancelled = true; };
-		// auth はトークン更新で別オブジェクトになるので、ユーザーが替わったときだけ読み直す
-	}, [userId, readSupabase, nonce]);
+	}, [userId, nonce]);
 
 	const reload = useCallback(() => setNonce(n => n + 1), []);
 
-	return readSupabase
-		? { projects: supabaseProjects, source: 'supabase', loading, error, reload }
-		: { projects: pcOptions, source: 'pc', loading: waitingForPc, error: null, reload };
+	const projects = useMemo(() => mergeProjectOptions(pcOptions, serverProjects), [pcOptions, serverProjects]);
+	return {
+		projects,
+		source: pcOptions.length > 0 ? 'pc' : 'division',
+		loading: waitingForPc || (loading && projects.length === 0),
+		// PC の一覧が出ていれば、Division API が失敗してもそれで選べるので警告は出さない
+		error: pcOptions.length > 0 ? null : error,
+		reload,
+	};
 };
 
 /** 一度に並べる数。多いときは「すべて表示」で広げる。 */
