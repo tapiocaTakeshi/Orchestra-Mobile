@@ -17,7 +17,9 @@
     "eas:credentials": "npx eas-cli credentials",
     "build:android": "npm run eas:check && npx eas-cli build --platform android",
     "build:ios": "npm run eas:check && npx eas-cli build --platform ios",
-    "build:web": "expo export --platform web"
+    "build:web": "expo export --platform web",
+    "postinstall": "node scripts/generate-ios-icon.cjs",
+    "icons:generate": "node scripts/generate-ios-icon.cjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -36,7 +38,8 @@
     "react-native-get-random-values": "~1.11.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-url-polyfill": "^2.0.0",
-    "react-native-web": "^0.21.0"
+    "react-native-web": "^0.21.0",
+    "pngjs": "3.4.0"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
