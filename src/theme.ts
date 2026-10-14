@@ -1,29 +1,30 @@
 /**
- * モバイル共通トークン。色はデスクトップ Orchestra の既定テーマ「Orchestra Dark」
- * (extensions/theme-orchestra) の値を使い、右のコメントに元の VS Code 色キーを書いている。
- * 見た目は Claude Code のように飾りを減らす方針: 地・線・文字の濃淡で組み、色は状態の印くらいにしか使わない。
+ * モバイル共通トークン。見た目は ChatGPT のアプリに合わせる:
+ * 無彩色のグレーの濃淡 (地・入力欄・線) で組み、色は状態の印とリンクくらいにしか使わない。
+ * 左のナビゲーションレールだけ一段暗い地 (bgSidebar) にして、本文と分ける。
  */
 
 export const colors = {
-	bg: '#0e0c0b', // editor.background — 画面の地
-	bgElevated: '#131110', // sideBar.background — 入力欄の箱・カンバンのカード
-	bgInput: '#1a1716', // input.background — 1 行の入力欄
-	bgHover: '#24201e', // list.hoverBackground / button.secondaryBackground
-	border: '#262120', // sideBar.border / editorGroup.border
-	borderStrong: '#3a3330', // input.border
+	bg: '#212121', // 画面の地
+	bgSidebar: '#171717', // ナビゲーションレール・ドロワーの地
+	bgElevated: '#2f2f2f', // 入力欄の箱・カンバンのカード
+	bgInput: '#2a2a2a', // 1 行の入力欄
+	bgHover: '#3a3a3a', // 押したとき・自分の吹き出し
+	border: '#333333',
+	borderStrong: '#424242',
 
-	fg: '#ece6de', // editor.foreground
-	fgStrong: '#f7f2ea', // tab.activeForeground
-	fgMuted: '#bdb3a8', // sideBar.foreground
-	fgFaint: '#877c72', // input.placeholderForeground / tab.inactiveForeground
+	fg: '#ececec',
+	fgStrong: '#ffffff',
+	fgMuted: '#b4b4b4',
+	fgFaint: '#8e8e8e',
 
-	// 色はほぼ使わず、リンクや稼働中の印だけゴールドにする
-	accentText: '#c6a769', // textLink.foreground
+	// 色はほぼ使わず、リンクや稼働中の印だけ青にする
+	accentText: '#7ab7ff',
 
-	success: '#89d185', // charts.green (デスクトップの状態ドット)
-	warning: '#cca700', // charts.yellow (= --void-warning、「確認待ち」のドット)
+	success: '#4ade80',
+	warning: '#facc15', // 「確認待ち」のドット
 	danger: '#f87171',
-	running: '#c6a769', // 「作業中」の印
+	running: '#7ab7ff', // 「作業中」の印
 } as const;
 
 /** `#rrggbb` に透明度を足す (デスクトップの `${color}22` と同じ書き方)。 */

@@ -26,6 +26,17 @@ export const PAGES: PageEntry[] = [
 	{ key: 'settings', label: '接続', icon: 'link', needsConnection: true },
 ];
 
+/**
+ * ホームのナビゲーションレールに並べるページ。コストはホームの入力欄から、クラウドはホームそのもので扱うので置かない。
+ * label はレールのアイコンの下に出す短い名前、title は長押しや読み上げで使う名前。
+ */
+export const RAIL_PAGES: (PageEntry & { title: string })[] = [
+	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: true },
+	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
+	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', icon: 'sliders', needsConnection: true },
+	{ key: 'social', label: 'ソーシャル', title: 'ソーシャル (共有)', icon: 'share-2', needsConnection: false },
+];
+
 export const pagesFor = (connected: boolean): PageEntry[] =>
 	PAGES.filter(p => connected || !p.needsConnection);
 
