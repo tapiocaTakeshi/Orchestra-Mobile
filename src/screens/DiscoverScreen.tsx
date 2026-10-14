@@ -36,7 +36,7 @@ import { colors, fontSize, radius, spacing } from '../theme';
 const POLL_INTERVAL_MS = 5_000;
 
 /** グループ内の 1 行 (アイコン・題名・補足・右端)。最後の行だけ区切り線を消す。 */
-const ListRow = ({ icon, title, detail, badge, right, onPress, disabled, accessibilityLabel, last, tone = 'default' }: {
+const ListRow = ({ icon, title, detail, badge, right, onPress, disabled, accessibilityLabel, last, tone = 'default', primary }: {
 	icon: IconName;
 	title: string;
 	detail?: string;
@@ -49,8 +49,10 @@ const ListRow = ({ icon, title, detail, badge, right, onPress, disabled, accessi
 	last?: boolean;
 	/** danger はログアウトのような取り消しにくい操作。赤い文字で出す。 */
 	tone?: 'default' | 'danger';
+	/** 主役の行 (接続できる PC)。アイコンをアクセント色にして目立たせる。 */
+	primary?: boolean;
 }) => {
-	const iconColor = tone === 'danger' ? colors.danger : colors.fgMuted;
+	const iconColor = tone === 'danger' ? colors.danger : primary ? colors.accentText : colors.fgMuted;
 	return (
 		<Pressable
 			accessibilityRole='button'
@@ -174,6 +176,7 @@ export const DiscoverScreen = ({
 								<ListRow
 									key={row.id}
 									icon='monitor'
+									primary
 									title={row.deviceLabel || row.lanUrl}
 									badge={newSessionIds.includes(row.id) ? 'NEW' : undefined}
 									detail={`最終確認 ${relativeTimeFromIso(row.lastSeenAt)}`}
