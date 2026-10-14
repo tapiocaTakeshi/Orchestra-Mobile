@@ -4,12 +4,17 @@
  * ログイン中の Division アカウントに紐づくデスクトップセッション (RemoteSession) を
  * 一定間隔でポーリングして一覧表示する。行をタップするだけで接続できる。
  * 未接続でも使えるページ (クラウド・共有・コスト) への導線も置く。
+ *
+ * 情報の優先順位: 接続できる PC (主役) → 未接続でも開けるページ → アカウント。
+ * 区画ごとに見出しと平らなグループ (地 bgElevated + 細い線) で分け、余白はテーマの spacing だけで組む。
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import {
+	Badge,
+	EmptyState,
 	ErrorBanner,
 	Icon,
 	IconName,
@@ -17,6 +22,7 @@ import {
 	Muted,
 	Screen,
 	ScreenHeader,
+	SectionTitle,
 	confirmAction,
 } from '../components/ui';
 import { RemoteSessionRow, listRemoteSessions } from '../lib/divisionAuth';
@@ -25,36 +31,49 @@ import { relativeTimeFromIso } from '../lib/format';
 import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, fontSize, spacing } from '../theme';
+import { colors, fontSize, radius, spacing } from '../theme';
 
 const POLL_INTERVAL_MS = 5_000;
 
-/** 一覧の 1 行 (アイコン・題名・補足・右端)。 */
-const ListRow = ({ icon, title, detail, right, onPress, disabled, accessibilityLabel }: {
+/** グループ内の 1 行 (アイコン・題名・補足・右端)。最後の行だけ区切り線を消す。 */
+const ListRow = ({ icon, title, detail, badge, right, onPress, disabled, accessibilityLabel, last, tone = 'default' }: {
 	icon: IconName;
 	title: string;
 	detail?: string;
+	/** 題名の横に出す小さな印 (例: NEW)。 */
+	badge?: string;
 	right?: React.ReactNode;
 	onPress: () => void;
 	disabled?: boolean;
 	accessibilityLabel?: string;
-}) => (
-	<Pressable
-		accessibilityRole='button'
-		accessibilityLabel={accessibilityLabel}
-		accessibilityState={{ disabled: !!disabled }}
-		disabled={disabled}
-		onPress={onPress}
-		style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-	>
-		<Icon name={icon} size={18} color={colors.fgMuted} />
-		<View style={styles.flex}>
-			<Text style={styles.rowTitle} numberOfLines={1}>{title}</Text>
-			{detail ? <Muted numberOfLines={1}>{detail}</Muted> : null}
-		</View>
-		{right ?? <Icon name='chevron-right' size={16} color={colors.fgFaint} />}
-	</Pressable>
-);
+	last?: boolean;
+	/** danger はログアウトのような取り消しにくい操作。赤い文字で出す。 */
+	tone?: 'default' | 'danger';
+}) => {
+	const iconColor = tone === 'danger' ? colors.danger : colors.fgMuted;
+	return (
+		<Pressable
+			accessibilityRole='button'
+			accessibilityLabel={accessibilityLabel}
+			accessibilityState={{ disabled: !!disabled }}
+			disabled={disabled}
+			onPress={onPress}
+			style={({ pressed }) => [styles.row, !last && styles.rowDivider, pressed && styles.rowPressed]}
+		>
+			<View style={styles.rowIcon}>
+				<Icon name={icon} size={18} color={iconColor} />
+			</View>
+			<View style={styles.rowBody}>
+				<View style={styles.rowTitleLine}>
+					<Text style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]} numberOfLines={1}>{title}</Text>
+					{badge ? <Badge label={badge} color={colors.accentText} /> : null}
+				</View>
+				{detail ? <Muted numberOfLines={1} style={styles.rowDetail}>{detail}</Muted> : null}
+			</View>
+			{right ?? <Icon name='chevron-right' size={16} color={colors.fgFaint} />}
+		</Pressable>
+	);
+};
 
 export const DiscoverScreen = ({
 	onOpenPage,
@@ -123,6 +142,8 @@ export const DiscoverScreen = ({
 
 	if (!session) return null;
 
+	const pages = pagesFor(false);
+
 	return (
 		<Screen>
 			<ScreenHeader title='接続先' />
@@ -133,40 +154,72 @@ export const DiscoverScreen = ({
 				{error ? <ErrorBanner message={error} onRetry={() => { void refresh(); }} style={styles.banner} /> : null}
 				{status ? <ErrorBanner message={status} style={styles.banner} /> : null}
 
-				{loading ? (
-					<Loading label='PC を探しています…' />
-				) : sessions.length === 0 ? (
-					<Text style={styles.empty}>
-						同じアカウントでログインしている PC が見つかりません。PC 側でリモートコントロールを有効にすると、ここに出ます。
-					</Text>
-				) : (
-					<View>
-						{sessions.map(row => (
-							<ListRow
-								key={row.id}
+				{/* 主役: 接続できる PC */}
+				<View style={styles.section}>
+					<SectionTitle right={!loading && sessions.length > 0 ? <Muted>{sessions.length} 台</Muted> : undefined}>
+						PC に接続
+					</SectionTitle>
+					<Text style={styles.lead}>同じアカウントでログインしている PC です。タップすると接続します。</Text>
+					<View style={styles.group}>
+						{loading ? (
+							<Loading label='PC を探しています…' />
+						) : sessions.length === 0 ? (
+							<EmptyState
 								icon='monitor'
-								title={row.deviceLabel || row.lanUrl}
-								detail={`${newSessionIds.includes(row.id) ? 'NEW · ' : ''}${relativeTimeFromIso(row.lastSeenAt)}`}
-								accessibilityLabel={`${row.deviceLabel || row.lanUrl} に接続`}
-								disabled={connectingId !== null}
-								right={connectingId === row.id ? <ActivityIndicator size='small' color={colors.fgMuted} /> : undefined}
-								onPress={() => { void onConnect(row); }}
+								title='PC が見つかりません'
+								detail='PC 側でリモートコントロールを有効にすると、ここに表示されます。'
 							/>
-						))}
+						) : (
+							sessions.map((row, i) => (
+								<ListRow
+									key={row.id}
+									icon='monitor'
+									title={row.deviceLabel || row.lanUrl}
+									badge={newSessionIds.includes(row.id) ? 'NEW' : undefined}
+									detail={`最終確認 ${relativeTimeFromIso(row.lastSeenAt)}`}
+									accessibilityLabel={`${row.deviceLabel || row.lanUrl} に接続`}
+									disabled={connectingId !== null}
+									right={connectingId === row.id ? <ActivityIndicator size='small' color={colors.fgMuted} /> : undefined}
+									last={i === sessions.length - 1}
+									onPress={() => { void onConnect(row); }}
+								/>
+							))
+						)}
 					</View>
-				)}
+				</View>
 
-				<View style={styles.more}>
-					{pagesFor(false).map(page => (
-						<ListRow key={page.key} icon={page.icon} title={page.label} onPress={() => onOpenPage(page.key)} />
-					))}
-					<ListRow
-						icon='log-out'
-						title='ログアウト'
-						detail={session.email}
-						right={<View />}
-						onPress={() => { void onLogout(); }}
-					/>
+				{/* 未接続でも開けるページ */}
+				{pages.length > 0 ? (
+					<View style={styles.section}>
+						<SectionTitle>接続せずに使う</SectionTitle>
+						<View style={styles.group}>
+							{pages.map((page, i) => (
+								<ListRow
+									key={page.key}
+									icon={page.icon}
+									title={page.label}
+									last={i === pages.length - 1}
+									onPress={() => onOpenPage(page.key)}
+								/>
+							))}
+						</View>
+					</View>
+				) : null}
+
+				{/* アカウント */}
+				<View style={styles.section}>
+					<SectionTitle>アカウント</SectionTitle>
+					<View style={styles.group}>
+						<ListRow
+							icon='log-out'
+							title='ログアウト'
+							detail={session.email}
+							tone='danger'
+							right={<View />}
+							last
+							onPress={() => { void onLogout(); }}
+						/>
+					</View>
 				</View>
 			</ScrollView>
 		</Screen>
@@ -174,23 +227,46 @@ export const DiscoverScreen = ({
 };
 
 const styles = StyleSheet.create({
-	flex: { flex: 1 },
 	content: {
 		paddingHorizontal: spacing.lg,
-		paddingBottom: spacing.xl,
+		paddingTop: spacing.sm,
+		paddingBottom: spacing.xl * 2,
 	},
-	banner: { marginHorizontal: 0 },
-	empty: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, paddingVertical: spacing.lg },
+	banner: { marginHorizontal: 0, marginBottom: 0 },
+	section: { marginTop: spacing.xl, gap: spacing.sm },
+	lead: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21 },
+	// 区画のまとまり。色は足さず、地と細い線の濃淡だけで分ける
+	group: {
+		backgroundColor: colors.bgElevated,
+		borderRadius: radius.lg,
+		borderWidth: StyleSheet.hairlineWidth,
+		borderColor: colors.border,
+		overflow: 'hidden',
+	},
 	row: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.md,
 		minHeight: 60,
 		paddingVertical: spacing.sm,
+		paddingHorizontal: spacing.md,
+	},
+	rowDivider: {
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.border,
 	},
-	rowPressed: { opacity: 0.6 },
-	rowTitle: { color: colors.fg, fontSize: fontSize.sm },
-	more: { marginTop: spacing.xl },
+	rowPressed: { backgroundColor: colors.bgHover },
+	rowIcon: {
+		width: 36,
+		height: 36,
+		borderRadius: radius.md,
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: colors.bgHover,
+	},
+	rowBody: { flex: 1, gap: 2 },
+	rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+	rowTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '500', flexShrink: 1 },
+	rowTitleDanger: { color: colors.danger },
+	rowDetail: { color: colors.fgFaint },
 });

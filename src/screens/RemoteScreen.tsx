@@ -44,7 +44,7 @@ import {
 import { oneLine, relativeTimeFromIso } from '../lib/format';
 import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
-import { colors, fontSize, radius, spacing } from '../theme';
+import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
 /** 下端からこれ以上離れたら「最新へ」ボタンを出す。 */
 const JUMP_THRESHOLD = 240;
@@ -256,7 +256,13 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 							</View>
 						) : (
 							<View style={styles.greeting}>
+								<View style={styles.greetingIcon}>
+									<Icon name='message-square' size={22} color={colors.accentText} />
+								</View>
 								<Text accessibilityRole='header' style={styles.greetingTitle}>エージェントに何をさせますか？</Text>
+								<Text style={styles.greetingLead}>
+									下の入力欄から指示を送れます。過去のチャットや各ページは左上のメニューから開けます。
+								</Text>
 							</View>
 						)}
 					</ScrollView>
@@ -422,8 +428,27 @@ const styles = StyleSheet.create({
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18 },
 	working: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	workingText: { color: colors.fgFaint, fontSize: fontSize.xs + 1 },
-	greeting: { flexGrow: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: spacing.xl },
-	greetingTitle: { color: colors.fgMuted, fontSize: fontSize.md, fontWeight: '500' },
+	greeting: {
+		flexGrow: 1,
+		justifyContent: 'center',
+		alignItems: 'center',
+		gap: spacing.sm,
+		paddingHorizontal: spacing.lg,
+		paddingBottom: spacing.xl,
+	},
+	greetingIcon: {
+		width: 48,
+		height: 48,
+		borderRadius: radius.lg,
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: spacing.xs,
+		backgroundColor: colors.bgElevated,
+		borderWidth: StyleSheet.hairlineWidth,
+		borderColor: colors.border,
+	},
+	greetingTitle: { color: colors.fgStrong, fontSize: fontSize.md + 1, fontWeight: '600', textAlign: 'center' },
+	greetingLead: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, textAlign: 'center', maxWidth: 320 },
 	menuSection: { marginTop: spacing.xl, gap: spacing.xs },
 	listRow: {
 		flexDirection: 'row',
@@ -457,7 +482,9 @@ const styles = StyleSheet.create({
 		gap: spacing.xs + 2,
 		borderRadius: radius.lg,
 		borderWidth: 1,
-		borderColor: colors.borderStrong,
+		// 止まったままになる重要な確認なので、状態色 (確認待ち = warning) の枠と一段明るい地で目立たせる
+		borderColor: withAlpha(colors.warning, '66'),
+		backgroundColor: colors.bgElevated,
 	},
 	approvalTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
 	approvalButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
