@@ -123,7 +123,14 @@ const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?
 	</Pressable>
 );
 
-export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => void }) => {
+export const RemoteScreen = ({ onOpenPage, headerTitle }: {
+	onOpenPage: (page: PageKey) => void;
+	/**
+	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは左上のメニューの代わりに
+	 * 右上の履歴ボタンを置き、メニューにはページを並べない (ページはホームのナビゲーションレールにある)。
+	 */
+	headerTitle?: React.ReactNode;
+}) => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
 	const toast = useToast();
@@ -208,9 +215,9 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 			>
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
-				<View style={styles.header}>
-					<IconButton icon='menu' accessibilityLabel='メニュー' onPress={() => setSheet('menu')} />
-					<View style={styles.flex}>
+				<View style={[styles.header, headerTitle !== undefined && styles.headerInHome]}>
+					{headerTitle === undefined ? <IconButton icon='menu' accessibilityLabel='メニュー' onPress={() => setSheet('menu')} /> : null}
+					{headerTitle !== undefined ? <View style={styles.flex}>{headerTitle}</View> : <View style={styles.flex}>
 						<Text style={styles.workspaceName} numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Text>
 						<View style={styles.statusRow} accessibilityLabel={`状態: ${status.label}`}>
 							<View style={[styles.statusDot, { backgroundColor: status.color }]} />
@@ -218,7 +225,14 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 								{status.label} · {snapshot.remoteSession ? 'PC と同期中' : `${ide?.appName} ${ide?.version}`}
 							</Text>
 						</View>
-					</View>
+					</View>}
+					{headerTitle !== undefined ? (
+						<View accessibilityLabel={`状態: ${status.label}`} style={styles.headerStatus}>
+							<View style={[styles.statusDot, { backgroundColor: status.color }]} />
+							<Text style={styles.statusText}>{status.label}</Text>
+						</View>
+					) : null}
+					{headerTitle !== undefined ? <IconButton icon='clock' accessibilityLabel='最近のチャット' onPress={() => setSheet('menu')} /> : null}
 					<IconButton icon='edit' accessibilityLabel='新しいチャット' onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
 				</View>
 
@@ -340,9 +354,9 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 				</View>
 
 				{sheet === 'menu' ? (
-					<Sheet title='メニュー' onClose={() => setSheet(null)}>
+					<Sheet title={headerTitle !== undefined ? '最近のチャット' : 'メニュー'} onClose={() => setSheet(null)}>
 						<ScrollView contentContainerStyle={styles.sheetContent}>
-							{pagesFor(true).map(page => (
+							{(headerTitle !== undefined ? [] : pagesFor(true)).map(page => (
 								<Pressable
 									key={page.key}
 									accessibilityRole='button'
@@ -355,15 +369,15 @@ export const RemoteScreen = ({ onOpenPage }: { onOpenPage: (page: PageKey) => vo
 								</Pressable>
 							))}
 							{snapshot.threads.length > 0 ? (
-								<View style={styles.menuSection}>
-									<SectionTitle>最近のチャット</SectionTitle>
+								<View style={[styles.menuSection, headerTitle !== undefined && styles.menuSectionInHome]}>
+									{headerTitle !== undefined ? null : <SectionTitle>最近のチャット</SectionTitle>}
 									<View>
 										{snapshot.threads.map(t => (
 											<ThreadRow key={t.threadId} thread={t} active={t.threadId === chat?.threadId} onPress={() => switchThread(t.threadId)} />
 										))}
 									</View>
 								</View>
-							) : null}
+							) : headerTitle !== undefined ? <Muted>まだチャットはありません。</Muted> : null}
 						</ScrollView>
 					</Sheet>
 				) : null}
@@ -389,6 +403,8 @@ const styles = StyleSheet.create({
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.borderStrong,
 	},
+	headerInHome: { paddingLeft: spacing.lg, minHeight: 56 },
+	headerStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, paddingHorizontal: spacing.xs },
 	workspaceName: { color: colors.fgStrong, fontSize: fontSize.sm + 1, fontWeight: '600' },
 	statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, marginTop: 2 },
 	statusDot: { width: 7, height: 7, borderRadius: 4 },
@@ -450,6 +466,7 @@ const styles = StyleSheet.create({
 	greetingTitle: { color: colors.fgStrong, fontSize: fontSize.md + 1, fontWeight: '600', textAlign: 'center' },
 	greetingLead: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21, textAlign: 'center', maxWidth: 320 },
 	menuSection: { marginTop: spacing.xl, gap: spacing.xs },
+	menuSectionInHome: { marginTop: 0 },
 	listRow: {
 		flexDirection: 'row',
 		alignItems: 'center',
@@ -494,7 +511,7 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.sm,
 	},
 	composer: {
-		borderRadius: 20,
+		borderRadius: 26,
 		borderWidth: 1,
 		borderColor: colors.border,
 		backgroundColor: colors.bgElevated,

@@ -1,11 +1,11 @@
 /**
  * アプリのルート。
  *
- * タブバーは置かない。最初の画面は 1 つだけで、
- *   - PC に接続しているとき  … チャット
- *   - 接続していないとき      … 接続先の一覧
- * それ以外 (カンバン・Division・クラウド・共有・コスト・クイック操作・接続) はメニューからページとして開き、
- * 「戻る」(Android は戻るキーも) で最初の画面に戻る。
+ * タブバーは置かない。最初の画面はホーム (ChatGPT のアプリのような見た目) で、
+ *   - 左のナビゲーションレール … Division のプロジェクト管理・カンバン・UI・ソーシャル
+ *   - 見出しのモード切り替え   … クラウドエージェント / リモートコントロール (未接続なら接続先の一覧)
+ *   - 入力欄の「コスト」       … コストの見積もりと方針
+ * レールから開いたものはページとして開き、「戻る」(Android は戻るキーも) でホームに戻る。
  * ページの中から別のページを開いたとき (クラウドの「カンバン」「コスト」など) は重ねて開き、
  * 「戻る」で元のページに戻る。
  */
@@ -18,12 +18,11 @@ import { StatusBar } from 'expo-status-bar';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
-import { DiscoverScreen } from './src/screens/DiscoverScreen';
+import { HomeMode, HomeScreen } from './src/screens/HomeScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { QuickActionsScreen } from './src/screens/QuickActionsScreen';
-import { RemoteScreen } from './src/screens/RemoteScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SocialScreen } from './src/screens/SocialScreen';
 import { TuningScreen } from './src/screens/TuningScreen';
@@ -50,6 +49,8 @@ const Shell = () => {
 	const [stack, setStack] = useState<PageKey[]>([]);
 	/** クラウドのページを開いたときにすぐ開くセッション (カンバンの「クラウドで開く」から) */
 	const [cloudSessionId, setCloudSessionId] = useState<string | null>(null);
+	/** ホームのモード。PC に繋いでいればリモートコントロール、そうでなければクラウドエージェントから始める。 */
+	const [homeMode, setHomeMode] = useState<HomeMode>(() => (connection ? 'remote' : 'cloud'));
 
 	// アカウントが替わったら、前のアカウントで開いていた画面を持ち越さない。
 	useEffect(() => {
@@ -59,6 +60,10 @@ const Shell = () => {
 
 	// 接続が切れたら、繋いでいないと使えないページには留まらない。
 	const connected = !!connection;
+	// 起動時に保存済みの接続が戻ったとき・接続先の一覧から繋いだときは、ホームをリモートコントロールにする。
+	useEffect(() => {
+		if (connected) setHomeMode('remote');
+	}, [connected]);
 	const visibleStack = useMemo(() => stack.filter(p => canOpenPage(p, connected)), [stack, connected]);
 	const openPage = visibleStack.length > 0 ? visibleStack[visibleStack.length - 1] : null;
 
@@ -117,7 +122,7 @@ const Shell = () => {
 			<BackProvider value={popPage}>
 				{/* ページを見ているあいだに承認を求められても気づけるよう、上に細い帯を出す */}
 				{awaitingApproval ? (
-					<Pressable accessibilityRole='button' onPress={() => setPage(null)} style={styles.approvalBar}>
+					<Pressable accessibilityRole='button' onPress={() => { setHomeMode('remote'); setPage(null); }} style={styles.approvalBar}>
 						<View style={styles.approvalDot} />
 						<Text style={styles.approvalText}>ツールの実行が確認待ちです</Text>
 						<Text style={styles.approvalLink}>チャットへ</Text>
@@ -128,10 +133,8 @@ const Shell = () => {
 				<PageContent key={`${visibleStack.length}:${openPage}:${cloudSessionId ?? ''}`} page={openPage} onOpenPage={pushFromPage} cloudSessionId={cloudSessionId} />
 			</BackProvider>
 		);
-	} else if (!connection) {
-		content = <DiscoverScreen onOpenPage={setPage} />;
 	} else {
-		content = <RemoteScreen onOpenPage={setPage} />;
+		content = <HomeScreen mode={homeMode} onModeChange={setHomeMode} onOpenPage={setPage} />;
 	}
 
 	return (

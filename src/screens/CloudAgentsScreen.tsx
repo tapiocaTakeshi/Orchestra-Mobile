@@ -71,6 +71,7 @@ import {
 	useBack,
 	useToast,
 } from '../components/ui';
+import { TuningScreen } from './TuningScreen';
 import { CloudModelPicker } from '../components/CloudModelPicker';
 import { CloudProjectPicker, CloudProjects, useCloudProjects } from '../components/CloudProjectPicker';
 import {
@@ -603,7 +604,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }
  * Claude Code のホームと同じく、画面の下に固定した入力欄。指示を書いて送ると、その場でセッションを起動する。
  * 下のチップ (始める場所・モデル・並列数) を押すと起動の設定を開く。設定が足りないまま送ったときも設定を開く。
  */
-const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen, onOptionsOpen }: {
+const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen, onOptionsOpen, costLabel }: {
 	auth: DivisionSession;
 	projects: CloudProjects;
 	draft: Draft;
@@ -611,7 +612,10 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen
 	onLaunch: (repo: CloudRepo | undefined) => void;
 	optionsOpen: boolean;
 	onOptionsOpen: (open: boolean) => void;
+	/** 「コスト」チップに添える金額 (一覧の料金の合計)。分からなければ出さない */
+	costLabel: string | null;
 }) => {
+	const [costOpen, setCostOpen] = useState(false);
 	const toast = useToast();
 	const github = useGitHubConnection(auth);
 	const mode = repoModeOf(draft, github);
@@ -680,6 +684,13 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen
 						{count > 1 ? (
 							<ComposerChip icon='copy' label={`×${count}`} accessibilityLabel={`並列数 ${count}。変更する`} onPress={() => onOptionsOpen(true)} />
 						) : null}
+						{/* コストの管理は入力欄から: 書いている指示の見積もり・方針・残高をシートで開く */}
+						<ComposerChip
+							icon='bar-chart-2'
+							label={costLabel ? `コスト · ${costLabel}` : 'コスト'}
+							accessibilityLabel='コスト調整を開く'
+							onPress={() => setCostOpen(true)}
+						/>
 					</ScrollView>
 					<SendButton
 						icon='arrow-up'
@@ -698,6 +709,11 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen
 					onChange={onChange}
 					onClose={() => onOptionsOpen(false)}
 				/>
+			) : null}
+			{costOpen ? (
+				<Sheet title='コスト調整' eyebrow='入力中の指示' onClose={() => setCostOpen(false)}>
+					<TuningScreen composerPrompt={draft.prompt} />
+				</Sheet>
 			) : null}
 		</View>
 	);
@@ -1655,11 +1671,16 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 // ページ本体
 // ---------------------------------------------------------------------------
 
-export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
+export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }: {
 	/** 「プロジェクト」「コスト」「カンバン」を開く (App のページの重なりに積む) */
 	onOpenPage?: OpenPage;
 	/** 開いたらすぐ詳細を出すセッション (カンバンの「クラウドで開く」から) */
 	initialSessionId?: string | null;
+	/**
+	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは上の段のショートカットを出さない
+	 * (ページはホームのナビゲーションレールに、コストは入力欄にある)。
+	 */
+	headerTitle?: React.ReactNode;
 } = {}) => {
 	const { session } = useDivisionAuth();
 	const { connection, snapshot } = useApp();
@@ -1885,7 +1906,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 	if (!session) {
 		return (
 			<Screen>
-				<ScreenHeader title='クラウド' />
+				<ScreenHeader title={headerTitle ?? 'クラウド'} />
 				<EmptyState
 					icon='log-in'
 					title='Division にログインしてください'
@@ -1920,7 +1941,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 				behavior={Platform.OS === 'ios' ? 'padding' : undefined}
 				keyboardVerticalOffset={insets.top}
 			>
-				<ScreenHeader title='クラウド' />
+				<ScreenHeader title={headerTitle ?? 'クラウド'} />
 
 				{error ? <ErrorBanner message={error} onRetry={() => void loadList()} /> : null}
 				{launchError ? <ErrorBanner message={launchError} onRetry={() => { setLaunchError(null); setOptionsOpen(true); }} /> : null}
@@ -1932,7 +1953,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 					keyboardDismissMode='on-drag'
 					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onPull()} tintColor={colors.fgMuted} />}
 				>
-					{onOpenPage ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
+					{onOpenPage && headerTitle === undefined ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
 
 					{launching > 0 ? (
 						<View style={styles.launching} accessibilityLiveRegion='polite'>
@@ -2006,6 +2027,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId }: {
 					onLaunch={repo => void launch(repo)}
 					optionsOpen={optionsOpen}
 					onOptionsOpen={setOptionsOpen}
+					costLabel={cost.known > 0 ? formatUsdCompact(cost.totalUsd) : null}
 				/>
 			</KeyboardAvoidingView>
 		</Screen>
@@ -2087,7 +2109,7 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.sm,
 	},
 	composerBox: {
-		borderRadius: radius.lg + 4,
+		borderRadius: 26,
 		borderWidth: 1,
 		borderColor: colors.borderStrong,
 		backgroundColor: colors.bgElevated,
