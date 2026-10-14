@@ -37,6 +37,7 @@ import {
 	SectionTitle,
 	SegmentedControl,
 	Toggle,
+	confirmAction,
 	useToast,
 } from '../components/ui';
 import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
@@ -74,11 +75,13 @@ import {
 	formatUsd,
 	formatUsdCompact,
 	formatUsdShort,
+	isAutoChargeValid,
 	isInputTokensValid,
 	quoteTotalUsd,
 	quoteViolations,
 	remainingRuns,
 	sumHistory,
+	validateAutoCharge,
 	validatePolicy,
 } from '../lib/tuning';
 import { OpenPage } from '../navigation';
@@ -388,6 +391,15 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 
 	const saveAutoCharge = useCallback(async () => {
 		if (!session) return;
+		// 残高から自動で金額が動く更新なので、内容を提示してから確定する。
+		const ok = await confirmAction({
+			title: '自動チャージを保存しますか？',
+			message: autoChargeDraft.enabled
+				? `残高が $${autoChargeDraft.threshold || '0'} を下回ったら、$${autoChargeDraft.amount || '0'} を自動でチャージします。`
+				: '自動チャージを無効にします。',
+			confirmLabel: '保存',
+		});
+		if (!ok) return;
 		setSavingAutoCharge(true);
 		setError(null);
 		try {

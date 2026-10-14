@@ -2,7 +2,9 @@
  * ホーム。ログインしたら最初に出る画面で、見た目は ChatGPT のアプリに合わせている。
  *
  *   - 左のナビゲーションレール … Division のプロジェクト管理・カンバン・UI (エディタ操作)・ソーシャルを開く。
- *                                PC 接続が要るものは鍵の印にして、押すと案内を出す。下端はアカウント
+ *                                PC 接続が要るものは鍵の印にして、押すと案内を出す。下端はアカウント。
+ *                                上端の « / » で畳める (畳むとアイコンだけになり、入力欄が全幅になる)。
+ *                                Division のプロジェクト管理は Division API 直結なので、PC 未接続でも開ける
  *   - 見出しのモード切り替え     … ChatGPT のモデル選択のように、題名を押して
  *                                「クラウドエージェント」と「リモートコントロール」を切り替える
  *   - 本文                     … クラウドエージェントなら起動の入力欄とセッション一覧、
@@ -60,11 +62,12 @@ const ModeSwitcher = ({ mode, subtitle, onPress }: { mode: HomeMode; subtitle?: 
 };
 
 /** レールの 1 項目。アイコンの下に短い名前を出す (Material のナビゲーションレールと同じ形)。 */
-const RailItem = ({ icon, label, title, locked, onPress }: {
+const RailItem = ({ icon, label, title, locked, collapsed, onPress }: {
 	icon: IconName;
 	label: string;
 	title: string;
 	locked?: boolean;
+	collapsed?: boolean;
 	onPress: () => void;
 }) => (
 	<Pressable
@@ -84,24 +87,40 @@ const RailItem = ({ icon, label, title, locked, onPress }: {
 						</View>
 					) : null}
 				</View>
-				<Text style={[styles.railLabel, locked && styles.railLabelLocked]} numberOfLines={1}>{label}</Text>
+				{!collapsed ? (
+					<Text style={[styles.railLabel, locked && styles.railLabelLocked]} numberOfLines={1}>{label}</Text>
+				) : null}
 			</>
 		)}
 	</Pressable>
 );
 
-const NavigationRail = ({ connected, email, onOpenPage, onAccount }: {
+const NavigationRail = ({ connected, email, collapsed, onToggleCollapsed, onOpenPage, onAccount }: {
 	connected: boolean;
 	email: string;
+	collapsed: boolean;
+	onToggleCollapsed: () => void;
 	onOpenPage: (page: PageKey) => void;
 	onAccount: () => void;
 }) => {
 	const toast = useToast();
 	return (
-		<View style={styles.rail}>
-			<View style={styles.railLogo}>
-				<Image source={require('../../assets/logo.png')} style={styles.railLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
-			</View>
+		<View style={[styles.rail, collapsed && styles.railCollapsed]}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityLabel={collapsed ? 'ナビゲーションレールを開く' : 'ナビゲーションレールを畳む'}
+				accessibilityState={{ expanded: !collapsed }}
+				hitSlop={6}
+				onPress={onToggleCollapsed}
+				style={({ pressed }) => [styles.railToggle, pressed && styles.railIconPressed]}
+			>
+				<Icon name={collapsed ? 'chevrons-right' : 'chevrons-left'} size={18} color={colors.fgMuted} />
+			</Pressable>
+			{!collapsed ? (
+				<View style={styles.railLogo}>
+					<Image source={require('../../assets/logo.png')} style={styles.railLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
+				</View>
+			) : null}
 			<ScrollView style={styles.flex} contentContainerStyle={styles.railItems} showsVerticalScrollIndicator={false}>
 				{RAIL_PAGES.map(page => {
 					const enabled = canOpenPage(page.key, connected);
@@ -112,6 +131,7 @@ const NavigationRail = ({ connected, email, onOpenPage, onAccount }: {
 							label={page.label}
 							title={page.title}
 							locked={!enabled}
+							collapsed={collapsed}
 							onPress={() => (enabled ? onOpenPage(page.key) : toast.show(`${page.title}は PC に接続すると使えます`, 'info'))}
 						/>
 					);
@@ -164,6 +184,8 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 	const { connection, snapshot, disconnect } = useApp();
 	const { session, logout } = useDivisionAuth();
 	const [sheet, setSheet] = useState<'mode' | 'account' | null>(null);
+	// ナビゲーションレールの折りたたみ。スマートフォンでは畳むと入力欄が全幅になる。
+	const [railCollapsed, setRailCollapsed] = useState(false);
 	const connected = !!connection;
 
 	const onLogout = useCallback(async () => {
@@ -204,6 +226,8 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 			<NavigationRail
 				connected={connected}
 				email={session.email}
+				collapsed={railCollapsed}
+				onToggleCollapsed={() => setRailCollapsed(c => !c)}
 				onOpenPage={onOpenPage}
 				onAccount={() => setSheet('account')}
 			/>
@@ -245,6 +269,8 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 };
 
 const RAIL_WIDTH = 68;
+/** 畳んだときの幅 (アイコンだけ)。 */
+const RAIL_WIDTH_COLLAPSED = 56;
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
@@ -261,10 +287,19 @@ const styles = StyleSheet.create({
 		borderRightWidth: StyleSheet.hairlineWidth,
 		borderRightColor: colors.border,
 	},
+	railCollapsed: { width: RAIL_WIDTH_COLLAPSED },
+	railToggle: {
+		width: 40,
+		height: 32,
+		borderRadius: 16,
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: spacing.xs,
+	},
 	railLogo: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
 	railLogoImage: { width: 28, height: 28 },
 	railItems: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
-	railItem: { width: RAIL_WIDTH, alignItems: 'center', gap: 4, paddingVertical: 2 },
+	railItem: { width: '100%', alignItems: 'center', gap: 4, paddingVertical: 2 },
 	railIcon: {
 		width: 48,
 		height: 32,
