@@ -6,6 +6,7 @@ import {
 	ActivityIndicator,
 	Alert,
 	Animated,
+	BackHandler,
 	Modal,
 	Platform,
 	Pressable,
@@ -137,7 +138,7 @@ export const Button = ({ title, onPress, variant = 'primary', size = 'md', icon,
 };
 
 /** アイコンだけのボタン。見た目が小さくても押せる範囲は 44pt 確保する。 */
-export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.fgMuted, badge, active, disabled }: {
+export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.fgMuted, badge, active, disabled, expanded }: {
 	icon: IconName;
 	onPress: () => void;
 	accessibilityLabel: string;
@@ -146,11 +147,13 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 	badge?: number;
 	active?: boolean;
 	disabled?: boolean;
+	/** ドロワーなど開閉するもののボタン。開いているなら true。 */
+	expanded?: boolean;
 }) => (
 	<Pressable
 		accessibilityRole='button'
 		accessibilityLabel={badge ? `${accessibilityLabel} (${badge})` : accessibilityLabel}
-		accessibilityState={{ disabled: !!disabled, selected: active }}
+		accessibilityState={{ disabled: !!disabled, selected: active, expanded }}
 		disabled={disabled}
 		hitSlop={4}
 		onPress={onPress}
@@ -459,6 +462,44 @@ export const ToastHost = () => {
 };
 
 // ---------------------------------------------------------------------------
+// ドロワー (Modal)
+// ---------------------------------------------------------------------------
+
+/**
+ * 画面の左端から開くナビゲーションドロワー。
+ * open が false のときは何も描かないので、閉じているときはアイコンもラベルも
+ * 完全に非表示になり、レールのような幅・余白・不可視の操作領域も残らない (本文は全幅)。
+ * 背景 (スクリム) のタップ・右上の「閉じる」・Android の戻るキーで閉じられる。
+ * 絶対配置で画面を覆うので、使う側のルートに flex: 1 があるだけで動く (Modal には頼らない)。
+ */
+export const Drawer = ({ open, onClose, children }: {
+	open: boolean;
+	onClose: () => void;
+	children: React.ReactNode;
+}) => {
+	// Android の戻るキーでも閉じられるようにする (開いているときだけ登録)。
+	useEffect(() => {
+		if (!open) return;
+		const sub = BackHandler.addEventListener('hardwareBackPress', () => { onClose(); return true; });
+		return () => sub.remove();
+	}, [open, onClose]);
+
+	if (!open) return null;
+	return (
+		<View style={styles.drawerOverlay}>
+			<SafeAreaView style={styles.drawerPanel} edges={['top', 'bottom']}>
+				<View style={styles.drawerHeader}>
+					<Text accessibilityRole='header' style={styles.drawerTitle}>メニュー</Text>
+					<IconButton icon='x' accessibilityLabel='メニューを閉じる' onPress={onClose} />
+				</View>
+				<View style={{ flex: 1 }}>{children}</View>
+			</SafeAreaView>
+			<Pressable accessibilityLabel='メニューを閉じる' onPress={onClose} style={styles.drawerScrim} />
+		</View>
+	);
+};
+
+// ---------------------------------------------------------------------------
 // シート (Modal)
 // ---------------------------------------------------------------------------
 
@@ -745,6 +786,35 @@ const styles = StyleSheet.create({
 	},
 	sheetTitle: { flex: 1, gap: 2, paddingVertical: spacing.xs },
 	sheetBody: { flex: 1 },
+	// ドロワーは本文を横から覆う。スクリム (半透明の地) のタップでも閉じられる。
+	drawerOverlay: {
+		position: 'absolute',
+		top: 0,
+		right: 0,
+		bottom: 0,
+		left: 0,
+		flexDirection: 'row',
+		zIndex: 10,
+	},
+	drawerPanel: {
+		width: 300,
+		maxWidth: '85%',
+		backgroundColor: colors.bgSidebar,
+		borderRightWidth: StyleSheet.hairlineWidth,
+		borderRightColor: colors.border,
+	},
+	drawerHeader: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		paddingLeft: spacing.lg,
+		paddingRight: spacing.sm,
+		paddingVertical: spacing.sm,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.borderStrong,
+	},
+	drawerTitle: { flex: 1, color: colors.fgStrong, fontSize: fontSize.md, fontWeight: '600' },
+	drawerScrim: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)' },
 	chipRow: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',

@@ -1678,7 +1678,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 	initialSessionId?: string | null;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは上の段のショートカットを出さない
-	 * (ページはホームのナビゲーションレールに、コストは入力欄にある)。
+	 * (ページはホームのナビゲーションドロワーに、コストは入力欄にある)。
 	 */
 	headerTitle?: React.ReactNode;
 } = {}) => {

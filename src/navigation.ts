@@ -31,10 +31,10 @@ export const PAGES: PageEntry[] = [
 ];
 
 /**
- * ホームのナビゲーションレールに並べるページ。コストはホームの入力欄から、クラウドはホームそのもので扱うので置かない。
- * label はレールのアイコンの下に出す短い名前、title は長押しや読み上げで使う名前。
+ * ホームのナビゲーションドロワーに並べるページ。コストはホームの入力欄から、クラウドはホームそのもので扱うので置かない。
+ * title はドロワーの行に出す名前 (読み上げにも使う)。label は短い名前で、ドロワーでは行に title を出す。
  */
-export const RAIL_PAGES: (PageEntry & { title: string })[] = [
+export const DRAWER_PAGES: (PageEntry & { title: string })[] = [
 	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: false },
 	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
 	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', icon: 'sliders', needsConnection: true },
