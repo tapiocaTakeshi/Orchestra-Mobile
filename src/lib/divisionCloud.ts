@@ -252,7 +252,7 @@ const accessTokenFor = async (session: DivisionSession): Promise<string> => {
 };
 
 export type RequestOptions = {
-	method?: 'GET' | 'POST';
+	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
 	body?: unknown;
 	timeoutMs?: number;
 	endpoint?: string;
@@ -278,7 +278,7 @@ export const divisionApiRequest = async <T>(session: DivisionSession, path: stri
 		response = await fetch(`${base}${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-			...(method === 'POST' ? { body: JSON.stringify(options.body ?? {}) } : {}),
+			...(method !== 'GET' ? { body: JSON.stringify(options.body ?? {}) } : {}),
 			signal: controller.signal,
 		});
 	} catch (e) {

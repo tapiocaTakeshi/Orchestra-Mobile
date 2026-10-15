@@ -25,6 +25,7 @@ import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
 import { QuickActionsScreen } from './src/screens/QuickActionsScreen';
+import { McpScreen } from './src/screens/McpScreen';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { SocialScreen } from './src/screens/SocialScreen';
 import { TuningScreen } from './src/screens/TuningScreen';
@@ -37,6 +38,7 @@ const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOp
 		case 'kanban': return <KanbanScreen onOpenPage={onOpenPage} />;
 		case 'projects': return <ProjectsScreen />;
 		case 'cloud': return <CloudAgentsScreen onOpenPage={onOpenPage} initialSessionId={cloudSessionId} />;
+		case 'mcp': return <McpScreen />;
 		case 'social': return <SocialScreen />;
 		case 'tuning': return <TuningScreen onOpenPage={onOpenPage} />;
 		case 'actions': return <QuickActionsScreen />;
