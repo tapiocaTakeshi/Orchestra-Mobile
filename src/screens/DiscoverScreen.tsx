@@ -85,7 +85,7 @@ export const DiscoverScreen = ({
 	onOpenPage: (page: PageKey) => void;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときはページへの導線とアカウントを出さない
-	 * (どちらもホームのナビゲーションレールにある)。
+	 * (どちらもホームのナビゲーションドロワーにある)。
 	 */
 	headerTitle?: React.ReactNode;
 }) => {
@@ -216,7 +216,7 @@ export const DiscoverScreen = ({
 					</View>
 				) : null}
 
-				{/* アカウント (ホームではレールの下端にある) */}
+				{/* アカウント (ホームではドロワーの下端にある) */}
 				{inHome ? null : <View style={styles.section}>
 					<SectionTitle>アカウント</SectionTitle>
 					<View style={styles.group}>

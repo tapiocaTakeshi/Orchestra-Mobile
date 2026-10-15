@@ -74,7 +74,8 @@
       "^react-native$": "react-native-web",
       "^@expo/vector-icons/Feather$": "<rootDir>/src/__mocks__/feather.tsx",
       "^react-native-safe-area-context$": "<rootDir>/src/__mocks__/safeArea.tsx",
-      "^expo-notifications$": "<rootDir>/src/__mocks__/expo-notifications.ts"
+      "^expo-notifications$": "<rootDir>/src/__mocks__/expo-notifications.ts",
+      "\\.(png|jpe?g|gif|webp|svg)$": "<rootDir>/src/__mocks__/imageAsset.ts"
     }
   }
 }

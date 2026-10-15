@@ -127,7 +127,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	onOpenPage: (page: PageKey) => void;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは左上のメニューの代わりに
-	 * 右上の履歴ボタンを置き、メニューにはページを並べない (ページはホームのナビゲーションレールにある)。
+	 * 右上の履歴ボタンを置き、メニューにはページを並べない (ページはホームのナビゲーションドロワーにある)。
 	 */
 	headerTitle?: React.ReactNode;
 }) => {
