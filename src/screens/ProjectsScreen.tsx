@@ -52,11 +52,13 @@ import { colors, fontSize, radius, spacing } from '../theme';
 const AgentRow = ({
 	assignment,
 	providers,
+	disabled,
 	onChange,
 	onRemove,
 }: {
 	assignment: RoleAssignment;
 	providers: ProviderModels[];
+	disabled: boolean;
 	onChange: (next: RoleAssignment) => void;
 	onRemove: () => void;
 }) => {
@@ -66,8 +68,9 @@ const AgentRow = ({
 		<View style={styles.agentRow}>
 			<Pressable
 				accessibilityRole='button'
-				accessibilityState={{ expanded: open }}
+				accessibilityState={{ expanded: open, disabled }}
 				accessibilityLabel={`${roleTitle(assignment.role)}、${assignment.model || 'モデル未設定'}。モデルを変更`}
+				disabled={disabled}
 				onPress={() => setOpen(o => !o)}
 				style={styles.agentHeader}
 			>
@@ -81,6 +84,7 @@ const AgentRow = ({
 					icon='x'
 					color={colors.fgFaint}
 					accessibilityLabel={`${roleTitle(assignment.role)} の役割を外す`}
+					disabled={disabled}
 					onPress={onRemove}
 				/>
 			</Pressable>
@@ -98,7 +102,8 @@ const AgentRow = ({
 										<Pressable
 											key={`${p.provider}:${model}`}
 											accessibilityRole='button'
-											accessibilityState={{ selected }}
+											accessibilityState={{ selected, disabled }}
+											disabled={disabled}
 											onPress={() => {
 												onChange({ ...assignment, provider: p.provider, model });
 												setOpen(false);
@@ -145,18 +150,20 @@ const ProjectEditor = ({
 	}, [project.projectId]);
 
 	const save = useCallback(async () => {
+		if (saving) return;
 		setSaving(true);
 		try {
 			await onSave(name, agents);
 		} finally {
 			setSaving(false);
 		}
-	}, [name, agents, onSave]);
+	}, [name, agents, onSave, saving]);
 
 	const dirty = name !== project.name || JSON.stringify(agents) !== JSON.stringify(project.agents);
 
 	/** 保存せずに閉じると編集が消えるので、変更があるときだけ確かめる。 */
 	const close = useCallback(async () => {
+		if (saving) return;
 		if (dirty) {
 			const ok = await confirmAction({
 				title: '変更を破棄しますか？',
@@ -167,9 +174,10 @@ const ProjectEditor = ({
 			if (!ok) return;
 		}
 		onClose();
-	}, [dirty, onClose]);
+	}, [dirty, onClose, saving]);
 
 	const remove = useCallback(async () => {
+		if (saving) return;
 		const ok = await confirmAction({
 			title: 'プロジェクトを削除しますか？',
 			message: `「${project.name}」と役割の割り当てを削除します。元に戻せません。`,
@@ -177,7 +185,7 @@ const ProjectEditor = ({
 			destructive: true,
 		});
 		if (ok) await onDelete();
-	}, [project.name, onDelete]);
+	}, [project.name, onDelete, saving]);
 
 	return (
 		<Sheet
@@ -191,7 +199,7 @@ const ProjectEditor = ({
 					<Card>
 						<SectionTitle>基本情報</SectionTitle>
 						<Muted>プロジェクト名</Muted>
-						<Input value={name} onChangeText={setName} placeholder='プロジェクト名' />
+						<Input value={name} onChangeText={setName} placeholder='プロジェクト名' editable={!saving} />
 						<Muted>プロジェクト ID</Muted>
 						<Body>{project.projectId || '(未設定)'}</Body>
 					</Card>
@@ -205,6 +213,7 @@ const ProjectEditor = ({
 								key={`${a.role}-${idx}`}
 								assignment={a}
 								providers={providers}
+								disabled={saving}
 								onChange={next => setAgents(prev => prev.map((cur, i) => (i === idx ? next : cur)))}
 								onRemove={() => setAgents(prev => prev.filter((_, i) => i !== idx))}
 							/>
@@ -220,6 +229,8 @@ const ProjectEditor = ({
 									key={role}
 									accessibilityRole='button'
 									accessibilityLabel={`${roleTitle(role)} を追加`}
+									accessibilityState={{ disabled: saving }}
+									disabled={saving}
 									onPress={() => setAgents(prev => [...prev, {
 										role,
 										provider: providers[0]?.provider ?? '',
@@ -238,12 +249,13 @@ const ProjectEditor = ({
 								onChangeText={setCustomRole}
 								placeholder='その他の役割 (英小文字)'
 								autoCapitalize='none'
+								editable={!saving}
 								style={styles.flex}
 							/>
 							<Button
 								title='追加'
 								variant='secondary'
-								disabled={!customRole.trim() || agents.some(a => a.role === customRole.trim())}
+								disabled={saving || !customRole.trim() || agents.some(a => a.role === customRole.trim())}
 								onPress={() => {
 									const role = customRole.trim();
 									setCustomRole('');
@@ -258,7 +270,7 @@ const ProjectEditor = ({
 					</Card>
 
 					<Button title='保存' icon='check' onPress={() => void save()} loading={saving} disabled={!dirty || !name.trim()} />
-					<Button title='このプロジェクトを削除' icon='trash-2' variant='ghost' onPress={() => void remove()} style={styles.centered} />
+					<Button title='このプロジェクトを削除' icon='trash-2' variant='ghost' disabled={saving} onPress={() => void remove()} style={styles.centered} />
 				</ScrollView>
 			</KeyboardAvoidingView>
 		</Sheet>
