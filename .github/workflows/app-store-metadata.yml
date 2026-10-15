@@ -13,3 +13,7 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/app-store-metadata.test.mjs
+      - name: Confirm Issuer ID variable
+        env:
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+        run: test -n "$ASC_ISSUER_ID"
