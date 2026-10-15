@@ -1,0 +1,12 @@
+name: App Store Metadata
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --version
