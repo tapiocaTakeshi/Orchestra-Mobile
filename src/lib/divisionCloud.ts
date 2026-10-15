@@ -96,7 +96,7 @@ export type CloudSession = {
  *   off     … 目標を立てずに 1 回だけ作業する
  */
 export type CloudGoalLoopMode = 'auto' | 'confirm' | 'off';
-export const DEFAULT_GOAL_LOOP: CloudGoalLoopMode = 'auto';
+export const DEFAULT_GOAL_LOOP: CloudGoalLoopMode = 'off';
 export const isGoalLoopMode = (v: unknown): v is CloudGoalLoopMode => v === 'auto' || v === 'confirm' || v === 'off';
 export const GOAL_LOOP_LABELS: Record<CloudGoalLoopMode, string> = { auto: '自動', confirm: '毎回確認', off: 'オフ' };
 export const GOAL_LOOP_HINTS: Record<CloudGoalLoopMode, string> = {

@@ -16,7 +16,9 @@ import {
 	MAX_SAVED_CLOUD_REPOS,
 	clearLastCloudRepo,
 	loadCloudRepos,
+	loadLastCloudGoalLoop,
 	loadLastCloudRepo,
+	saveLastCloudGoalLoop,
 	removeCloudRepo,
 	saveCloudRepo,
 	saveLastCloudRepo,
@@ -149,5 +151,40 @@ describe('clearLastCloudRepo', () => {
 		await expect(saveCloudRepo('u1', { repo: repo('o/a'), branch: '' })).resolves.toBeUndefined();
 		(AsyncStorage.multiRemove as jest.Mock).mockRejectedValueOnce(new Error('x'));
 		await expect(clearLastCloudRepo()).resolves.toBeUndefined();
+	});
+});
+
+describe('last cloud goal loop', () => {
+	const KEY = 'orchestra.cloudLastGoalLoop.v1';
+
+	it('defaults to off', () => {
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { DEFAULT_GOAL_LOOP } = require('../../lib/divisionCloud') as typeof import('../../lib/divisionCloud');
+		expect(DEFAULT_GOAL_LOOP).toBe('off');
+	});
+
+	it('returns null when nothing is saved, so the default (off) stays', async () => {
+		expect(await loadLastCloudGoalLoop('u1')).toBeNull();
+	});
+
+	it('respects a saved choice for the same user', async () => {
+		await saveLastCloudGoalLoop('u1', 'auto');
+		expect(await loadLastCloudGoalLoop('u1')).toBe('auto');
+		await saveLastCloudGoalLoop('u1', 'confirm');
+		expect(await loadLastCloudGoalLoop('u1')).toBe('confirm');
+		await saveLastCloudGoalLoop('u1', 'off');
+		expect(await loadLastCloudGoalLoop('u1')).toBe('off');
+	});
+
+	it('does not leak to another user', async () => {
+		await saveLastCloudGoalLoop('u1', 'auto');
+		expect(await loadLastCloudGoalLoop('u2')).toBeNull();
+	});
+
+	it('ignores unknown or corrupt values', async () => {
+		mockStore.set(KEY, JSON.stringify({ userId: 'u1', mode: 'always' }));
+		expect(await loadLastCloudGoalLoop('u1')).toBeNull();
+		mockStore.set(KEY, '{broken');
+		expect(await loadLastCloudGoalLoop('u1')).toBeNull();
 	});
 });
