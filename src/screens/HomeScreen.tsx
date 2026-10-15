@@ -1,22 +1,26 @@
 /**
  * ホーム。ログインしたら最初に出る画面で、見た目は ChatGPT のアプリに合わせている。
  *
- *   - 左のナビゲーションレール … Division のプロジェクト管理・カンバン・UI (エディタ操作)・ソーシャルを開く。
- *                                PC 接続が要るものは鍵の印にして、押すと案内を出す。下端はアカウント
- *   - 見出しのモード切り替え     … ChatGPT のモデル選択のように、題名を押して
- *                                「クラウドエージェント」と「リモートコントロール」を切り替える
- *   - 本文                     … クラウドエージェントなら起動の入力欄とセッション一覧、
- *                                リモートコントロールなら PC のチャット (未接続なら接続できる PC の一覧)
- *   - コスト                   … どちらのモードでも入力欄の「コスト」から、書いている指示の見積もりと方針を開く
+ *   - ナビゲーションドロワー … Division のプロジェクト管理・カンバン・UI (エディタ操作)・ソーシャルを開く。
+ *                             見出し左のメニューボタン (☰) で開き、中の ‹ や外側の暗い部分を押すと閉じる。
+ *                             閉じている間はドロワーを描画しないので、アイコンも幅も残らず本文が全幅になる。
+ *                             PC 接続が要るものは鍵の印にして、押すと案内を出す。下端はアカウント。
+ *                             Division のプロジェクト管理は Division API 直結なので、PC 未接続でも開ける
+ *   - 見出しのモード切り替え   … ChatGPT のモデル選択のように、題名を押して
+ *                               「クラウドエージェント」と「リモートコントロール」を切り替える
+ *   - 本文                   … クラウドエージェントなら起動の入力欄とセッション一覧、
+ *                              リモートコントロールなら PC のチャット (未接続なら接続できる PC の一覧)
+ *   - コスト                 … どちらのモードでも入力欄の「コスト」から、書いている指示の見積もりと方針を開く
  */
 
 import React, { useCallback, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { CloudAgentsScreen } from './CloudAgentsScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { RemoteScreen } from './RemoteScreen';
-import { Icon, IconName, Muted, Sheet, confirmAction, useToast } from '../components/ui';
+import { Icon, IconButton, IconName, Muted, Sheet, ToastHost, confirmAction, useToast } from '../components/ui';
 import { PageKey, RAIL_PAGES, canOpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
@@ -59,8 +63,8 @@ const ModeSwitcher = ({ mode, subtitle, onPress }: { mode: HomeMode; subtitle?: 
 	);
 };
 
-/** レールの 1 項目。アイコンの下に短い名前を出す (Material のナビゲーションレールと同じ形)。 */
-const RailItem = ({ icon, label, title, locked, onPress }: {
+/** ドロワーの 1 項目。アイコンと名前を横に並べた 1 行で、押すとページを開く。 */
+const DrawerItem = ({ icon, label, title, locked, onPress }: {
 	icon: IconName;
 	label: string;
 	title: string;
@@ -72,60 +76,85 @@ const RailItem = ({ icon, label, title, locked, onPress }: {
 		accessibilityLabel={locked ? `${title}。PC に接続すると使えます` : `${title}を開く`}
 		accessibilityState={{ disabled: !!locked }}
 		onPress={onPress}
-		style={styles.railItem}
+		style={({ pressed }) => [styles.drawerItem, pressed && styles.pressedBg]}
 	>
-		{({ pressed }) => (
-			<>
-				<View style={[styles.railIcon, pressed && styles.railIconPressed]}>
-					<Icon name={icon} size={20} color={locked ? colors.fgFaint : colors.fg} />
-					{locked ? (
-						<View style={styles.railLock}>
-							<Icon name='lock' size={9} color={colors.fgMuted} />
-						</View>
-					) : null}
+		<View style={styles.drawerItemIcon}>
+			<Icon name={icon} size={20} color={locked ? colors.fgFaint : colors.fg} />
+			{locked ? (
+				<View style={styles.drawerLock}>
+					<Icon name='lock' size={9} color={colors.fgMuted} />
 				</View>
-				<Text style={[styles.railLabel, locked && styles.railLabelLocked]} numberOfLines={1}>{label}</Text>
-			</>
-		)}
+			) : null}
+		</View>
+		<View style={styles.flex}>
+			<Text style={[styles.drawerItemTitle, locked && styles.drawerItemLocked]} numberOfLines={1}>{title}</Text>
+			{label !== title ? <Muted numberOfLines={1}>{label}</Muted> : null}
+		</View>
+		{locked ? <Muted>PC で有効</Muted> : <Icon name='chevron-right' size={16} color={colors.fgFaint} />}
 	</Pressable>
 );
 
-const NavigationRail = ({ connected, email, onOpenPage, onAccount }: {
+/**
+ * 開閉できるナビゲーションのドロワー。Modal で本文の上に被せ、閉じるとき (onClose でアンマウント)
+ * 画面にはメニューボタン以外何も残さない。外側の暗い部分・中の ‹ でも閉じられる。
+ */
+const NavigationDrawer = ({ connected, email, onClose, onOpenPage, onAccount }: {
 	connected: boolean;
 	email: string;
+	onClose: () => void;
 	onOpenPage: (page: PageKey) => void;
 	onAccount: () => void;
 }) => {
 	const toast = useToast();
 	return (
-		<View style={styles.rail}>
-			<View style={styles.railLogo}>
-				<Image source={require('../../assets/logo.png')} style={styles.railLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
+		<Modal visible transparent animationType='fade' onRequestClose={onClose}>
+			<View style={styles.drawerOverlay}>
+				{/* 透明な Modal は全画面なので、ノッチやホームバーに掛からないよう上下と左の安全領域をとる */}
+				<SafeAreaView style={styles.drawer} edges={['top', 'bottom', 'left']}>
+					<View style={styles.drawerHeader}>
+						<View style={styles.drawerLogo}>
+							<Image source={require('../../assets/logo.png')} style={styles.drawerLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
+						</View>
+						<IconButton icon='chevron-left' accessibilityLabel='ナビゲーションを閉じる' onPress={onClose} />
+					</View>
+					<ScrollView style={styles.flex} contentContainerStyle={styles.drawerItems} showsVerticalScrollIndicator={false}>
+						{RAIL_PAGES.map(page => {
+							const enabled = canOpenPage(page.key, connected);
+							return (
+								<DrawerItem
+									key={page.key}
+									icon={page.icon}
+									label={page.label}
+									title={page.title}
+									locked={!enabled}
+									onPress={() => (enabled ? onOpenPage(page.key) : toast.show(`${page.title}は PC に接続すると使えます`, 'info'))}
+								/>
+							);
+						})}
+					</ScrollView>
+					<Pressable
+						accessibilityRole='button'
+						accessibilityLabel={`アカウント ${email}`}
+						onPress={onAccount}
+						style={({ pressed }) => [styles.drawerAccount, pressed && styles.pressedBg]}
+					>
+						<View style={styles.avatar}>
+							<Text style={styles.avatarText}>{(email.trim()[0] ?? '?').toUpperCase()}</Text>
+						</View>
+						<Text style={styles.drawerAccountEmail} numberOfLines={1}>{email}</Text>
+					</Pressable>
+				</SafeAreaView>
+				{/* ドロワーの外側。押すと閉じる。ラベルを付けて操作対象であることを明確にする。 */}
+				<Pressable
+					accessibilityRole='button'
+					accessibilityLabel='ナビゲーションを閉じる'
+					onPress={onClose}
+					style={styles.drawerScrim}
+				/>
+				{/* Modal は別レイヤーに描かれるので、ロック項目の案内が隠れないようここにもトーストを置く */}
+				<ToastHost />
 			</View>
-			<ScrollView style={styles.flex} contentContainerStyle={styles.railItems} showsVerticalScrollIndicator={false}>
-				{RAIL_PAGES.map(page => {
-					const enabled = canOpenPage(page.key, connected);
-					return (
-						<RailItem
-							key={page.key}
-							icon={page.icon}
-							label={page.label}
-							title={page.title}
-							locked={!enabled}
-							onPress={() => (enabled ? onOpenPage(page.key) : toast.show(`${page.title}は PC に接続すると使えます`, 'info'))}
-						/>
-					);
-				})}
-			</ScrollView>
-			<Pressable
-				accessibilityRole='button'
-				accessibilityLabel={`アカウント ${email}`}
-				onPress={onAccount}
-				style={({ pressed }) => [styles.avatar, pressed && styles.pressed]}
-			>
-				<Text style={styles.avatarText}>{(email.trim()[0] ?? '?').toUpperCase()}</Text>
-			</Pressable>
-		</View>
+		</Modal>
 	);
 };
 
@@ -164,7 +193,20 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 	const { connection, snapshot, disconnect } = useApp();
 	const { session, logout } = useDivisionAuth();
 	const [sheet, setSheet] = useState<'mode' | 'account' | null>(null);
+	// ナビゲーションのドロワー。閉じている (初期値) あいだは描画自体をしないので、
+	// アイコンも幅も余白も残らず、本文が使える幅いっぱいに広がる。
+	const [drawerOpen, setDrawerOpen] = useState(false);
 	const connected = !!connection;
+
+	// ページを開くときはドロワーを先に閉じてから遷移する。アカウントのシートもドロワーの上に出ないよう閉じてから開く。
+	const openPage = useCallback((page: PageKey) => {
+		setDrawerOpen(false);
+		onOpenPage(page);
+	}, [onOpenPage]);
+	const openAccount = useCallback(() => {
+		setDrawerOpen(false);
+		setSheet('account');
+	}, []);
 
 	const onLogout = useCallback(async () => {
 		setSheet(null);
@@ -189,25 +231,33 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 			onPress={() => setSheet('mode')}
 		/>
 	);
+	// ドロワーが閉じていても開けるように、メニューボタンは本文の見出し側に置く。
+	const menuButton = (
+		<IconButton icon='menu' accessibilityLabel='メニューを開く' onPress={() => setDrawerOpen(true)} />
+	);
 
 	let content: React.ReactNode;
 	if (mode === 'cloud') {
-		content = <CloudAgentsScreen headerTitle={switcher} onOpenPage={page => onOpenPage(page)} />;
+		content = <CloudAgentsScreen headerTitle={switcher} headerLeft={menuButton} onOpenPage={page => onOpenPage(page)} />;
 	} else if (connected) {
-		content = <RemoteScreen headerTitle={switcher} onOpenPage={onOpenPage} />;
+		content = <RemoteScreen headerTitle={switcher} headerLeft={menuButton} onOpenPage={onOpenPage} />;
 	} else {
-		content = <DiscoverScreen headerTitle={switcher} onOpenPage={onOpenPage} />;
+		content = <DiscoverScreen headerTitle={switcher} headerLeft={menuButton} onOpenPage={onOpenPage} />;
 	}
 
 	return (
 		<View style={styles.root}>
-			<NavigationRail
-				connected={connected}
-				email={session.email}
-				onOpenPage={onOpenPage}
-				onAccount={() => setSheet('account')}
-			/>
 			<View style={styles.main}>{content}</View>
+
+			{drawerOpen ? (
+				<NavigationDrawer
+					connected={connected}
+					email={session.email}
+					onClose={() => setDrawerOpen(false)}
+					onOpenPage={openPage}
+					onAccount={openAccount}
+				/>
+			) : null}
 
 			{sheet === 'mode' ? (
 				<Sheet title='始める' onClose={() => setSheet(null)}>
@@ -244,39 +294,51 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 	);
 };
 
-const RAIL_WIDTH = 68;
+/** ドロワーの幅。細長い表示 (Web) でははみ出さないよう、画面幅の 8 割までにする。 */
+const DRAWER_MAX_WIDTH = 304;
 
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
-	root: { flex: 1, flexDirection: 'row', backgroundColor: colors.bg },
+	root: { flex: 1, backgroundColor: colors.bg },
 	main: { flex: 1, backgroundColor: colors.bg },
 	pressed: { opacity: 0.6 },
+	pressedBg: { backgroundColor: colors.bgHover },
 
-	rail: {
-		width: RAIL_WIDTH,
-		alignItems: 'center',
-		paddingTop: spacing.sm,
-		paddingBottom: spacing.md,
+	drawerOverlay: { flex: 1, flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.5)' },
+	drawer: {
+		width: DRAWER_MAX_WIDTH,
+		maxWidth: '80%',
 		backgroundColor: colors.bgSidebar,
 		borderRightWidth: StyleSheet.hairlineWidth,
 		borderRightColor: colors.border,
 	},
-	railLogo: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
-	railLogoImage: { width: 28, height: 28 },
-	railItems: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
-	railItem: { width: RAIL_WIDTH, alignItems: 'center', gap: 4, paddingVertical: 2 },
-	railIcon: {
-		width: 48,
-		height: 32,
-		borderRadius: 16,
+	drawerScrim: { flex: 1 },
+	drawerHeader: {
+		flexDirection: 'row',
 		alignItems: 'center',
-		justifyContent: 'center',
+		gap: spacing.sm,
+		paddingLeft: spacing.lg,
+		paddingRight: spacing.xs,
+		minHeight: 56,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
 	},
-	railIconPressed: { backgroundColor: colors.bgHover },
-	railLock: {
+	drawerLogo: { flex: 1, alignItems: 'flex-start' },
+	drawerLogoImage: { width: 28, height: 28 },
+	drawerItems: { paddingVertical: spacing.sm, paddingHorizontal: spacing.sm, gap: 2 },
+	drawerItem: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.md,
+		minHeight: 48,
+		paddingHorizontal: spacing.sm,
+		borderRadius: radius.md,
+	},
+	drawerItemIcon: { width: 24, alignItems: 'center', justifyContent: 'center' },
+	drawerLock: {
 		position: 'absolute',
-		right: 6,
-		bottom: 0,
+		right: -4,
+		bottom: -4,
 		width: 14,
 		height: 14,
 		borderRadius: 7,
@@ -284,15 +346,24 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		backgroundColor: colors.bgSidebar,
 	},
-	railLabel: { color: colors.fg, fontSize: 10, fontWeight: '500', maxWidth: RAIL_WIDTH - 4 },
-	railLabelLocked: { color: colors.fgFaint },
+	drawerItemTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '500' },
+	drawerItemLocked: { color: colors.fgFaint },
+	drawerAccount: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.md,
+		paddingHorizontal: spacing.lg,
+		paddingVertical: spacing.md,
+		borderTopWidth: StyleSheet.hairlineWidth,
+		borderTopColor: colors.border,
+	},
+	drawerAccountEmail: { flex: 1, color: colors.fg, fontSize: fontSize.sm },
 	avatar: {
 		width: 34,
 		height: 34,
 		borderRadius: 17,
 		alignItems: 'center',
 		justifyContent: 'center',
-		marginTop: spacing.sm,
 		backgroundColor: colors.bgHover,
 	},
 	avatarText: { color: colors.fgStrong, fontSize: fontSize.xs + 1, fontWeight: '600' },

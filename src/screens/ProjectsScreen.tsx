@@ -40,6 +40,7 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { useCloudProjects } from '../components/CloudProjectPicker';
 import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
 import { publishAssignmentPost } from '../lib/divisionSocial';
 import { defaultPostTitle, toPostAssignments } from '../lib/social';
@@ -342,6 +343,7 @@ const ShareSheet = ({
 
 export const ProjectsScreen = () => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
+	const { session } = useDivisionAuth();
 
 	const toast = useToast();
 	const [providers, setProviders] = useState<ProviderModels[]>([]);
@@ -352,7 +354,11 @@ export const ProjectsScreen = () => {
 	const [newId, setNewId] = useState('');
 	const [syncing, setSyncing] = useState<'pull' | 'push' | null>(null);
 
+	// PC に繋いでいなくても、Division API (Web のディビジョンプロジェクトと同じ一覧) を読んで閲覧できるようにする。
+	const cloudProjects = useCloudProjects(session);
+
 	const division = snapshot?.division ?? null;
+	const connected = !!client && !!snapshot && !!division;
 	const editing = useMemo(
 		() => division?.projects.find(p => p.projectId === editingId) ?? null,
 		[division, editingId],
@@ -389,7 +395,50 @@ export const ProjectsScreen = () => {
 		}
 	}, [invalidate, toast]);
 
-	if (!snapshot || !client || !division) {
+	// PC 未接続: Division API の一覧を読むだけで表示する (編集・同期は PC 接続が必要)。
+	if (!connected) {
+		return (
+			<Screen>
+				<ScreenHeader title='Division' />
+				<ScrollView
+					contentContainerStyle={styles.content}
+					refreshControl={<RefreshControl refreshing={cloudProjects.loading} onRefresh={cloudProjects.reload} tintColor={colors.fgMuted} />}
+				>
+					<Card>
+						<Row>
+							<Icon name='cloud' size={16} color={colors.accentText} />
+							<Body>クラウドのプロジェクト</Body>
+						</Row>
+						<Muted>Web のディビジョンプロジェクトと同じ一覧です。PC に接続しなくても見られます。役割の編集やクラウドとの同期は PC に接続すると使えます。</Muted>
+					</Card>
+
+					{cloudProjects.error ? <ErrorBanner message={cloudProjects.error} onRetry={cloudProjects.reload} style={styles.bannerFlush} /> : null}
+					{cloudProjects.loading && cloudProjects.projects.length === 0 ? (
+						<Loading label='プロジェクトを読み込んでいます…' />
+					) : null}
+					{!cloudProjects.loading && !cloudProjects.error && cloudProjects.projects.length === 0 ? (
+						<EmptyState icon='layers' title='プロジェクトがありません' detail='PC の Orchestra か Web で作って保存すると、ここに表示されます。' />
+					) : null}
+
+					{cloudProjects.projects.map(project => (
+						<Card key={project.id}>
+							<Row style={styles.spread}>
+								<View style={styles.flex}>
+									<Row>
+										<Body numberOfLines={1}>{project.name}</Body>
+										{project.active ? <Badge label='PC で有効' icon='check-circle' color={colors.success} /> : null}
+									</Row>
+									<Muted numberOfLines={1}>{project.id}</Muted>
+								</View>
+							</Row>
+						</Card>
+					))}
+				</ScrollView>
+			</Screen>
+		);
+	}
+
+	if (!division) {
 		return (
 			<Screen>
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}

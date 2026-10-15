@@ -11,14 +11,18 @@ export type PageEntry = {
 	key: PageKey;
 	label: string;
 	icon: IconName;
-	/** PC に繋いでいないと開けないページ (クラウド・共有・コストは Division 直結なので未接続でも開ける) */
+	/**
+	 * PC に繋いでいないと開けないページ。
+	 * クラウド・共有・コストは Division 直結、Division のプロジェクト管理は
+	 * Division API (Web のディビジョンプロジェクトと同じ一覧) を読むので、未接続でも開ける。
+	 */
 	needsConnection: boolean;
 };
 
 /** メニューに並べる順番。 */
 export const PAGES: PageEntry[] = [
 	{ key: 'kanban', label: 'カンバン', icon: 'columns', needsConnection: true },
-	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: true },
+	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: false },
 	{ key: 'cloud', label: 'クラウド', icon: 'cloud', needsConnection: false },
 	{ key: 'social', label: '共有', icon: 'share-2', needsConnection: false },
 	{ key: 'tuning', label: 'コスト', icon: 'bar-chart-2', needsConnection: false },
@@ -31,7 +35,7 @@ export const PAGES: PageEntry[] = [
  * label はレールのアイコンの下に出す短い名前、title は長押しや読み上げで使う名前。
  */
 export const RAIL_PAGES: (PageEntry & { title: string })[] = [
-	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: true },
+	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: false },
 	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
 	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', icon: 'sliders', needsConnection: true },
 	{ key: 'social', label: 'ソーシャル', title: 'ソーシャル (共有)', icon: 'share-2', needsConnection: false },

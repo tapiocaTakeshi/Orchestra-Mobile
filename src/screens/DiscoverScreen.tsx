@@ -80,14 +80,17 @@ const ListRow = ({ icon, title, detail, badge, right, onPress, disabled, accessi
 export const DiscoverScreen = ({
 	onOpenPage,
 	headerTitle,
+	headerLeft,
 }: {
 	/** 未接続でも開けるページ (クラウド・共有・コスト) を開く */
 	onOpenPage: (page: PageKey) => void;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときはページへの導線とアカウントを出さない
-	 * (どちらもホームのナビゲーションレールにある)。
+	 * (どちらもホームのドロワーにある)。
 	 */
 	headerTitle?: React.ReactNode;
+	/** ホームの中に出すときの左端の操作 (ドロワーを開くメニューボタン)。 */
+	headerLeft?: React.ReactNode;
 }) => {
 	const { connect } = useApp();
 	const { session, logout, newSessionIds, dismissNewSession } = useDivisionAuth();
@@ -155,7 +158,7 @@ export const DiscoverScreen = ({
 
 	return (
 		<Screen>
-			<ScreenHeader title={headerTitle ?? '接続先'} />
+			<ScreenHeader title={headerTitle ?? '接続先'} left={headerLeft} />
 			<ScrollView
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={pulling} onRefresh={() => { void onPull(); }} tintColor={colors.fgMuted} />}

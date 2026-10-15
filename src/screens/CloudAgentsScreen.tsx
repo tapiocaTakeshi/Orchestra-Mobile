@@ -1671,16 +1671,18 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 // ページ本体
 // ---------------------------------------------------------------------------
 
-export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }: {
+export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, headerLeft }: {
 	/** 「プロジェクト」「コスト」「カンバン」を開く (App のページの重なりに積む) */
 	onOpenPage?: OpenPage;
 	/** 開いたらすぐ詳細を出すセッション (カンバンの「クラウドで開く」から) */
 	initialSessionId?: string | null;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは上の段のショートカットを出さない
-	 * (ページはホームのナビゲーションレールに、コストは入力欄にある)。
+	 * (ページはホームのドロワーに、コストは入力欄にある)。
 	 */
 	headerTitle?: React.ReactNode;
+	/** ホームの中に出すときの左端の操作 (ドロワーを開くメニューボタン)。 */
+	headerLeft?: React.ReactNode;
 } = {}) => {
 	const { session } = useDivisionAuth();
 	const { connection, snapshot } = useApp();
@@ -1906,7 +1908,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 	if (!session) {
 		return (
 			<Screen>
-				<ScreenHeader title={headerTitle ?? 'クラウド'} />
+				<ScreenHeader title={headerTitle ?? 'クラウド'} left={headerLeft} />
 				<EmptyState
 					icon='log-in'
 					title='Division にログインしてください'
@@ -1941,7 +1943,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 				behavior={Platform.OS === 'ios' ? 'padding' : undefined}
 				keyboardVerticalOffset={insets.top}
 			>
-				<ScreenHeader title={headerTitle ?? 'クラウド'} />
+				<ScreenHeader title={headerTitle ?? 'クラウド'} left={headerLeft} />
 
 				{error ? <ErrorBanner message={error} onRetry={() => void loadList()} /> : null}
 				{launchError ? <ErrorBanner message={launchError} onRetry={() => { setLaunchError(null); setOptionsOpen(true); }} /> : null}

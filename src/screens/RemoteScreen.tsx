@@ -123,13 +123,15 @@ const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?
 	</Pressable>
 );
 
-export const RemoteScreen = ({ onOpenPage, headerTitle }: {
+export const RemoteScreen = ({ onOpenPage, headerTitle, headerLeft }: {
 	onOpenPage: (page: PageKey) => void;
 	/**
 	 * ホームの中に出すときの見出し (モード切り替え)。渡したときは左上のメニューの代わりに
-	 * 右上の履歴ボタンを置き、メニューにはページを並べない (ページはホームのナビゲーションレールにある)。
+	 * 右上の履歴ボタンを置き、メニューにはページを並べない (ページはホームのドロワーにある)。
 	 */
 	headerTitle?: React.ReactNode;
+	/** ホームの中に出すときの左端の操作 (ドロワーを開くメニューボタン)。 */
+	headerLeft?: React.ReactNode;
 }) => {
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 
@@ -216,6 +218,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 				<View style={[styles.header, headerTitle !== undefined && styles.headerInHome]}>
+					{headerLeft ?? null}
 					{headerTitle === undefined ? <IconButton icon='menu' accessibilityLabel='メニュー' onPress={() => setSheet('menu')} /> : null}
 					{headerTitle !== undefined ? <View style={styles.flex}>{headerTitle}</View> : <View style={styles.flex}>
 						<Text style={styles.workspaceName} numberOfLines={1}>{ide?.workspaceName || '(フォルダ未オープン)'}</Text>

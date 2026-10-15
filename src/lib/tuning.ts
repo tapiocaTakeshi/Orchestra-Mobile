@@ -37,6 +37,32 @@ export const validatePolicy = (policy: RoutingPolicy): PolicyIssue[] => {
 
 export const isPolicyValid = (policy: RoutingPolicy): boolean => validatePolicy(policy).length === 0;
 
+/**
+ * 自動チャージの入力欄 (文字列) の検証。
+ * Number('') は 0 になり、Number('Infinity') / Number('1e999') は Infinity になるので、
+ * 空欄や有限でない値を有効として扱わないよう、数値化の前に文字列で判定する。
+ */
+export type AutoChargeIssues = { threshold: string | null; amount: string | null };
+
+const parseMoney = (text: string): number => {
+	const trimmed = text.trim();
+	return trimmed === '' ? Number.NaN : Number(trimmed);
+};
+
+export const validateAutoCharge = (draft: { threshold: string; amount: string }): AutoChargeIssues => {
+	const threshold = parseMoney(draft.threshold);
+	const amount = parseMoney(draft.amount);
+	return {
+		threshold: Number.isFinite(threshold) && threshold >= 0 ? null : 'しきい値は 0 以上の数値で入力してください。',
+		amount: Number.isFinite(amount) && amount > 0 ? null : 'チャージ額は 0 より大きい数値で入力してください。',
+	};
+};
+
+export const isAutoChargeValid = (draft: { threshold: string; amount: string }): boolean => {
+	const issues = validateAutoCharge(draft);
+	return issues.threshold === null && issues.amount === null;
+};
+
 /** 入力トークン数の入力欄の検証 (IDE 側と同じ 0〜2,000,000 の整数)。 */
 export const isInputTokensValid = (value: number): boolean =>
 	Number.isInteger(value) && value >= 0 && value <= 2_000_000;

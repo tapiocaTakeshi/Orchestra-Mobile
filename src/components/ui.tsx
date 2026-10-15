@@ -35,12 +35,14 @@ export const useBack = () => useContext(BackContext);
 /**
  * 1 行の見出し。ページとして開いたときは左に戻るボタン、右に操作を置ける。
  * title に文字以外 (ホームのモード切り替えなど) を渡したときは、そのまま見出しの位置に置く。
+ * left に操作 (ホームのメニューボタンなど) を渡すと、戻るボタンの次・見出しの前に置く。
  */
-export const ScreenHeader = ({ title, right }: { title: React.ReactNode; right?: React.ReactNode }) => {
+export const ScreenHeader = ({ title, right, left }: { title: React.ReactNode; right?: React.ReactNode; left?: React.ReactNode }) => {
 	const back = useBack();
 	return (
-		<View style={[styles.screenHeader, back && styles.screenHeaderWithBack]}>
+		<View style={[styles.screenHeader, (back !== null || left !== undefined) && styles.screenHeaderWithBack]}>
 			{back ? <IconButton icon='chevron-left' accessibilityLabel='戻る' onPress={back} /> : null}
+			{left}
 			{typeof title === 'string'
 				? <Text accessibilityRole='header' style={[styles.title, styles.screenHeaderTitle]} numberOfLines={1}>{title}</Text>
 				: <View style={styles.screenHeaderTitle}>{title}</View>}
