@@ -1,4 +1,4 @@
-name: App Store Metadata
+name: Update App Store Connect Metadata
 on:
   release:
     types: [published]
@@ -9,4 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: node --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/app-store-metadata.test.mjs
