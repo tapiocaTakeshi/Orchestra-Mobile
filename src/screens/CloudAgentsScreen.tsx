@@ -397,12 +397,14 @@ const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
 };
 
 /** 起動の設定 (始める場所・モデル・プロジェクト・並列数・題名)。指示は画面下の入力欄で書く。 */
-const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }: {
+const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoopTouched, onClose }: {
 	auth: DivisionSession;
 	github: GitHubConnection;
 	projects: CloudProjects;
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
+	/** 利用者が目標ループを自分で選んだ (保存済みの値で上書きしない) */
+	onGoalLoopTouched: () => void;
 	onClose: () => void;
 }) => {
 	const status = github.status;
@@ -545,7 +547,14 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }
 
 				<View style={styles.field}>
 					<SectionTitle>目標ループ</SectionTitle>
-					<SegmentedControl options={GOAL_LOOP_OPTIONS} value={draft.goalLoop} onChange={value => set('goalLoop', value)} />
+					<SegmentedControl
+						options={GOAL_LOOP_OPTIONS}
+						value={draft.goalLoop}
+						onChange={value => {
+							onGoalLoopTouched();
+							set('goalLoop', value);
+						}}
+					/>
 					<Muted>
 						{GOAL_LOOP_HINTS[draft.goalLoop]}
 						{draft.goalLoop !== 'off' ? '。最初にリーダーが目標と確認できる達成条件を立て、ラウンドごとにレビュアーがサンドボックスで確かめます。' : '。'}
@@ -604,11 +613,12 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onClose }
  * Claude Code のホームと同じく、画面の下に固定した入力欄。指示を書いて送ると、その場でセッションを起動する。
  * 下のチップ (始める場所・モデル・並列数) を押すと起動の設定を開く。設定が足りないまま送ったときも設定を開く。
  */
-const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen, onOptionsOpen, costLabel }: {
+const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, onLaunch, optionsOpen, onOptionsOpen, costLabel }: {
 	auth: DivisionSession;
 	projects: CloudProjects;
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
+	onGoalLoopTouched: () => void;
 	onLaunch: (repo: CloudRepo | undefined) => void;
 	optionsOpen: boolean;
 	onOptionsOpen: (open: boolean) => void;
@@ -707,6 +717,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onLaunch, optionsOpen
 					projects={projects}
 					draft={draft}
 					onChange={onChange}
+					onGoalLoopTouched={onGoalLoopTouched}
 					onClose={() => onOptionsOpen(false)}
 				/>
 			) : null}
@@ -1697,6 +1708,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 	const [selectedId, setSelectedId] = useState<string | null>(initialSessionId ?? null);
 	const [optionsOpen, setOptionsOpen] = useState(false);
 	const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+	const goalLoopTouched = useRef(false);
 	const [launching, setLaunching] = useState(0);
 	const [launchError, setLaunchError] = useState<string | null>(null);
 	const [stoppingId, setStoppingId] = useState<string | null>(null);
@@ -1714,11 +1726,12 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 	useEffect(() => {
 		if (lastUserId.current === session?.userId) return;
 		lastUserId.current = session?.userId;
+		goalLoopTouched.current = false;
 		previousStatus.current = null;
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '' }));
+		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP }));
 	}, [session?.userId]);
 
 	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
@@ -1741,7 +1754,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 		if (!userId) return;
 		let cancelled = false;
 		void loadLastCloudGoalLoop(userId).then(last => {
-			if (!cancelled && last) setDraft(d => ({ ...d, goalLoop: last }));
+			if (!cancelled && !goalLoopTouched.current && last) setDraft(d => ({ ...d, goalLoop: last }));
 		});
 		return () => { cancelled = true; };
 	}, [session?.userId]);
@@ -2024,6 +2037,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 					projects={projects}
 					draft={draft}
 					onChange={setDraft}
+					onGoalLoopTouched={() => { goalLoopTouched.current = true; }}
 					onLaunch={repo => void launch(repo)}
 					optionsOpen={optionsOpen}
 					onOptionsOpen={setOptionsOpen}
