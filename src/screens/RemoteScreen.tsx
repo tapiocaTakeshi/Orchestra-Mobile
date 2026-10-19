@@ -4,6 +4,7 @@
  * ここでできること:
  *   - エージェントに指示を出す / 中断する
  *   - ツール実行の承認・却下 (無人だと止まったままになるので、外出先から進められる)
+ *   - 目標ループの切り替え (自動 / 毎回確認) と、「毎回確認」で止まったときの続行・停止
  *   - 左上のメニューから、スレッドの切り替えと各ページ (カンバンなど) への移動
  *
  * 見た目は Claude Code のように飾りを減らしている: エージェントの返答は枠なしの本文、
@@ -28,7 +29,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TuningScreen } from './TuningScreen';
 import { OrchestraApiError } from '../api/client';
-import { ChatMessage, ThreadSummary } from '../api/types';
+import { ChatMessage, GoalLoopMode, PendingReview, ThreadSummary } from '../api/types';
+import { Markdown } from '../components/Markdown';
 import {
 	Button,
 	ErrorBanner,
@@ -92,7 +94,7 @@ const ToolMessage = ({ name, text }: { name?: string; text: string }) => {
 const ChatMessageView = ({ message }: { message: ChatMessage }) => {
 	switch (message.role) {
 		case 'user': return <UserMessage text={message.text || '(内容なし)'} />;
-		case 'assistant': return message.text ? <Text selectable style={styles.assistantText}>{message.text}</Text> : null;
+		case 'assistant': return message.text ? <Markdown text={message.text} textStyle={styles.assistantText} /> : null;
 		case 'tool': return <ToolMessage name={message.toolName} text={message.text} />;
 		case 'interrupted':
 			return (
@@ -106,6 +108,28 @@ const ChatMessageView = ({ message }: { message: ChatMessage }) => {
 		default:
 			return message.text ? <Text style={styles.noteText}>{message.text}</Text> : null;
 	}
+};
+
+const GOAL_LOOP_LABELS: Record<GoalLoopMode, string> = { auto: '自動', confirm: '毎回確認' };
+const GOAL_LOOP_HINTS: Record<GoalLoopMode, string> = {
+	auto: '未達なら自動で次のラウンドに進みます',
+	confirm: '未達のラウンドが終わるたびに止まり、続けるかを確認します',
+};
+
+/** 承認の確認の文言。ツールの承認と、フローのレビュー (目標ループの「毎回確認」など) で変える。 */
+const approvalCopy = (review: PendingReview | null | undefined) => {
+	if (!review) return { title: 'ツールの実行を承認しますか？', note: '承認するまでエージェントは止まったままです。', approve: '承認して続行', reject: '取り消す', approved: '承認しました', rejected: '取り消しました' };
+	if (review.flowRole === 'goal-loop') {
+		return {
+			title: `🎯 ${review.title}（ラウンド ${review.completed} / ${review.total} 完了）`,
+			note: '次のラウンドに進むか選んでください。',
+			approve: '次のラウンドへ進む',
+			reject: 'ここで止める',
+			approved: '次のラウンドに進みました',
+			rejected: 'ここで止めました',
+		};
+	}
+	return { title: `${review.title} を確認してください`, note: '承認するまでエージェントは止まったままです。', approve: '承認して続行', reject: '却下', approved: '承認しました', rejected: '却下しました' };
 };
 
 const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?: boolean; onPress: () => void }) => (
@@ -193,6 +217,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 
 	const isRunning = !!chat?.isRunning;
 	const isAwaiting = !!chat?.awaitingApproval;
+	const approval = approvalCopy(chat?.pendingReview);
+	const goalLoopMode = chat?.goalLoopMode ?? null;
 	const hasMessages = !!chat && chat.messages.length > 0;
 	const canSend = !!draft.trim() && !sending;
 	const status = isAwaiting
@@ -291,11 +317,16 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				{/* 承認の確認は入力欄のすぐ上 (指が届く場所) に出す */}
 				{isAwaiting ? (
 					<View accessibilityRole='alert' style={styles.approval}>
-						<Text style={styles.approvalTitle}>ツールの実行を承認しますか？</Text>
-						<Muted>承認するまでエージェントは止まったままです。</Muted>
+						<Text style={styles.approvalTitle}>{approval.title}</Text>
+						{chat?.pendingReview?.content ? (
+							<ScrollView style={styles.approvalBody} nestedScrollEnabled>
+								<Markdown text={chat.pendingReview.content} textStyle={styles.approvalText} />
+							</ScrollView>
+						) : null}
+						<Muted>{approval.note}</Muted>
 						<View style={styles.approvalButtons}>
-							<Button title='承認して続行' onPress={() => void act(() => client.approveTool(), '承認しました')} style={styles.flex} />
-							<Button title='取り消す' variant='secondary' onPress={() => void act(() => client.rejectTool(), '取り消しました')} style={styles.flex} />
+							<Button title={approval.approve} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
+							<Button title={approval.reject} variant='secondary' onPress={() => void act(() => client.rejectTool(), approval.rejected)} style={styles.flex} />
 						</View>
 					</View>
 				) : null}
@@ -323,6 +354,22 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 								<Icon name='bar-chart-2' size={15} color={colors.fgFaint} />
 								<Text style={styles.composerChipText}>コスト</Text>
 							</Pressable>
+							{/* 目標ループ: PC のチャット欄の「ループ」と同じ。押すたびに 自動 ⇄ 毎回確認 */}
+							{goalLoopMode ? (
+								<Pressable
+									accessibilityRole='button'
+									accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[goalLoopMode]}。${GOAL_LOOP_HINTS[goalLoopMode]}。押すと切り替え`}
+									onPress={() => {
+										const next: GoalLoopMode = goalLoopMode === 'auto' ? 'confirm' : 'auto';
+										void act(() => client.setGoalLoopMode(next), `ループ: ${GOAL_LOOP_LABELS[next]}（${GOAL_LOOP_HINTS[next]}）`);
+									}}
+									hitSlop={6}
+									style={({ pressed }) => [styles.composerChip, pressed && styles.composerChipPressed]}
+								>
+									<Icon name='repeat' size={15} color={colors.fgFaint} />
+									<Text style={styles.composerChipText}>ループ · {GOAL_LOOP_LABELS[goalLoopMode]}</Text>
+								</Pressable>
+							) : null}
 							<View style={styles.flex} />
 							{isRunning && !isAwaiting && !draft.trim() ? (
 								<Pressable
@@ -504,6 +551,8 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgElevated,
 	},
 	approvalTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
+	approvalBody: { maxHeight: 180 },
+	approvalText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20 },
 	approvalButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
 	composerWrap: {
 		paddingHorizontal: spacing.md,

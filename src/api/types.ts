@@ -141,11 +141,30 @@ export type ChatMessage = {
 	toolName?: string;
 };
 
+/** 目標ループの進め方。PC のチャット欄の「ループ」と同じ設定 */
+export type GoalLoopMode = 'auto' | 'confirm';
+
+/**
+ * ツール承認ではなく、フローのレビューで止まっているときの中身。
+ * goal-loop は「毎回確認」で未達のラウンドが終わったとき。承認 = 次のラウンドへ、却下 = ここで止める。
+ */
+export type PendingReview = {
+	flowRole: string;
+	title: string;
+	content: string;
+	completed: number;
+	total: number;
+};
+
 export type ChatState = {
 	threadId: string;
 	messages: ChatMessage[];
 	isRunning: boolean;
 	awaitingApproval: boolean;
+	/** フローのレビューで止まっているときの中身。古い IDE は返さない */
+	pendingReview?: PendingReview | null;
+	/** 目標ループの設定。チャットのモデルが Division API でなければ null、古い IDE は返さない */
+	goalLoopMode?: GoalLoopMode | null;
 	error?: string;
 };
 
