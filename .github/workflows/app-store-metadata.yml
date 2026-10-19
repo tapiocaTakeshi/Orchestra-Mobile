@@ -1,0 +1,19 @@
+name: Update App Store Connect Metadata
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/app-store-metadata.test.mjs
+      - name: Confirm Issuer ID variable
+        env:
+          ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+        run: test -n "$ASC_ISSUER_ID"
