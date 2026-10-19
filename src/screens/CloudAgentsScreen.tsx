@@ -81,6 +81,7 @@ import {
 	currentPullRequest,
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
+import { Markdown } from '../components/Markdown';
 import {
 	CloudChange,
 	CloudChanges,
@@ -1116,7 +1117,7 @@ const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal,
 			return (
 				<View style={styles.assistantBody}>
 					{role ? <RoleChip label={timeline.roleNames.get(role) ?? (review ? 'レビュー' : role)} /> : null}
-					<Text selectable style={styles.assistantText}>{value}</Text>
+					<Markdown text={value} textStyle={styles.assistantText} />
 				</View>
 			);
 		}

@@ -11,6 +11,7 @@ import {
 	DivisionProject,
 	DivisionState,
 	FileEntry,
+	GoalLoopMode,
 	KanbanColumn,
 	KanbanPriority,
 	KanbanState,
@@ -346,6 +347,10 @@ export class OrchestraClient {
 
 	async rejectTool(threadId?: string): Promise<ChatState> {
 		return this.request('/api/chat/reject', { method: 'POST', body: { threadId } });
+	}
+
+	async setGoalLoopMode(mode: GoalLoopMode): Promise<ChatState> {
+		return this.request('/api/chat/goal-loop', { method: 'POST', body: { mode } });
 	}
 
 	// -----------------------------------------------------------------------
