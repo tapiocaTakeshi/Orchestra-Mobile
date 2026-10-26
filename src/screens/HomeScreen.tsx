@@ -19,6 +19,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { CloudAgentsScreen } from './CloudAgentsScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { RemoteScreen } from './RemoteScreen';
+import { REMOTE_CONNECTION_LABELS } from '../lib/remoteSession';
 import { Drawer, Icon, IconButton, IconName, Muted, Sheet, confirmAction, useToast } from '../components/ui';
 import { PageKey, DRAWER_PAGES, canOpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
@@ -163,7 +164,7 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 	/** ドロワーやモードの中から開くページ (App のページの重なりに積む) */
 	onOpenPage: (page: PageKey) => void;
 }) => {
-	const { connection, snapshot, disconnect } = useApp();
+	const { connection, connectionStatus, snapshot, disconnect } = useApp();
 	const { session, logout } = useDivisionAuth();
 	const [sheet, setSheet] = useState<'mode' | 'account' | null>(null);
 	// ナビゲーションドロワーの開閉。閉じている (初期状態) ときは画面にナビゲーションの痕跡を残さない。
@@ -189,9 +190,11 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 
 	if (!session) return null;
 
-	const remoteSubtitle = connected
-		? snapshot?.ide?.workspaceName || connection?.label || 'PC に接続中'
-		: 'PC に未接続';
+	// リモートコントロールの状態: 未接続 / 接続中 / 接続済み / 接続切れ
+	const pcName = snapshot?.ide?.workspaceName || connection?.label || 'PC';
+	const remoteSubtitle = connectionStatus === 'disconnected'
+		? 'PC に未接続'
+		: `${REMOTE_CONNECTION_LABELS[connectionStatus]} · ${pcName}`;
 	const switcher = (
 		<View style={styles.headerRow}>
 			<IconButton

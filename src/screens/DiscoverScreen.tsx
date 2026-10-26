@@ -28,6 +28,7 @@ import {
 import { RemoteSessionRow, listRemoteSessions } from '../lib/divisionAuth';
 import { verifyAndConnect } from '../lib/connect';
 import { relativeTimeFromIso } from '../lib/format';
+import { REMOTE_CONNECTION_LABELS, REMOTE_DEVICE_HIDE_AFTER_MS, remoteDeviceStatus } from '../lib/remoteSession';
 import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
@@ -102,7 +103,8 @@ export const DiscoverScreen = ({
 	const refresh = useCallback(async () => {
 		if (!session) return;
 		try {
-			const rows = await listRemoteSessions(session);
+			// 最近 (7 日以内) 見えていた PC も出し、ハートビートが途切れているものは「接続切れ」と分ける
+			const rows = await listRemoteSessions(session, REMOTE_DEVICE_HIDE_AFTER_MS);
 			setSessions(rows);
 			setError(null);
 		} catch (e) {
@@ -135,6 +137,10 @@ export const DiscoverScreen = ({
 
 	const onConnect = useCallback(async (row: RemoteSessionRow) => {
 		if (!session) return;
+		if (remoteDeviceStatus(row.lastSeenAt) === 'offline') {
+			setStatus(`${row.deviceLabel || row.lanUrl} との接続が切れています (最終確認 ${relativeTimeFromIso(row.lastSeenAt)})。PC で Orchestra を起動し、リモートコントロールを有効にしてください。`);
+			return;
+		}
 		setConnectingId(row.id);
 		setStatus(null);
 		// 一覧はログイン中アカウントの RemoteSession だけなので、それをそのまま照合に使う。
@@ -150,6 +156,7 @@ export const DiscoverScreen = ({
 
 	if (!session) return null;
 
+	const availableCount = sessions.filter(row => remoteDeviceStatus(row.lastSeenAt) === 'available').length;
 	const inHome = headerTitle !== undefined;
 	const pages = inHome ? [] : pagesFor(false);
 
@@ -165,7 +172,7 @@ export const DiscoverScreen = ({
 
 				{/* 主役: 接続できる PC */}
 				<View style={styles.section}>
-					<SectionTitle right={!loading && sessions.length > 0 ? <Muted>{sessions.length} 台</Muted> : undefined}>
+					<SectionTitle right={!loading && sessions.length > 0 ? <Muted>{availableCount} / {sessions.length} 台がつなげます</Muted> : undefined}>
 						PC に接続
 					</SectionTitle>
 					<Text style={styles.lead}>同じアカウントでログインしている PC です。タップすると接続します。</Text>
@@ -179,21 +186,27 @@ export const DiscoverScreen = ({
 								detail='PC 側でリモートコントロールを有効にすると、ここに表示されます。'
 							/>
 						) : (
-							sessions.map((row, i) => (
-								<ListRow
-									key={row.id}
-									icon='monitor'
-									primary
-									title={row.deviceLabel || row.lanUrl}
-									badge={newSessionIds.includes(row.id) ? 'NEW' : undefined}
-									detail={`最終確認 ${relativeTimeFromIso(row.lastSeenAt)}`}
-									accessibilityLabel={`${row.deviceLabel || row.lanUrl} に接続`}
-									disabled={connectingId !== null}
-									right={connectingId === row.id ? <ActivityIndicator size='small' color={colors.fgMuted} /> : undefined}
-									last={i === sessions.length - 1}
-									onPress={() => { void onConnect(row); }}
-								/>
-							))
+							sessions.map((row, i) => {
+								const offline = remoteDeviceStatus(row.lastSeenAt) === 'offline';
+								const stateLabel = offline ? REMOTE_CONNECTION_LABELS.lost : REMOTE_CONNECTION_LABELS.disconnected;
+								return (
+									<ListRow
+										key={row.id}
+										icon={offline ? 'wifi-off' : 'monitor'}
+										primary={!offline}
+										title={row.deviceLabel || row.lanUrl}
+										badge={newSessionIds.includes(row.id) ? 'NEW' : undefined}
+										detail={`${stateLabel} · 最終確認 ${relativeTimeFromIso(row.lastSeenAt)}`}
+										accessibilityLabel={offline ? `${row.deviceLabel || row.lanUrl} (接続切れ)` : `${row.deviceLabel || row.lanUrl} に接続`}
+										disabled={connectingId !== null}
+										right={connectingId === row.id
+											? <ActivityIndicator size='small' color={colors.fgMuted} />
+											: <Badge label={stateLabel} color={offline ? colors.danger : colors.fgMuted} />}
+										last={i === sessions.length - 1}
+										onPress={() => { void onConnect(row); }}
+									/>
+								);
+							})
 						)}
 					</View>
 				</View>

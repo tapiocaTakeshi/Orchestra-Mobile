@@ -27,7 +27,7 @@ import { Connection, Snapshot } from '../api/types';
 import { useToast } from '../components/ui';
 import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
-import { claimRemoteSyncNotice, remoteSessionNotice } from '../lib/remoteSession';
+import { RemoteConnectionStatus, claimRemoteSyncNotice, remoteConnectionStatus, remoteSessionNotice } from '../lib/remoteSession';
 import { useDivisionAuth } from './DivisionAuthContext';
 import {
 	loadActiveUrl,
@@ -56,6 +56,11 @@ type AppContextValue = {
 	connect: (connection: Connection) => Promise<void>;
 	disconnect: () => Promise<void>;
 	forget: (url: string) => Promise<void>;
+
+	/** 未接続 / 接続中 / 接続済み / 接続切れ (lib/remoteSession の remoteConnectionStatus) */
+	connectionStatus: RemoteConnectionStatus;
+	/** 最後に PC から状態を受け取れた時刻 (ms)。接続切れのとき「いつの内容か」を出すため */
+	lastSuccessAt: number | null;
 
 	// スナップショット
 	snapshot: Snapshot | null;
@@ -93,6 +98,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
+	const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
 
 	const clientRef = useRef<OrchestraClient | null>(null);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,6 +150,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		setSnapshot(null);
 		snapshotRef.current = null;
 		setError(null);
+		setLastSuccessAt(null);
 		await saveActiveUrl(null);
 	}, []);
 
@@ -168,6 +175,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			const next = await current.getSnapshot(controller.signal);
 			failuresRef.current = 0;
 			setError(null);
+			setLastSuccessAt(Date.now());
 			const previous = snapshotRef.current;
 			if (previous && previous.revision !== next.revision) {
 				if (!previous.chat.awaitingApproval && next.chat.awaitingApproval) {
@@ -229,6 +237,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			setSnapshot(null);
 			snapshotRef.current = null;
 			setError(null);
+			setLastSuccessAt(null);
 			return;
 		}
 		failuresRef.current = 0;
@@ -289,6 +298,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		setConnection(owned);
 		setSnapshot(null);
 		setError(null);
+		setLastSuccessAt(null);
 		await Promise.all([saveConnections(updated), saveActiveUrl(owned.url)]);
 	}, [connections, session]);
 
@@ -309,9 +319,16 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		() => connectionsForAccount(connections, session?.userId),
 		[connections, session?.userId],
 	);
+	const connectionStatus = remoteConnectionStatus({
+		hasConnection: !!accountConnection,
+		hasSnapshot: !!snapshot,
+		failing: error !== null,
+	});
 	const value = useMemo<AppContextValue>(() => ({
 		connections: accountConnections,
 		connection: accountConnection,
+		connectionStatus,
+		lastSuccessAt,
 		client,
 		isRestoring,
 		connect,
@@ -322,7 +339,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		isRefreshing,
 		refresh,
 		invalidate,
-	}), [accountConnections, accountConnection, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
+	}), [accountConnections, accountConnection, connectionStatus, lastSuccessAt, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
 
 	return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
