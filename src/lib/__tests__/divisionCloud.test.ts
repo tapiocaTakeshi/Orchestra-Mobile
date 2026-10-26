@@ -897,3 +897,27 @@ describe('approval mode', () => {
 		expect(toCloudApprovalEvent({ status: 'pending' })).toBeNull();
 	});
 });
+
+describe('ホームの一覧の絞り込み (全て / 稼働中 / 承認待ち / エラー)', () => {
+	const { CLOUD_SESSION_FILTERS, countCloudSessionsByFilter, matchesCloudSessionFilter } = jest.requireActual('../divisionCloud');
+
+	test('タブの並びと名前', () => {
+		expect(CLOUD_SESSION_FILTERS.map((f: { label: string }) => f.label)).toEqual(['全て', '稼働中', '承認待ち', 'エラー']);
+	});
+
+	test('状態ごとの振り分け', () => {
+		const match = (status: string) => ['all', 'running', 'approval', 'error'].filter(f => matchesCloudSessionFilter(status, f));
+		expect(match('provisioning')).toEqual(['all', 'running']);
+		expect(match('uploading')).toEqual(['all', 'running']);
+		expect(match('running')).toEqual(['all', 'running']);
+		expect(match('awaiting_approval')).toEqual(['all', 'approval']);
+		expect(match('failed')).toEqual(['all', 'error']);
+		expect(match('idle')).toEqual(['all']);
+		expect(match('cancelled')).toEqual(['all']);
+	});
+
+	test('件数', () => {
+		const sessions = ['running', 'provisioning', 'awaiting_approval', 'failed', 'failed', 'idle', 'cancelled'].map(status => ({ status }));
+		expect(countCloudSessionsByFilter(sessions)).toEqual({ all: 7, running: 2, approval: 1, error: 2 });
+	});
+});
