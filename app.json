@@ -55,7 +55,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-iap"
     ],
     "extra": {
       "appVariant": "production",

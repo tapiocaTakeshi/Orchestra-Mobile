@@ -17,8 +17,18 @@ import {
 	CloudSession,
 	CloudSessionEvent,
 	DivisionCloudError,
+	approvalBody,
+	approvalErrorText,
+	approvalEventText,
 	archiveCloudSession,
 	canSendMessage,
+	cloudStatusColor,
+	createSessionBody,
+	editedApprovalContent,
+	getCloudApproval,
+	resolveCloudApproval,
+	toCloudApproval,
+	toCloudApprovalEvent,
 	chatBlocks,
 	classifyPatchLines,
 	cloudSource,
@@ -322,6 +332,7 @@ describe('status helpers', () => {
 		expect(cloudStatusLabel('uploading')).toBe('アップロード中');
 		expect(cloudStatusLabel('running')).toBe('実行中');
 		expect(cloudStatusLabel('idle')).toBe('待機中');
+		expect(cloudStatusLabel('awaiting_approval')).toBe('承認待ち');
 		expect(cloudStatusLabel('failed')).toBe('失敗');
 		expect(cloudStatusLabel('cancelled')).toBe('停止');
 	});
@@ -762,5 +773,127 @@ describe('chatBlocks', () => {
 	it('starts with an agent block when the log has no prompt yet', () => {
 		expect(chatBlocks([e(1, 'status')]).map(b => b.kind)).toEqual(['agent']);
 		expect(chatBlocks([])).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 承認モード
+// ---------------------------------------------------------------------------
+
+describe('approval mode', () => {
+	const rawApproval = (over: Record<string, unknown> = {}) => ({
+		taskSeq: 12,
+		index: 1,
+		role: 'reviewer',
+		roleName: 'レビュー',
+		title: 'Review the API',
+		file: '.division/REVIEW.md',
+		summary: 'Looks fine',
+		content: '# Review\n',
+		...over,
+	});
+
+	it('reads awaiting_approval and approvalMode from the session DTO', () => {
+		const s = toCloudSession(rawSession({ status: 'awaiting_approval', approvalMode: true }));
+		expect(s.status).toBe('awaiting_approval');
+		expect(s.approvalMode).toBe(true);
+		// 古いサーバーには approvalMode が無い
+		expect(toCloudSession(rawSession()).approvalMode).toBe(false);
+	});
+
+	it('treats awaiting_approval as stopped: not active, no messages, but notified', () => {
+		expect(isActive('awaiting_approval')).toBe(false);
+		expect(canSendMessage({ status: 'awaiting_approval', startedAt: 'x' })).toBe(false);
+		expect(listPollInterval([{ status: 'awaiting_approval' }])).toBe(20_000);
+		expect(cloudStatusColor('awaiting_approval')).not.toBe(cloudStatusColor('idle'));
+		const before = new Map<string, CloudSession['status']>([['a', 'running'], ['b', 'awaiting_approval']]);
+		const next = [session({ id: 'a', status: 'awaiting_approval' }), session({ id: 'b', status: 'awaiting_approval' })];
+		expect(finishedSessions(before, next).map(s => s.id)).toEqual(['a']);
+	});
+
+	it('sends approvalMode only for Division Project sessions', async () => {
+		expect(createSessionBody({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true }))
+			.toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true });
+		expect(createSessionBody({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: false }))
+			.toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj' });
+		expect(createSessionBody({ prompt: 'p', model: 'anthropic/x', approvalMode: true })).toEqual({ prompt: 'p', model: 'anthropic/x' });
+
+		mockFetch(() => ({ status: 201, body: { session: rawSession({ approvalMode: true, model: 'division-project' }) } }));
+		const created = await createCloudSession(auth, { prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true });
+		expect(bodyOf(calls[0])).toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true });
+		expect(created.approvalMode).toBe(true);
+	});
+
+	it('passes approvalMode through launchSessions', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession() } }));
+		await launchSessions(auth, { prompt: 'p', count: 1, model: 'division-project', projectId: 'proj', approvalMode: true });
+		expect(bodyOf(calls[0])).toMatchObject({ approvalMode: true });
+	});
+
+	it('gets the pending approval', async () => {
+		mockFetch(() => ({ status: 200, body: { approval: rawApproval() } }));
+		const approval = await getCloudApproval(auth, 'a/b');
+		expect(calls[0].url).toBe(`${BASE}/a%2Fb/approval`);
+		expect(calls[0].init.method).toBe('GET');
+		expect(approval).toEqual({ ...rawApproval(), tooLarge: false });
+	});
+
+	it('returns null when nothing is waiting, and handles too-large files', async () => {
+		mockFetch(() => ({ status: 200, body: { approval: null } }));
+		expect(await getCloudApproval(auth, 's1')).toBeNull();
+		expect(toCloudApproval({ role: 'x' })).toBeNull();
+		expect(toCloudApproval(rawApproval({ content: null, tooLarge: true }))).toMatchObject({ content: null, tooLarge: true });
+		expect(toCloudApproval(rawApproval({ roleName: '', role: 'research' }))?.roleName).toBe('research');
+	});
+
+	it('approves (with edited content only when changed) and sends back with feedback', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession({ status: 'running', approvalMode: true }) } }));
+		const s = await resolveCloudApproval(auth, 's1', { taskSeq: 12, action: 'approve' });
+		expect(calls[0].url).toBe(`${BASE}/s1/approval`);
+		expect(calls[0].init.method).toBe('POST');
+		expect(bodyOf(calls[0])).toEqual({ taskSeq: 12, action: 'approve' });
+		expect(s.status).toBe('running');
+
+		await resolveCloudApproval(auth, 's1', { taskSeq: 12, action: 'approve', content: '# Edited\n' });
+		expect(bodyOf(calls[1])).toEqual({ taskSeq: 12, action: 'approve', content: '# Edited\n' });
+
+		await resolveCloudApproval(auth, 's1', { taskSeq: 12, action: 'revise', feedback: '  more detail  ' });
+		expect(bodyOf(calls[2])).toEqual({ taskSeq: 12, action: 'revise', feedback: 'more detail' });
+	});
+
+	it('refuses to send back without feedback (no request)', async () => {
+		mockFetch(() => ({ status: 200, body: {} }));
+		await expect(resolveCloudApproval(auth, 's1', { taskSeq: 1, action: 'revise', feedback: '  ' })).rejects.toThrow('フィードバック');
+		expect(calls).toHaveLength(0);
+		expect(() => approvalBody({ taskSeq: 1, action: 'revise' })).toThrow();
+	});
+
+	it('only sends edited content when it changed and was readable', () => {
+		expect(editedApprovalContent({ content: 'a' }, 'a')).toBeUndefined();
+		expect(editedApprovalContent({ content: 'a' }, 'b')).toBe('b');
+		expect(editedApprovalContent({ content: null }, 'b')).toBeUndefined();
+	});
+
+	it('shows the server message for stale approvals', async () => {
+		mockFetch(() => ({ status: 409, body: { error: '承認待ちの成果物が変わりました。画面を更新してください。' } }));
+		const error = await resolveCloudApproval(auth, 's1', { taskSeq: 3, action: 'approve' }).catch(e => e);
+		expect(error).toBeInstanceOf(DivisionCloudError);
+		expect(approvalErrorText(error)).toBe('承認待ちの成果物が変わりました。画面を更新してください。');
+		expect(approvalErrorText(new DivisionCloudError(409, 'Session is running; nothing is waiting for approval.')))
+			.toBe('この成果物はもう承認待ちではありません。画面を更新してください。');
+		expect(approvalErrorText(new DivisionCloudError(401, 'x'))).toContain('ログイン');
+	});
+
+	it('describes approval events for the timeline', () => {
+		const approved = toCloudApprovalEvent({ taskSeq: 12, index: 1, role: 'reviewer', roleName: 'レビュー', file: '.division/REVIEW.md', status: 'approved', edited: true });
+		expect(approved).toMatchObject({ status: 'approved', edited: true });
+		expect(approvalEventText(approved!)).toBe('✅ REVIEW.md を承認 (編集あり)');
+		expect(approvalEventText({ ...approved!, edited: false })).toBe('✅ REVIEW.md を承認');
+
+		const revised = toCloudApprovalEvent({ taskSeq: 12, role: 'research', file: '.division/RESEARCH.md', status: 'revised', edited: false, feedback: ' 出典を足して ' });
+		expect(revised?.roleName).toBe('research');
+		expect(approvalEventText(revised!)).toBe('↩️ 差し戻し: 出典を足して');
+
+		expect(toCloudApprovalEvent({ status: 'pending' })).toBeNull();
 	});
 });

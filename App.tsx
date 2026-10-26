@@ -17,6 +17,7 @@ import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
+import { TermsAgreementGate } from './src/components/TermsSheet';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
@@ -48,7 +49,8 @@ const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOp
 
 const Shell = () => {
 	const { connection, isRestoring, snapshot } = useApp();
-	const { session, isRestoring: isRestoringAuth } = useDivisionAuth();
+	const { session, isRestoring: isRestoringAuth, termsAccepted, acceptTerms, logout } = useDivisionAuth();
+	const [acceptingTerms, setAcceptingTerms] = useState(false);
 	/** 開いているページの重なり (末尾がいま見えているページ)。空なら最初の画面。 */
 	const [stack, setStack] = useState<PageKey[]>([]);
 	/** クラウドのページを開いたときにすぐ開くセッション (カンバンの「クラウドで開く」から) */
@@ -113,6 +115,23 @@ const Shell = () => {
 		return (
 			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
 				<LoginScreen />
+				<ToastHost />
+			</SafeAreaView>
+		);
+	}
+
+	// ログイン済みでも、最新の利用規約に同意していなければ (アプリの更新で規約が変わったなど) 先に同意を求める。
+	if (!termsAccepted) {
+		return (
+			<SafeAreaView style={styles.root} edges={['top', 'bottom']}>
+				<TermsAgreementGate
+					busy={acceptingTerms}
+					onAgree={() => {
+						setAcceptingTerms(true);
+						void acceptTerms().finally(() => setAcceptingTerms(false));
+					}}
+					onLogout={() => { void logout(); }}
+				/>
 				<ToastHost />
 			</SafeAreaView>
 		);

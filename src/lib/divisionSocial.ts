@@ -6,23 +6,45 @@
  * いいね数はトリガ、取り込み数は `import_assignment_post` 関数が更新する
  * (Orchestra リポジトリの supabase/migrations/*_assignment_post_social.sql)。
  * クライアントからカウンタを直接書くことはできない。
+ *
+ * 不適切コンテンツ対策 (App Store Guideline 1.2):
+ *   - 不適切な語を含む投稿はサーバーのトリガが `objectionable_content` で拒否する。
+ *     アプリ側でも送る前に同じ語で確かめ (lib/moderation.ts)、フィードからも外す。
+ *   - 通報とブロックは Edge Function `moderation` を通す (開発者への通知もそこで行う)。
+ *     ブロックした相手の投稿は `AssignmentPost` の select ポリシーで返らなくなる。
+ *   - ブロックの解除は `UserBlock` の自分の行を直接消す。
  */
 
 import { PostgrestError } from '@supabase/supabase-js';
 
-import { DivisionSession, getDivisionSupabase } from './divisionAuth';
+import { DivisionSession, getDivisionAccessToken, getDivisionSupabase } from './divisionAuth';
 import {
 	DIVISION_ASSIGNMENT_POST_LIKE_TABLE,
 	DIVISION_ASSIGNMENT_POST_TABLE,
+	DIVISION_FUNCTIONS_BASE_URL,
 	DIVISION_IMPORT_POST_FUNCTION,
 	DIVISION_PROFILES_TABLE,
 } from './divisionAuthConfig';
+import {
+	OBJECTIONABLE_CONTENT_MESSAGE,
+	REPORT_DETAILS_MAX,
+	ReportReason,
+	isObjectionablePost,
+	isReportReason,
+	validatePostText,
+} from './moderation';
 import { AssignmentPost, PostAssignment, parseAssignments } from './social';
+
+export const DIVISION_USER_BLOCK_TABLE = 'UserBlock';
+export const DIVISION_CONTENT_REPORT_TABLE = 'ContentReport';
+export const DIVISION_MODERATION_FUNCTION = 'moderation';
 
 const POST_COLUMNS = 'id, authorId, authorName, title, description, assignments, sourceProjectId, likeCount, importCount, createdAt, updatedAt';
 
 /** テーブルが未整備 (マイグレーション未適用) のときは、次の一手が分かる文言にする。 */
-const describeError = (error: PostgrestError, fallback: string): string => {
+export const describeError = (error: Pick<PostgrestError, 'code' | 'message'>, fallback: string): string => {
+	// 不適切な語を含む投稿は、サーバーのトリガがこのメッセージで拒否する。
+	if (/objectionable_content/.test(error.message ?? '')) return OBJECTIONABLE_CONTENT_MESSAGE;
 	if (error.code === '42P01') return 'ソーシャル機能のテーブルがまだ作られていません。Orchestra の Supabase マイグレーションを適用してください。';
 	if (error.code === '42501') return '権限がありません。Orchestra の Supabase マイグレーション (RLS ポリシー) を適用してください。';
 	return `${fallback}: ${error.message}`;
@@ -89,14 +111,51 @@ export const listAssignmentPosts = async (
 	const rows = (data ?? []) as PostRow[];
 	if (rows.length === 0) return [];
 
-	const { data: likes } = await sb
-		.from(DIVISION_ASSIGNMENT_POST_LIKE_TABLE)
-		.select('postId')
-		.eq('userId', session.userId)
-		.in('postId', rows.map(r => r.id));
+	// いいね・自分が通報した投稿・ブロック中の相手は並べて取る。通報とブロックは
+	// サーバーでも絞っているので、読めなくても (マイグレーション前など) フィードは出す。
+	const [{ data: likes }, reportedIds, blockedIds] = await Promise.all([
+		sb
+			.from(DIVISION_ASSIGNMENT_POST_LIKE_TABLE)
+			.select('postId')
+			.eq('userId', session.userId)
+			.in('postId', rows.map(r => r.id)),
+		selectIds(sb, DIVISION_CONTENT_REPORT_TABLE, 'postId', 'reporterId', session.userId),
+		selectIds(sb, DIVISION_USER_BLOCK_TABLE, 'blockedId', 'blockerId', session.userId),
+	]);
 
 	const likedIds = new Set((likes ?? []).map(l => (l as { postId: string }).postId));
-	return rows.map(row => toPost(row, likedIds, session.userId));
+	return rows
+		.map(row => toPost(row, likedIds, session.userId))
+		.filter(post => isVisibleInFeed(post, reportedIds, blockedIds));
+};
+
+/** フィードに出すか。自分の投稿は (削除できるよう) いつも出す。 */
+export const isVisibleInFeed = (
+	post: AssignmentPost,
+	reportedPostIds: ReadonlySet<string>,
+	blockedUserIds: ReadonlySet<string>,
+): boolean => {
+	if (post.mine) return true;
+	if (reportedPostIds.has(post.id) || blockedUserIds.has(post.authorId)) return false;
+	return !isObjectionablePost(post);
+};
+
+const selectIds = async (
+	sb: Awaited<ReturnType<typeof withSession>>,
+	table: string,
+	column: string,
+	ownerColumn: string,
+	userId: string,
+): Promise<Set<string>> => {
+	try {
+		const { data, error } = await sb.from(table).select(column).eq(ownerColumn, userId);
+		if (error || !Array.isArray(data)) return new Set();
+		return new Set(data
+			.map(row => (row as unknown as Record<string, unknown>)[column])
+			.filter((id): id is string => typeof id === 'string' && !!id));
+	} catch {
+		return new Set();
+	}
 };
 
 /** 表示名。profiles は自分の行しか読めないので、投稿時に埋め込む用。 */
@@ -128,9 +187,15 @@ export const publishAssignmentPost = async (
 	const title = input.title.trim();
 	if (!title) throw new Error('タイトルを入力してください。');
 	if (input.assignments.length === 0) throw new Error('共有できる役割の割り当てがありません。');
+	const description = input.description?.trim() || '';
+	const textProblem = validatePostText({ title, description });
+	if (textProblem) throw new Error(textProblem);
 
 	const sb = await withSession(session);
 	const authorName = input.authorName?.trim() || await fetchDisplayName(session);
+	if (validatePostText({ authorName })) {
+		throw new Error(`${OBJECTIONABLE_CONTENT_MESSAGE} (表示名を変更してください)`);
+	}
 
 	const { data, error } = await sb
 		.from(DIVISION_ASSIGNMENT_POST_TABLE)
@@ -138,7 +203,7 @@ export const publishAssignmentPost = async (
 			authorId: session.userId,
 			authorName,
 			title,
-			description: input.description?.trim() || null,
+			description: description || null,
 			assignments: input.assignments,
 			sourceProjectId: input.sourceProjectId || null,
 			updatedAt: new Date().toISOString(),
@@ -155,6 +220,9 @@ export const updateAssignmentPost = async (
 	postId: string,
 	patch: { title?: string; description?: string },
 ): Promise<void> => {
+	if (patch.title !== undefined && !patch.title.trim()) throw new Error('タイトルを入力してください。');
+	const textProblem = validatePostText(patch);
+	if (textProblem) throw new Error(textProblem);
 	const sb = await withSession(session);
 	const { error } = await sb
 		.from(DIVISION_ASSIGNMENT_POST_TABLE)
@@ -209,4 +277,128 @@ export const importAssignmentPost = async (
 		throw new Error(describeError(error, '取り込みに失敗しました'));
 	}
 	return parseAssignments(data);
+};
+
+// ---------------------------------------------------------------------------
+// 通報・ブロック
+// ---------------------------------------------------------------------------
+
+/** Edge Function `moderation` のエラー。code は関数が返した理由 (already_reported など)。 */
+export class ModerationError extends Error {
+	readonly code: string | null;
+	readonly status: number;
+
+	constructor(message: string, code: string | null, status: number) {
+		super(message);
+		this.name = 'ModerationError';
+		this.code = code;
+		this.status = status;
+	}
+}
+
+const MODERATION_ERROR_MESSAGES: Record<string, string> = {
+	already_reported: 'この投稿はすでに通報済みです。',
+	cannot_report_own: '自分の投稿は通報できません。',
+	post_not_found: 'この投稿はすでに削除されています。',
+	cannot_block_self: '自分自身はブロックできません。',
+};
+
+export type ReportPostBody = { action: 'report'; postId: string; reason: ReportReason; details?: string };
+export type BlockUserBody = { action: 'block'; userId: string; postId?: string };
+
+/** 通報の送信内容。理由を確かめ、補足は前後の空白を落として上限で切る (空なら送らない)。 */
+export const buildReportBody = (input: { postId: string; reason: ReportReason; details?: string }): ReportPostBody => {
+	if (!input.postId) throw new Error('通報する投稿が見つかりません。');
+	if (!isReportReason(input.reason)) throw new Error('通報の理由を選んでください。');
+	const details = (input.details ?? '').trim().slice(0, REPORT_DETAILS_MAX);
+	return { action: 'report', postId: input.postId, reason: input.reason, ...(details ? { details } : {}) };
+};
+
+export const buildBlockBody = (input: { userId: string; postId?: string | null }): BlockUserBody => {
+	if (!input.userId) throw new Error('ブロックする利用者が見つかりません。');
+	return { action: 'block', userId: input.userId, ...(input.postId ? { postId: input.postId } : {}) };
+};
+
+const callModerationFunction = async (
+	session: DivisionSession,
+	body: ReportPostBody | BlockUserBody,
+): Promise<Record<string, unknown>> => {
+	const accessToken = await getDivisionAccessToken(session);
+	let res: Response;
+	try {
+		res = await fetch(`${DIVISION_FUNCTIONS_BASE_URL}/${DIVISION_MODERATION_FUNCTION}`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+			body: JSON.stringify(body),
+		});
+	} catch {
+		throw new ModerationError('通信できませんでした。電波の状態を確かめて、もう一度お試しください。', null, 0);
+	}
+	const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+	if (!res.ok || json.ok !== true) {
+		const code = typeof json.code === 'string' ? json.code : null;
+		const message = (code && MODERATION_ERROR_MESSAGES[code])
+			|| (typeof json.error === 'string' && json.error)
+			|| `リクエストに失敗しました (HTTP ${res.status})`;
+		throw new ModerationError(message, code, res.status);
+	}
+	return json;
+};
+
+/**
+ * 投稿を通報する。開発者に通知され、24 時間以内に確認される。
+ * すでに通報済みなら 'already_reported' を返す (利用者にとっては成功と同じ扱い)。
+ */
+export const reportPost = async (
+	session: DivisionSession,
+	input: { postId: string; reason: ReportReason; details?: string },
+): Promise<'reported' | 'already_reported'> => {
+	const body = buildReportBody(input);
+	try {
+		await callModerationFunction(session, body);
+		return 'reported';
+	} catch (e) {
+		if (e instanceof ModerationError && e.code === 'already_reported') return 'already_reported';
+		throw e;
+	}
+};
+
+/** 利用者をブロックする。開発者にも通知され、その人の投稿はフィードに出なくなる。ブロック済みでも成功。 */
+export const blockUser = async (
+	session: DivisionSession,
+	input: { userId: string; postId?: string | null },
+): Promise<void> => {
+	if (input.userId === session.userId) throw new ModerationError(MODERATION_ERROR_MESSAGES.cannot_block_self, 'cannot_block_self', 400);
+	await callModerationFunction(session, buildBlockBody(input));
+};
+
+export type BlockedUser = {
+	userId: string;
+	name: string | null;
+	createdAt: string;
+};
+
+/** ブロック中の利用者 (新しい順)。 */
+export const listBlockedUsers = async (session: DivisionSession): Promise<BlockedUser[]> => {
+	const sb = await withSession(session);
+	const { data, error } = await sb
+		.from(DIVISION_USER_BLOCK_TABLE)
+		.select('blockedId, blockedName, createdAt')
+		.eq('blockerId', session.userId)
+		.order('createdAt', { ascending: false });
+	if (error) throw new Error(describeError(error, 'ブロック中の利用者の取得に失敗しました'));
+	return ((data ?? []) as { blockedId: string; blockedName: string | null; createdAt: string }[])
+		.filter(row => typeof row.blockedId === 'string' && !!row.blockedId)
+		.map(row => ({ userId: row.blockedId, name: row.blockedName ?? null, createdAt: row.createdAt }));
+};
+
+/** ブロックを解除する。次にフィードを読み込んだときから、その人の投稿がまた出る。 */
+export const unblockUser = async (session: DivisionSession, blockedUserId: string): Promise<void> => {
+	const sb = await withSession(session);
+	const { error } = await sb
+		.from(DIVISION_USER_BLOCK_TABLE)
+		.delete()
+		.eq('blockerId', session.userId)
+		.eq('blockedId', blockedUserId);
+	if (error) throw new Error(describeError(error, 'ブロックの解除に失敗しました'));
 };

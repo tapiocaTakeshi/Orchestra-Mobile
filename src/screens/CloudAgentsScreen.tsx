@@ -16,6 +16,8 @@
  *                 カンバンと Division のプロジェクトは PC 接続が必要なので、未接続なら押せない
  *   - プロジェクト … 新規のシートで Division のプロジェクトを選ぶと、そのプロジェクトのコーダーのモデルで動く
  *   - 料金      … 各セッションの料金 (costUsd) と、一覧の合計
+ *   - 承認モード … Division Project を選んだときだけ起動の設定で選べる。coder 以外の役割が成果物 (.division/*.md) を
+ *                 書くたびに「承認待ち」で止まり、詳細のカードで中身を編集して承認するか、フィードバックを付けて差し戻す
  *   - PR        … Sessions started from a GitHub repo can open / update a pull request from the detail header
  *                 (and the last completion card); `pull_request` log events render as a card. See CloudPullRequest.tsx
  *
@@ -67,6 +69,7 @@ import {
 	SectionTitle,
 	SegmentedControl,
 	Sheet,
+	Toggle,
 	confirmAction,
 	useBack,
 	useToast,
@@ -83,6 +86,7 @@ import {
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
 import {
+	CloudApproval,
 	CloudChange,
 	CloudChanges,
 	CloudModelSelection,
@@ -96,6 +100,8 @@ import {
 	PatchSection,
 	PlanProgress,
 	PlanTaskState,
+	approvalErrorText,
+	approvalEventText,
 	archiveCloudSession,
 	canSendMessage,
 	chatBlocks,
@@ -110,7 +116,9 @@ import {
 	cloudStatusColor,
 	cloudStatusLabel,
 	divisionTimeline,
+	editedApprovalContent,
 	fetchCloudChanges,
+	getCloudApproval,
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
@@ -125,6 +133,7 @@ import {
 	modelSelectionIssue,
 	outputPreview,
 	pausedReviewSeq,
+	resolveCloudApproval,
 	reviewOutcomeLabel,
 	pullRequestActionLabel,
 	pullRequestStateFor,
@@ -134,6 +143,7 @@ import {
 	stopCloudSession,
 	sumCloudCosts,
 	taskHeaderLabel,
+	toCloudApprovalEvent,
 	toCloudGoal,
 	toCloudPlan,
 	toCloudReview,
@@ -272,7 +282,7 @@ const SessionRow = ({ item, projectName, onPress, onStop, stopping }: {
 					<Text style={styles.rowTime}>{relativeTimeFromIso(item.updatedAt)}</Text>
 				</Row>
 				<Text style={styles.rowMeta} numberOfLines={1}>
-					{active || item.status === 'failed'
+					{active || item.status === 'failed' || item.status === 'awaiting_approval'
 						? <Text style={{ color: cloudStatusColor(item.status) }}>{cloudStatusLabel(item.status)} · </Text>
 						: null}
 					{meta}
@@ -315,6 +325,8 @@ type Draft = {
 	projectId: string;
 	/** 目標ループ (目標を立てて、達成するまでラウンドを繰り返す) */
 	goalLoop: CloudGoalLoopMode;
+	/** 承認モード (Division Project のときだけ送る)。役割の成果物ごとに止まって承認を待つ */
+	approvalMode: boolean;
 	showAdvanced: boolean;
 };
 
@@ -335,6 +347,7 @@ const EMPTY_DRAFT: Draft = {
 	title: '',
 	projectId: '',
 	goalLoop: DEFAULT_GOAL_LOOP,
+	approvalMode: false,
 	showAdvanced: false,
 };
 
@@ -544,6 +557,19 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 							最後にまとめます。ログに計画と各タスクの進み具合が出ます。
 						</Muted>
 					) : null}
+					{draft.modelMode === 'division' ? (
+						<>
+							<Row style={styles.spread}>
+								<Text style={styles.toggleLabel}>承認モード</Text>
+								<Toggle value={draft.approvalMode} onValueChange={value => set('approvalMode', value)} accessibilityLabel='承認モード' />
+							</Row>
+							<Muted>
+								{draft.approvalMode
+									? 'コーダー以外の役割が成果物 (.division/REVIEW.md など) を書き終えるたびに止まります。中身を確かめて (必要なら編集して) 承認するか、フィードバックを付けて差し戻してください。'
+									: 'オンにすると、コーダー以外の役割の成果物ごとに止まって承認を待ちます。'}
+							</Muted>
+						</>
+					) : null}
 				</View>
 
 				<View style={styles.field}>
@@ -692,6 +718,9 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 							accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[draft.goalLoop]}。変更する`}
 							onPress={() => onOptionsOpen(true)}
 						/>
+						{draft.modelMode === 'division' && draft.approvalMode ? (
+							<ComposerChip icon='check-square' label='承認モード' accessibilityLabel='承認モード: オン。変更する' onPress={() => onOptionsOpen(true)} />
+						) : null}
 						{count > 1 ? (
 							<ComposerChip icon='copy' label={`×${count}`} accessibilityLabel={`並列数 ${count}。変更する`} onPress={() => onOptionsOpen(true)} />
 						) : null}
@@ -1094,6 +1123,165 @@ const ReviewEventView = ({ data, roleName, onContinue, continuing }: {
 	);
 };
 
+/** approval イベント: 成果物を承認した / 差し戻した。 */
+const ApprovalEventView = ({ data }: { data: Record<string, unknown> }) => {
+	const approval = toCloudApprovalEvent(data);
+	if (!approval) return null;
+	const label = approvalEventText(approval);
+	return (
+		<View style={styles.line} accessibilityLabel={`${approval.roleName}: ${label}`}>
+			<Text selectable style={[styles.approvalEventText, { color: approval.status === 'approved' ? colors.success : colors.warning }]}>
+				{label}
+				{approval.file ? <Text style={styles.approvalEventFile}>  {approval.file}</Text> : null}
+			</Text>
+		</View>
+	);
+};
+
+/**
+ * 承認モードで止まっているときのカード。成果物の中身を編集でき、「承認して続行」か
+ * フィードバックを付けて「差し戻す」。中身が読めない (大きすぎるなど) ときは編集せずに承認・差し戻しだけできる。
+ */
+const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
+	auth: DivisionSession;
+	sessionId: string;
+	/** ログが進んだら (別の端末で承認されて次の成果物を待っているなど) 読み直す */
+	lastSeq: number;
+	onResolved: (next: CloudSession, action: 'approve' | 'revise') => void;
+}) => {
+	const [approval, setApproval] = useState<CloudApproval | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [content, setContent] = useState('');
+	const [feedback, setFeedback] = useState('');
+	const [busy, setBusy] = useState<'approve' | 'revise' | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const shownSeq = useRef<number | null>(null);
+
+	const load = useCallback(async () => {
+		setLoading(true);
+		setLoadError(null);
+		try {
+			const next = await getCloudApproval(auth, sessionId);
+			setApproval(next);
+			// 同じ成果物を読み直したときは、編集中の内容とフィードバックを消さない
+			if (next && next.taskSeq !== shownSeq.current) {
+				shownSeq.current = next.taskSeq;
+				setContent(next.content ?? '');
+				setFeedback('');
+				setError(null);
+			}
+		} catch (e) {
+			setLoadError(cloudErrorText(e));
+		} finally {
+			setLoading(false);
+		}
+	}, [auth, sessionId]);
+
+	useEffect(() => { void load(); }, [load, lastSeq]);
+
+	const submit = async (action: 'approve' | 'revise') => {
+		if (!approval || busy) return;
+		if (action === 'revise' && !feedback.trim()) return;
+		setBusy(action);
+		setError(null);
+		try {
+			// 中身を変えたときだけ送る (読めなかったファイルは送らない)
+			const edited = editedApprovalContent(approval, content);
+			const next = await resolveCloudApproval(auth, sessionId, {
+				taskSeq: approval.taskSeq,
+				action,
+				...(edited !== undefined ? { content: edited } : {}),
+				...(action === 'revise' ? { feedback } : {}),
+			});
+			onResolved(next, action);
+		} catch (e) {
+			setError(approvalErrorText(e));
+		} finally {
+			setBusy(null);
+		}
+	};
+
+	const readOnly = !approval || approval.content === null;
+	const edited = !!approval && editedApprovalContent(approval, content) !== undefined;
+
+	return (
+		<View style={[styles.done, styles.approval]} accessibilityLabel='成果物の承認'>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name='check-square' size={14} color={colors.warning} /></View>
+				<Text style={[styles.doneTitle, styles.flex]}>
+					承認待ち
+					{approval ? <Text style={styles.doneCount}>  {approval.roleName}</Text> : null}
+				</Text>
+				<Button title='更新' icon='refresh-cw' variant='ghost' size='sm' loading={loading && !!approval} disabled={!!busy} onPress={() => void load()} />
+			</View>
+			{loading && !approval && !loadError ? <Loading label='成果物を読み込んでいます…' /> : null}
+			{loadError ? <ErrorBanner message={loadError} onRetry={() => void load()} style={styles.inlineBanner} /> : null}
+			{!loading && !loadError && !approval ? (
+				<Muted>承認待ちの成果物が見つかりません。少し待ってから「更新」を押してください。</Muted>
+			) : null}
+			{approval ? (
+				<>
+					{approval.title ? <Text selectable style={styles.doneText}>{approval.title}</Text> : null}
+					<Text selectable style={styles.approvalFile}>{approval.file}</Text>
+					{approval.summary ? <Text selectable style={styles.planMeta} numberOfLines={4}>{approval.summary}</Text> : null}
+					{readOnly ? (
+						<Muted>
+							{approval.tooLarge
+								? 'ファイルが大きいため、ここでは表示・編集できません。そのまま承認するか、フィードバックを付けて差し戻してください。'
+								: 'ファイルの中身を読み込めませんでした。そのまま承認するか、フィードバックを付けて差し戻してください。'}
+						</Muted>
+					) : (
+						<>
+							<Input
+								value={content}
+								onChangeText={setContent}
+								multiline
+								scrollEnabled
+								autoCapitalize='none'
+								autoCorrect={false}
+								editable={!busy}
+								accessibilityLabel={`${approval.file} の内容`}
+								style={styles.approvalEditor}
+							/>
+							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら中身を直してから承認できます。'}</Muted>
+						</>
+					)}
+					<Input
+						value={feedback}
+						onChangeText={setFeedback}
+						multiline
+						editable={!busy}
+						placeholder='差し戻すときのフィードバック (何を直してほしいか)'
+						accessibilityLabel='差し戻しのフィードバック'
+						style={styles.approvalFeedback}
+					/>
+					{error ? <ErrorBanner message={error} style={styles.inlineBanner} /> : null}
+					<Row style={styles.doneActions}>
+						<Button
+							title='承認して続行'
+							icon='check'
+							size='sm'
+							loading={busy === 'approve'}
+							disabled={!!busy}
+							onPress={() => void submit('approve')}
+						/>
+						<Button
+							title='差し戻す'
+							icon='corner-up-left'
+							variant='secondary'
+							size='sm'
+							loading={busy === 'revise'}
+							disabled={!!busy || !feedback.trim()}
+							onPress={() => void submit('revise')}
+						/>
+					</Row>
+				</>
+			) : null}
+		</View>
+	);
+};
+
 const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal, continuing }: {
 	event: CloudSessionEvent;
 	timeline: DivisionTimeline;
@@ -1172,6 +1360,8 @@ const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal,
 			return <PullRequestEventCard data={data} />;
 		case 'goal':
 			return <GoalCard data={data} />;
+		case 'approval':
+			return <ApprovalEventView data={data} />;
 		case 'review': {
 			const role = text(data.role) || 'reviewer';
 			return <ReviewEventView data={data} roleName={timeline.roleNames.get(role) ?? 'レビュー'} onContinue={onContinueGoal} continuing={continuing} />;
@@ -1512,8 +1702,17 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		}
 	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
 
+	// 承認モードで成果物の承認・差し戻しをしたら、セッションとログを取り直す
+	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise') => {
+		applySession(next);
+		toast.show(action === 'approve' ? '承認しました' : '差し戻しました', 'success');
+		follow.current = true;
+		void loadEvents();
+	}, [applySession, loadEvents, toast]);
+
 	const source = cloudSource(current);
 	const active = isActive(current.status);
+	const awaitingApproval = current.status === 'awaiting_approval';
 	const sendable = canSendMessage(current);
 	// Division Project の計画ごとのタスクの状態 (plan / task イベントが無ければ空)
 	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
@@ -1554,7 +1753,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 
 	const showChanges = tab === 'changes';
 	// 動いていて何も書いていなければ、送信ボタンを停止ボタンにする (Claude Code と同じ)
-	const stopMode = active && !draft.trim();
+	// 承認待ちのあいだは指示を送れない (サーバーも 409) ので、停止だけできるようにする
+	const stopMode = awaitingApproval || (active && !draft.trim());
 
 	return (
 		<KeyboardAvoidingView
@@ -1627,6 +1827,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 									<TypingBubble status={current.status} since={workingSince} />
 								</AgentTurn>
 							) : null}
+							{awaitingApproval ? (
+								<ApprovalCard key={id} auth={auth} sessionId={id} lastSeq={current.lastSeq} onResolved={onApprovalResolved} />
+							) : null}
 						</View>
 					</ScrollView>
 
@@ -1636,7 +1839,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 								value={draft}
 								onChangeText={setDraft}
 								editable={sendable}
-								placeholder={sendable ? (current.status === 'running' ? '作業中のエージェントに追加で指示する…' : '続きを指示する…') : '準備ができるまで指示は送れません'}
+								placeholder={awaitingApproval
+									? '成果物の承認待ちです。上のカードで承認するか差し戻してください'
+									: sendable ? (current.status === 'running' ? '作業中のエージェントに追加で指示する…' : '続きを指示する…') : '準備ができるまで指示は送れません'}
 								placeholderTextColor={colors.fgFaint}
 								selectionColor={colors.accentText}
 								accessibilityLabel='追加の指示'
@@ -1732,7 +1937,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP }));
+		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
 	}, [session?.userId]);
 
 	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
@@ -1768,7 +1973,9 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 				for (const s of finishedSessions(previousStatus.current, rows)) {
 					void notifyRemoteEvent(
 						'クラウドエージェント',
-						s.status === 'idle' ? `「${s.title}」が終わりました。` : `「${s.title}」が失敗しました。`,
+						s.status === 'idle' ? `「${s.title}」が終わりました。`
+							: s.status === 'awaiting_approval' ? `「${s.title}」が成果物の承認を待っています。`
+								: `「${s.title}」が失敗しました。`,
 						'cloud-session',
 					);
 				}
@@ -1857,6 +2064,8 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
 				goalLoop: draft.goalLoop,
+				// 承認モードは Division Project のときだけ
+				approvalMode: selection.mode === 'division' && draft.approvalMode,
 				// 1 つだけ起動したときは、作れた時点でそのセッションのチャットを開く (サンドボックスの用意はチャットの中で待つ)
 				onCreated: count === 1
 					? created => {
@@ -2345,6 +2554,13 @@ const styles = StyleSheet.create({
 	doneCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	doneText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
 	doneActions: { flexWrap: 'wrap' },
+	approval: { borderColor: withAlpha(colors.warning, '66') },
+	approvalFile: { color: colors.fgMuted, fontFamily: MONO, fontSize: fontSize.xs },
+	approvalEditor: { minHeight: 180, maxHeight: 360, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 19, textAlignVertical: 'top' },
+	approvalFeedback: { minHeight: 64, textAlignVertical: 'top' },
+	approvalEventText: { fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
+	approvalEventFile: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
+	toggleLabel: { color: colors.fg, fontSize: fontSize.sm },
 	typing: {
 		flexDirection: 'row',
 		alignItems: 'center',
