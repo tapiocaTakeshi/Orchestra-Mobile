@@ -21,7 +21,7 @@ import { TermsAgreementGate } from './src/components/TermsSheet';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
-import { HomeMode, HomeScreen } from './src/screens/HomeScreen';
+import { HomeScreen } from './src/screens/HomeScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ProjectsScreen } from './src/screens/ProjectsScreen';
@@ -55,8 +55,8 @@ const Shell = () => {
 	const [stack, setStack] = useState<PageKey[]>([]);
 	/** クラウドのページを開いたときにすぐ開くセッション (カンバンの「クラウドで開く」から) */
 	const [cloudSessionId, setCloudSessionId] = useState<string | null>(null);
-	/** ホームのモード。PC に繋いでいればリモートコントロール、そうでなければクラウドエージェントから始める。 */
-	const [homeMode, setHomeMode] = useState<HomeMode>(() => (connection ? 'remote' : 'cloud'));
+	/** ホームで PC (リモートコントロール) のチャットを開いているか。一覧はクラウドと PC を混ぜて出す */
+	const [pcChatOpen, setPcChatOpen] = useState(false);
 
 	// アカウントが替わったら、前のアカウントで開いていた画面を持ち越さない。
 	useEffect(() => {
@@ -66,10 +66,6 @@ const Shell = () => {
 
 	// 接続が切れたら、繋いでいないと使えないページには留まらない。
 	const connected = !!connection;
-	// 起動時に保存済みの接続が戻ったとき・接続先の一覧から繋いだときは、ホームをリモートコントロールにする。
-	useEffect(() => {
-		if (connected) setHomeMode('remote');
-	}, [connected]);
 	const visibleStack = useMemo(() => stack.filter(p => canOpenPage(p, connected)), [stack, connected]);
 	const openPage = visibleStack.length > 0 ? visibleStack[visibleStack.length - 1] : null;
 
@@ -145,7 +141,7 @@ const Shell = () => {
 			<BackProvider value={popPage}>
 				{/* ページを見ているあいだに承認を求められても気づけるよう、上に細い帯を出す */}
 				{awaitingApproval ? (
-					<Pressable accessibilityRole='button' onPress={() => { setHomeMode('remote'); setPage(null); }} style={styles.approvalBar}>
+					<Pressable accessibilityRole='button' onPress={() => { setPcChatOpen(true); setPage(null); }} style={styles.approvalBar}>
 						<View style={styles.approvalDot} />
 						<Text style={styles.approvalText}>ツールの実行が確認待ちです</Text>
 						<Text style={styles.approvalLink}>チャットへ</Text>
@@ -157,7 +153,7 @@ const Shell = () => {
 			</BackProvider>
 		);
 	} else {
-		content = <HomeScreen mode={homeMode} onModeChange={setHomeMode} onOpenPage={setPage} />;
+		content = <HomeScreen pcChatOpen={pcChatOpen} onPcChatOpenChange={setPcChatOpen} onOpenPage={setPage} />;
 	}
 
 	return (

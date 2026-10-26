@@ -54,9 +54,14 @@ jest.mock('../../components/ui', () => {
 	};
 });
 
-// 本文はドロワーのテストには関係ないので、headerTitle (☰ とモード切り替え) をそのまま出すだけのスタブ
+// 本文はドロワーのテストには関係ないので、headerTitle (☰ と見出し) をそのまま出すだけのスタブ。
+// PC のチャットを混ぜる一覧として渡されているか (onOpenPcChat) だけ覚えておく
+const mockCloudProps: { onOpenPcChat?: () => void }[] = [];
 jest.mock('../CloudAgentsScreen', () => ({
-	CloudAgentsScreen: ({ headerTitle }: { headerTitle?: React.ReactNode }) => <>{headerTitle}</>,
+	CloudAgentsScreen: (props: { headerTitle?: React.ReactNode; onOpenPcChat?: () => void }) => {
+		mockCloudProps.push(props);
+		return <>{props.headerTitle}</>;
+	},
 }));
 
 // モックを差し込んだうえで、テスト対象の画面を読み込む
@@ -103,12 +108,14 @@ const findButtonsByLabel = (root: ReactTestInstance, label: string): ReactTestIn
 
 let renderer: ReactTestRenderer | null = null;
 let onOpenPage: jest.Mock;
+let onPcChatOpenChange: jest.Mock;
 
 const render = async (): Promise<ReactTestRenderer> => {
 	onOpenPage = jest.fn();
+	onPcChatOpenChange = jest.fn();
 	await act(async () => {
 		renderer = create(
-			React.createElement(HomeScreen, { mode: 'cloud', onModeChange: jest.fn(), onOpenPage }),
+			React.createElement(HomeScreen, { pcChatOpen: false, onPcChatOpenChange, onOpenPage }),
 		);
 	});
 	return renderer!;
@@ -135,6 +142,21 @@ afterEach(async () => {
 		renderer = null;
 	}
 	jest.clearAllMocks();
+	mockCloudProps.length = 0;
+});
+
+describe('HomeScreen の一覧 (クラウドと PC を混ぜる)', () => {
+	it('クラウドの一覧に PC のチャットを混ぜて出し、見出しに PC との接続状態を出す', async () => {
+		const r = await render();
+		expect(findTextNode(r.root, 'Orchestra')).toBeTruthy();
+		expect(findTextNode(r.root, 'PC に未接続')).toBeTruthy();
+		// モードの切り替えは無くなった
+		expect(findTextNode(r.root, 'リモートコントロール')).toBeUndefined();
+		const props = mockCloudProps[mockCloudProps.length - 1];
+		expect(typeof props.onOpenPcChat).toBe('function');
+		await act(async () => { props.onOpenPcChat!(); });
+		expect(onPcChatOpenChange).toHaveBeenCalledWith(true);
+	});
 });
 
 // --- テスト ------------------------------------------------------------------

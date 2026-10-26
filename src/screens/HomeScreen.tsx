@@ -6,18 +6,18 @@
  *                              閉じているときはアイコンもラベルも完全に表示されず、本文は全幅で使える
  *                              (レールのような常設の幅・余白・不可視の操作領域は残らない)。
  *                              Division のプロジェクト管理は Division API 直結なので、PC 未接続でも開ける
- *   - 見出しのモード切り替え     … ChatGPT のモデル選択のように、題名を押して
- *                                「クラウドエージェント」と「リモートコントロール」を切り替える
- *   - 本文                     … クラウドエージェントなら起動の入力欄とセッション一覧、
- *                                リモートコントロールなら PC のチャット (未接続なら接続できる PC の一覧)
- *   - コスト                   … どちらのモードでも入力欄の「コスト」から、書いている指示の見積もりと方針を開く
+ *   - 本文                     … Claude Code のアプリのように、クラウドエージェントのセッションと
+ *                                PC (リモートコントロール) のチャット・接続できる PC を 1 つの一覧に混ぜる
+ *                                (全て / 稼働中 / 承認待ち / エラー で絞り込み)。入力欄の送り先で
+ *                                クラウドか接続中の PC かを選ぶ。PC のチャットを押すとリモートコントロールの画面を開く
+ *   - 見出し                   … PC との接続状態 (未接続 / 接続中 / 接続済み / 接続切れ)
+ *   - コスト                   … 入力欄の「コスト」から、書いている指示の見積もりと方針を開く
  */
 
-import React, { useCallback, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { BackHandler, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CloudAgentsScreen } from './CloudAgentsScreen';
-import { DiscoverScreen } from './DiscoverScreen';
 import { RemoteScreen } from './RemoteScreen';
 import { REMOTE_CONNECTION_LABELS } from '../lib/remoteSession';
 import { Drawer, Icon, IconButton, IconName, Muted, Sheet, confirmAction, useToast } from '../components/ui';
@@ -25,43 +25,6 @@ import { PageKey, DRAWER_PAGES, canOpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
-
-export type HomeMode = 'cloud' | 'remote';
-
-const MODES: { value: HomeMode; label: string; detail: string; icon: IconName }[] = [
-	{
-		value: 'cloud',
-		label: 'クラウドエージェント',
-		detail: 'Division のサンドボックスでエージェントを動かします。PC に繋いでいなくても使えます。',
-		icon: 'cloud',
-	},
-	{
-		value: 'remote',
-		label: 'リモートコントロール',
-		detail: 'PC の Orchestra に接続して、チャット・承認・中断を手元から操作します。',
-		icon: 'monitor',
-	},
-];
-
-/** ChatGPT のモデル選択のような見出し。押すとモードを選ぶシートを開く。 */
-const ModeSwitcher = ({ mode, subtitle, onPress }: { mode: HomeMode; subtitle?: string; onPress: () => void }) => {
-	const current = MODES.find(m => m.value === mode)!;
-	return (
-		<Pressable
-			accessibilityRole='button'
-			accessibilityLabel={`モード: ${current.label}。切り替える`}
-			hitSlop={6}
-			onPress={onPress}
-			style={({ pressed }) => [styles.switcher, pressed && styles.pressed]}
-		>
-			<View style={styles.switcherLine}>
-				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>{current.label}</Text>
-				<Icon name='chevron-down' size={16} color={colors.fgFaint} />
-			</View>
-			{subtitle ? <Text style={styles.switcherSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
-		</Pressable>
-	);
-};
 
 /** ドロワーの 1 項目。アイコンと名前を横に並べた 1 行 (ChatGPT のアプリのドロワーと同じ形)。 */
 const DrawerItem = ({ icon, label, title, locked, onPress }: {
@@ -158,18 +121,31 @@ const SheetRow = ({ icon, title, detail, selected, tone = 'default', onPress }: 
 	</Pressable>
 );
 
-export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
-	mode: HomeMode;
-	onModeChange: (mode: HomeMode) => void;
-	/** ドロワーやモードの中から開くページ (App のページの重なりに積む) */
+export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
+	/** PC (リモートコントロール) のチャットを開いているか (承認の帯から開けるよう App が持つ) */
+	pcChatOpen: boolean;
+	onPcChatOpenChange: (open: boolean) => void;
+	/** ドロワーや一覧の中から開くページ (App のページの重なりに積む) */
 	onOpenPage: (page: PageKey) => void;
 }) => {
 	const { connection, connectionStatus, snapshot, disconnect } = useApp();
 	const { session, logout } = useDivisionAuth();
-	const [sheet, setSheet] = useState<'mode' | 'account' | null>(null);
+	const [sheet, setSheet] = useState<'account' | null>(null);
 	// ナビゲーションドロワーの開閉。閉じている (初期状態) ときは画面にナビゲーションの痕跡を残さない。
 	const [drawerOpen, setDrawerOpen] = useState(false);
 	const connected = !!connection;
+	const showPcChat = pcChatOpen && connected;
+
+	// 接続を切ったら (接続先を選び直すなど) 一覧に戻る
+	useEffect(() => {
+		if (pcChatOpen && !connected) onPcChatOpenChange(false);
+	}, [pcChatOpen, connected, onPcChatOpenChange]);
+	// PC のチャットを開いているあいだは、Android の戻るキーで一覧に戻る
+	useEffect(() => {
+		if (!showPcChat) return;
+		const sub = BackHandler.addEventListener('hardwareBackPress', () => { onPcChatOpenChange(false); return true; });
+		return () => sub.remove();
+	}, [showPcChat, onPcChatOpenChange]);
 
 	/** ドロワーの項目から開く。ページに移ったあとドロワーは閉じる。 */
 	const openFromDrawer = useCallback((page: PageKey) => {
@@ -195,7 +171,7 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 	const remoteSubtitle = connectionStatus === 'disconnected'
 		? 'PC に未接続'
 		: `${REMOTE_CONNECTION_LABELS[connectionStatus]} · ${pcName}`;
-	const switcher = (
+	const homeHeader = (
 		<View style={styles.headerRow}>
 			<IconButton
 				icon='menu'
@@ -203,22 +179,26 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 				expanded={drawerOpen}
 				onPress={() => setDrawerOpen(true)}
 			/>
-			<ModeSwitcher
-				mode={mode}
-				subtitle={mode === 'remote' ? remoteSubtitle : undefined}
-				onPress={() => setSheet('mode')}
-			/>
+			<View style={styles.switcher}>
+				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>Orchestra</Text>
+				<Text style={styles.switcherSubtitle} numberOfLines={1}>{remoteSubtitle}</Text>
+			</View>
+		</View>
+	);
+	// PC のチャットを開いたときの見出し: 戻る + PC 名と接続状態
+	const pcChatHeader = (
+		<View style={styles.headerRow}>
+			<IconButton icon='chevron-left' accessibilityLabel='一覧に戻る' onPress={() => onPcChatOpenChange(false)} />
+			<View style={styles.switcher}>
+				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>{pcName}</Text>
+				<Text style={styles.switcherSubtitle} numberOfLines={1}>リモートコントロール · {REMOTE_CONNECTION_LABELS[connectionStatus]}</Text>
+			</View>
 		</View>
 	);
 
-	let content: React.ReactNode;
-	if (mode === 'cloud') {
-		content = <CloudAgentsScreen headerTitle={switcher} onOpenPage={page => onOpenPage(page)} />;
-	} else if (connected) {
-		content = <RemoteScreen headerTitle={switcher} onOpenPage={onOpenPage} />;
-	} else {
-		content = <DiscoverScreen headerTitle={switcher} onOpenPage={onOpenPage} />;
-	}
+	const content = showPcChat
+		? <RemoteScreen headerTitle={pcChatHeader} onOpenPage={onOpenPage} />
+		: <CloudAgentsScreen headerTitle={homeHeader} onOpenPage={page => onOpenPage(page)} onOpenPcChat={() => onPcChatOpenChange(true)} />;
 
 	return (
 		<View style={styles.root}>
@@ -231,23 +211,6 @@ export const HomeScreen = ({ mode, onModeChange, onOpenPage }: {
 				onOpenPage={openFromDrawer}
 				onAccount={() => { setDrawerOpen(false); setSheet('account'); }}
 			/>
-
-			{sheet === 'mode' ? (
-				<Sheet title='始める' onClose={() => setSheet(null)}>
-					<View style={styles.sheetContent}>
-						{MODES.map(m => (
-							<SheetRow
-								key={m.value}
-								icon={m.icon}
-								title={m.label}
-								detail={m.detail}
-								selected={m.value === mode}
-								onPress={() => { setSheet(null); onModeChange(m.value); }}
-							/>
-						))}
-					</View>
-				</Sheet>
-			) : null}
 
 			{sheet === 'account' ? (
 				<Sheet title='アカウント' eyebrow={session.email} onClose={() => setSheet(null)}>
