@@ -26,6 +26,7 @@ import type { PageKey } from '../../navigation';
 jest.mock('../../state/AppContext', () => ({
 	useApp: () => ({
 		connection: null,
+		connectionStatus: 'disconnected',
 		snapshot: null,
 		disconnect: jest.fn(),
 	}),

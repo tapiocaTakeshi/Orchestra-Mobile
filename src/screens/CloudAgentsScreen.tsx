@@ -122,6 +122,10 @@ import {
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	CLOUD_SESSION_FILTERS,
+	CloudSessionFilter,
+	countCloudSessionsByFilter,
+	matchesCloudSessionFilter,
 	isDivisionProjectModel,
 	isFullNameRepo,
 	lastSeqOf,
@@ -2107,6 +2111,17 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 		return () => sub.remove();
 	}, [detailOpen]);
 	const activeCount = useMemo(() => sessions.filter(s => isActive(s.status)).length, [sessions]);
+	// 全て / 稼働中 / 承認待ち / エラー で一覧を絞り込む
+	const [listFilter, setListFilter] = useState<CloudSessionFilter>('all');
+	const filterCounts = useMemo(() => countCloudSessionsByFilter(sessions), [sessions]);
+	const visibleSessions = useMemo(
+		() => sessions.filter(s => matchesCloudSessionFilter(s.status, listFilter)),
+		[sessions, listFilter],
+	);
+	const filterOptions = useMemo(
+		() => CLOUD_SESSION_FILTERS.map(f => ({ value: f.value, label: filterCounts[f.value] > 0 ? `${f.label} ${filterCounts[f.value]}` : f.label })),
+		[filterCounts],
+	);
 	const cost = useMemo(() => sumCloudCosts(sessions), [sessions]);
 	// 一覧の行には、名前が分かるときだけプロジェクトを出す (詳細では ID の先頭でも出す)
 	const projectNameOf = useCallback(
@@ -2223,8 +2238,14 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 									</Pressable>
 								) : null}
 							</View>
+							<SegmentedControl<CloudSessionFilter>
+								options={filterOptions}
+								value={listFilter}
+								onChange={setListFilter}
+								style={styles.filterTabs}
+							/>
 							<View>
-								{sessions.map(item => (
+								{visibleSessions.map(item => (
 									<SessionRow
 										key={item.id}
 										item={item}
@@ -2234,6 +2255,13 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle }:
 										onStop={() => void stopFromList(item)}
 									/>
 								))}
+								{visibleSessions.length === 0 ? (
+									<Muted style={styles.filterEmpty}>
+										{listFilter === 'running' ? '稼働中のセッションはありません。'
+											: listFilter === 'approval' ? '承認待ちのセッションはありません。'
+												: '失敗したセッションはありません。'}
+									</Muted>
+								) : null}
 							</View>
 							<Muted style={styles.footnote}>
 								変更を手元に取り込むのは PC の Orchestra で行います。
@@ -2426,6 +2454,8 @@ const styles = StyleSheet.create({
 	},
 	statusInline: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	statusLabel: { fontSize: fontSize.xs, fontWeight: '600' },
+	filterTabs: { marginBottom: spacing.sm },
+	filterEmpty: { paddingVertical: spacing.lg, textAlign: 'center' },
 
 	// ログ (チャット)
 	logContent: {

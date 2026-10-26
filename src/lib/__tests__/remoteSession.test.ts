@@ -78,3 +78,39 @@ describe('claimRemoteSyncNotice', () => {
 		expect(claimRemoteSyncNotice(syncedAt + 1)).toBe(true);
 	});
 });
+
+describe('remote connection status', () => {
+	const { remoteConnectionStatus, chatConnectionBadge, remoteDeviceStatus, REMOTE_DEVICE_OFFLINE_AFTER_MS, REMOTE_DEVICE_HIDE_AFTER_MS } = jest.requireActual('../remoteSession');
+
+	test('未接続 / 接続中 / 接続済み / 接続切れ', () => {
+		expect(remoteConnectionStatus({ hasConnection: false, hasSnapshot: false, failing: false })).toBe('disconnected');
+		expect(remoteConnectionStatus({ hasConnection: true, hasSnapshot: false, failing: false })).toBe('connecting');
+		expect(remoteConnectionStatus({ hasConnection: true, hasSnapshot: true, failing: false })).toBe('connected');
+		// 続けて失敗していれば、前の内容が残っていても接続切れ
+		expect(remoteConnectionStatus({ hasConnection: true, hasSnapshot: true, failing: true })).toBe('lost');
+		expect(remoteConnectionStatus({ hasConnection: true, hasSnapshot: false, failing: true })).toBe('lost');
+	});
+
+	test('チャットごとの印', () => {
+		const badge = (status: string, isActive: boolean, isRemoteControlled = false) =>
+			chatConnectionBadge({ status, isActive, isRemoteControlled })?.label ?? null;
+		expect(badge('connected', true)).toBe('接続済み');
+		expect(badge('connected', false)).toBeNull();
+		expect(badge('connected', false, true)).toBe('リモート操作中');
+		expect(badge('connected', true, true)).toBe('リモート操作中');
+		expect(badge('lost', true)).toBe('接続切れ');
+		expect(badge('lost', false)).toBe('接続切れ');
+		expect(badge('connecting', true)).toBe('接続中');
+		expect(badge('connecting', false)).toBeNull();
+		expect(badge('disconnected', false)).toBe('未接続');
+	});
+
+	test('PC ごとの状態: つなげる / 接続切れ / 古すぎて出さない', () => {
+		const now = Date.parse('2026-10-26T12:00:00Z');
+		const ago = (ms: number) => new Date(now - ms).toISOString();
+		expect(remoteDeviceStatus(ago(30_000), now)).toBe('available');
+		expect(remoteDeviceStatus(ago(REMOTE_DEVICE_OFFLINE_AFTER_MS + 1), now)).toBe('offline');
+		expect(remoteDeviceStatus(ago(REMOTE_DEVICE_HIDE_AFTER_MS + 1), now)).toBeNull();
+		expect(remoteDeviceStatus('not a date', now)).toBeNull();
+	});
+});

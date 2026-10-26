@@ -706,6 +706,40 @@ export const cloudStatusColor = (status: CloudSessionStatus): string => {
 export const isActive = (status: CloudSessionStatus): boolean =>
 	status === 'provisioning' || status === 'uploading' || status === 'running';
 
+/**
+ * ホームのセッション (チャット) 一覧の絞り込み。
+ *   - all      … 全て
+ *   - running  … 稼働中 (準備中・アップロード中・実行中)
+ *   - approval … 承認待ち (承認モードで成果物の承認を待っている)
+ *   - error    … エラー (失敗した)
+ */
+export type CloudSessionFilter = 'all' | 'running' | 'approval' | 'error';
+
+export const CLOUD_SESSION_FILTERS: { value: CloudSessionFilter; label: string }[] = [
+	{ value: 'all', label: '全て' },
+	{ value: 'running', label: '稼働中' },
+	{ value: 'approval', label: '承認待ち' },
+	{ value: 'error', label: 'エラー' },
+];
+
+export const matchesCloudSessionFilter = (status: CloudSessionStatus, filter: CloudSessionFilter): boolean => {
+	switch (filter) {
+		case 'running': return isActive(status);
+		case 'approval': return status === 'awaiting_approval';
+		case 'error': return status === 'failed';
+		default: return true;
+	}
+};
+
+/** 絞り込みごとの件数 (タブに出す) */
+export const countCloudSessionsByFilter = (sessions: Pick<CloudSession, 'status'>[]): Record<CloudSessionFilter, number> => {
+	const counts: Record<CloudSessionFilter, number> = { all: 0, running: 0, approval: 0, error: 0 };
+	for (const s of sessions) {
+		for (const f of CLOUD_SESSION_FILTERS) if (matchesCloudSessionFilter(s.status, f.value)) counts[f.value] += 1;
+	}
+	return counts;
+};
+
 /** 追加の指示を送れるか。開始前 (サンドボックス用意中) に止めたセッションはサーバーが受け付けない。 */
 export const canSendMessage = (session: Pick<CloudSession, 'status' | 'startedAt'>): boolean =>
 	['running', 'idle', 'failed', 'cancelled'].includes(session.status) && !!session.startedAt;

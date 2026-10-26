@@ -59,3 +59,72 @@ export const claimRemoteSyncNotice = (syncedAt: number): boolean => {
 	if (claimedSyncs.size > 50) claimedSyncs.delete(claimedSyncs.values().next().value as number);
 	return true;
 };
+
+// ---------------------------------------------------------------------------
+// PC との接続状態 (リモートコントロール)
+// ---------------------------------------------------------------------------
+
+/**
+ * リモートコントロールの接続状態。
+ *   - disconnected … 未接続 (接続先を選んでいない)
+ *   - connecting   … 接続先は選んだが、まだ PC から状態を受け取っていない
+ *   - connected    … 接続済み (ポーリングが通っている)
+ *   - lost         … 接続切れ (ポーリングが続けて失敗している。PC のスリープ・別の Wi-Fi など)
+ */
+export type RemoteConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'lost';
+
+export const remoteConnectionStatus = (input: {
+	hasConnection: boolean;
+	hasSnapshot: boolean;
+	/** 続けて失敗している (AppContext は 2 回続けて失敗したら error を立てる) */
+	failing: boolean;
+}): RemoteConnectionStatus => {
+	if (!input.hasConnection) return 'disconnected';
+	if (input.failing) return 'lost';
+	return input.hasSnapshot ? 'connected' : 'connecting';
+};
+
+export const REMOTE_CONNECTION_LABELS: Record<RemoteConnectionStatus, string> = {
+	disconnected: '未接続',
+	connecting: '接続中',
+	connected: '接続済み',
+	lost: '接続切れ',
+};
+
+/**
+ * チャット (スレッド) ごとの状態。開いているチャットは PC との接続状態をそのまま持ち、
+ * PC で `/remote-control` したチャットは「リモート操作中」と分かるようにする。
+ * 接続が切れていれば、どのチャットも PC に届かないので一律に「接続切れ」。
+ */
+export type ChatConnectionBadge = { label: string; tone: 'success' | 'running' | 'warning' | 'danger' | 'muted' };
+
+export const chatConnectionBadge = (input: {
+	status: RemoteConnectionStatus;
+	/** このチャットが PC で今開いているチャット */
+	isActive: boolean;
+	/** このチャットが PC の `/remote-control` で同期したチャット */
+	isRemoteControlled: boolean;
+}): ChatConnectionBadge | null => {
+	if (input.status === 'lost') return { label: '接続切れ', tone: 'danger' };
+	if (input.status === 'disconnected') return { label: '未接続', tone: 'muted' };
+	if (input.status === 'connecting') return input.isActive ? { label: '接続中', tone: 'warning' } : null;
+	if (input.isRemoteControlled) return { label: 'リモート操作中', tone: 'running' };
+	if (input.isActive) return { label: '接続済み', tone: 'success' };
+	return null;
+};
+
+/** PC (RemoteSession の行) ごとの状態: 一覧に出すのは未接続 (つなげる) と接続切れ (最近まで見えていた) */
+export type RemoteDeviceStatus = 'available' | 'offline';
+
+/** ハートビートがこれより古い PC は「接続切れ」として出す (ハートビート間隔は約 25 秒) */
+export const REMOTE_DEVICE_OFFLINE_AFTER_MS = 2 * 60 * 1000;
+/** これより古い PC は一覧に出さない (使われなくなった古い行) */
+export const REMOTE_DEVICE_HIDE_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
+
+export const remoteDeviceStatus = (lastSeenAt: string, now = Date.now()): RemoteDeviceStatus | null => {
+	const seen = Date.parse(lastSeenAt);
+	if (!Number.isFinite(seen)) return null;
+	const age = now - seen;
+	if (age > REMOTE_DEVICE_HIDE_AFTER_MS) return null;
+	return age > REMOTE_DEVICE_OFFLINE_AFTER_MS ? 'offline' : 'available';
+};

@@ -7,6 +7,9 @@
  *   - 目標ループの切り替え (自動 / 毎回確認) と、「毎回確認」で止まったときの続行・停止
  *   - 左上のメニューから、スレッドの切り替えと各ページ (カンバンなど) への移動
  *
+ * PC との接続状態 (未接続 / 接続中 / 接続済み / 接続切れ) はヘッダーと各チャットに出し、
+ * 接続が切れたら最後に受け取った内容を残したまま送信を止める (読み込み中のまま固まらない)。
+ *
  * 見た目は Claude Code のように飾りを減らしている: エージェントの返答は枠なしの本文、
  * ツールの実行は 1 行 (押すと出力を開く)、承認の確認は入力欄のすぐ上に出す。
  */
@@ -32,6 +35,7 @@ import { OrchestraApiError } from '../api/client';
 import { ChatMessage, GoalLoopMode, PendingReview, ThreadSummary } from '../api/types';
 import { Markdown } from '../components/Markdown';
 import {
+	Badge,
 	Button,
 	ErrorBanner,
 	Icon,
@@ -44,6 +48,7 @@ import {
 	useToast,
 } from '../components/ui';
 import { oneLine, relativeTimeFromIso } from '../lib/format';
+import { ChatConnectionBadge, REMOTE_CONNECTION_LABELS, RemoteConnectionStatus, chatConnectionBadge } from '../lib/remoteSession';
 import { PageKey, pagesFor } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
@@ -132,10 +137,26 @@ const approvalCopy = (review: PendingReview | null | undefined) => {
 	return { title: `${review.title} を確認してください`, note: '承認するまでエージェントは止まったままです。', approve: '承認して続行', reject: '却下', approved: '承認しました', rejected: '却下しました' };
 };
 
-const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?: boolean; onPress: () => void }) => (
+const BADGE_COLORS: Record<ChatConnectionBadge['tone'], string> = {
+	success: colors.success,
+	running: colors.running,
+	warning: colors.warning,
+	danger: colors.danger,
+	muted: colors.fgFaint,
+};
+
+const CONNECTION_COLORS: Record<RemoteConnectionStatus, string> = {
+	disconnected: colors.fgFaint,
+	connecting: colors.warning,
+	connected: colors.success,
+	lost: colors.danger,
+};
+
+const ThreadRow = ({ thread, active, badge, onPress }: { thread: ThreadSummary; active?: boolean; badge?: ChatConnectionBadge | null; onPress: () => void }) => (
 	<Pressable
 		accessibilityRole='button'
 		accessibilityState={{ selected: !!active }}
+		accessibilityLabel={`${oneLine(thread.title)}${badge ? ` (${badge.label})` : ''}`}
 		onPress={onPress}
 		style={({ pressed }) => [styles.listRow, pressed && styles.listRowPressed]}
 	>
@@ -143,9 +164,40 @@ const ThreadRow = ({ thread, active, onPress }: { thread: ThreadSummary; active?
 			<Text style={styles.listTitle} numberOfLines={1}>{oneLine(thread.title)}</Text>
 			<Muted>{relativeTimeFromIso(thread.lastModified)} · {thread.messageCount} 件</Muted>
 		</View>
+		{badge ? <Badge label={badge.label} color={BADGE_COLORS[badge.tone]} /> : null}
 		{active ? <Icon name='check' size={18} color={colors.fg} /> : null}
 	</Pressable>
 );
+
+/** まだ PC から状態を受け取れていないとき (接続中 / 接続切れ) の画面。読み込み中のまま固まらないようにする。 */
+const ConnectionState = ({ status, error, label, onRetry, onChoose }: {
+	status: RemoteConnectionStatus;
+	error: string | null;
+	label?: string;
+	onRetry: () => void;
+	onChoose: () => void;
+}) => {
+	const lost = status === 'lost';
+	return (
+		<View style={styles.connectionState} accessibilityLiveRegion='polite'>
+			<View style={[styles.greetingIcon, lost && styles.connectionIconLost]}>
+				{lost ? <Icon name='wifi-off' size={22} color={colors.danger} /> : <ActivityIndicator size='small' color={colors.warning} />}
+			</View>
+			<Text accessibilityRole='header' style={styles.greetingTitle}>
+				{lost ? 'PC との接続が切れています' : `${label || 'PC'} に接続しています…`}
+			</Text>
+			<Text style={styles.greetingLead}>
+				{lost
+					? `${error ? `${error}\n` : ''}PC がスリープしていないか、Orchestra が起動しているか、同じ Wi-Fi につながっているかを確かめてください。`
+					: 'PC からチャットの状態を受け取っています。'}
+			</Text>
+			<View style={styles.connectionButtons}>
+				{lost ? <Button title='再接続' onPress={onRetry} /> : null}
+				<Button title='接続先を選び直す' variant='secondary' onPress={onChoose} />
+			</View>
+		</View>
+	);
+};
 
 export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	onOpenPage: (page: PageKey) => void;
@@ -155,7 +207,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	 */
 	headerTitle?: React.ReactNode;
 }) => {
-	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
+	const { snapshot, error, refresh, isRefreshing, invalidate, client, connection, connectionStatus, lastSuccessAt, disconnect } = useApp();
 
 	const toast = useToast();
 	const [draft, setDraft] = useState('');
@@ -206,29 +258,55 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 		}
 	}, [draft, client, invalidate, sending, toast]);
 
-	if (!snapshot || !client) {
+	if (!client) {
 		return (
 			<Screen>
-				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-				<Loading label='IDE の状態を取得しています…' />
+				<Loading label='接続先を確認しています…' />
 			</Screen>
 		);
 	}
+
+	if (!snapshot) {
+		return (
+			<Screen>
+				{headerTitle !== undefined ? <View style={[styles.header, styles.headerInHome]}><View style={styles.flex}>{headerTitle}</View></View> : null}
+				<ConnectionState
+					status={connectionStatus}
+					error={error}
+					label={connection?.label}
+					onRetry={() => void refresh()}
+					onChoose={() => void disconnect()}
+				/>
+			</Screen>
+		);
+	}
+
+	const lost = connectionStatus === 'lost';
 
 	const isRunning = !!chat?.isRunning;
 	const isAwaiting = !!chat?.awaitingApproval;
 	const approval = approvalCopy(chat?.pendingReview);
 	const goalLoopMode = chat?.goalLoopMode ?? null;
 	const hasMessages = !!chat && chat.messages.length > 0;
-	const canSend = !!draft.trim() && !sending;
-	const status = isAwaiting
-		? { label: '確認待ち', color: colors.warning }
-		: isRunning
-			? { label: '作業中', color: colors.running }
-			: { label: '待機中', color: colors.fgFaint };
+	const canSend = !!draft.trim() && !sending && !lost;
+	// 接続が切れていれば、作業中かどうかも分からない (最後に見た内容でしかない) ので接続切れを出す
+	const status = lost
+		? { label: REMOTE_CONNECTION_LABELS.lost, color: CONNECTION_COLORS.lost }
+		: isAwaiting
+			? { label: '確認待ち', color: colors.warning }
+			: isRunning
+				? { label: '作業中', color: colors.running }
+				: { label: '待機中', color: colors.fgFaint };
+	const remoteThreadId = snapshot.remoteSession?.threadId ?? null;
+	const badgeFor = (threadId: string) => chatConnectionBadge({
+		status: connectionStatus,
+		isActive: threadId === chat?.threadId,
+		isRemoteControlled: threadId === remoteThreadId,
+	});
 
 	const switchThread = (threadId: string) => {
 		setSheet(null);
+		if (lost) { toast.show('PC との接続が切れているため、チャットを切り替えられません。', 'error'); return; }
 		if (threadId !== chat?.threadId) void act(() => client.switchThread(threadId), 'スレッドを切り替えました');
 	};
 
@@ -239,8 +317,6 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				behavior={Platform.OS === 'ios' ? 'padding' : undefined}
 				keyboardVerticalOffset={insets.top}
 			>
-				{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
-
 				<View style={[styles.header, headerTitle !== undefined && styles.headerInHome]}>
 					{headerTitle === undefined ? <IconButton icon='menu' accessibilityLabel='メニュー' onPress={() => setSheet('menu')} /> : null}
 					{headerTitle !== undefined ? <View style={styles.flex}>{headerTitle}</View> : <View style={styles.flex}>
@@ -248,7 +324,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						<View style={styles.statusRow} accessibilityLabel={`状態: ${status.label}`}>
 							<View style={[styles.statusDot, { backgroundColor: status.color }]} />
 							<Text style={styles.statusText} numberOfLines={1}>
-								{status.label} · {snapshot.remoteSession ? 'PC と同期中' : `${ide?.appName} ${ide?.version}`}
+								{status.label} · {lost ? REMOTE_CONNECTION_LABELS.lost : snapshot.remoteSession ? 'リモート操作中' : REMOTE_CONNECTION_LABELS.connected}
 							</Text>
 						</View>
 					</View>}
@@ -259,9 +335,15 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						</View>
 					) : null}
 					{headerTitle !== undefined ? <IconButton icon='clock' accessibilityLabel='最近のチャット' onPress={() => setSheet('menu')} /> : null}
-					<IconButton icon='edit' accessibilityLabel='新しいチャット' onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
+					<IconButton icon='edit' accessibilityLabel='新しいチャット' disabled={lost} onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
 				</View>
 
+				{lost ? (
+					<ErrorBanner
+						message={`PC との接続が切れています${error ? ` (${error})` : ''}。${lastSuccessAt ? `${relativeTimeFromIso(new Date(lastSuccessAt).toISOString())}の内容を表示しています。` : ''}送信と承認は再接続するまでできません。`}
+						onRetry={() => void refresh()}
+					/>
+				) : null}
 				{chat?.error ? <ErrorBanner message={chat.error} /> : null}
 
 				<View style={styles.flex}>
@@ -325,8 +407,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						) : null}
 						<Muted>{approval.note}</Muted>
 						<View style={styles.approvalButtons}>
-							<Button title={approval.approve} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
-							<Button title={approval.reject} variant='secondary' onPress={() => void act(() => client.rejectTool(), approval.rejected)} style={styles.flex} />
+							<Button title={approval.approve} disabled={lost} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
+							<Button title={approval.reject} variant='secondary' disabled={lost} onPress={() => void act(() => client.rejectTool(), approval.rejected)} style={styles.flex} />
 						</View>
 					</View>
 				) : null}
@@ -336,7 +418,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						<TextInput
 							value={draft}
 							onChangeText={setDraft}
-							placeholder={isRunning ? 'エージェントが作業中です…' : 'エージェントに指示する…'}
+							placeholder={lost ? 'PC との接続が切れています' : isRunning ? 'エージェントが作業中です…' : 'エージェントに指示する…'}
+							editable={!lost}
 							placeholderTextColor={colors.fgFaint}
 							selectionColor={colors.fgMuted}
 							accessibilityLabel='エージェントへの指示'
@@ -371,7 +454,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 								</Pressable>
 							) : null}
 							<View style={styles.flex} />
-							{isRunning && !isAwaiting && !draft.trim() ? (
+							{isRunning && !isAwaiting && !draft.trim() && !lost ? (
 								<Pressable
 									accessibilityRole='button'
 									accessibilityLabel='エージェントを止める'
@@ -420,7 +503,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 									{headerTitle !== undefined ? null : <SectionTitle>最近のチャット</SectionTitle>}
 									<View>
 										{snapshot.threads.map(t => (
-											<ThreadRow key={t.threadId} thread={t} active={t.threadId === chat?.threadId} onPress={() => switchThread(t.threadId)} />
+											<ThreadRow key={t.threadId} thread={t} active={t.threadId === chat?.threadId} badge={badgeFor(t.threadId)} onPress={() => switchThread(t.threadId)} />
 										))}
 									</View>
 								</View>
@@ -440,6 +523,15 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 };
 
 const styles = StyleSheet.create({
+	connectionState: {
+		flex: 1,
+		alignItems: 'center',
+		justifyContent: 'center',
+		gap: spacing.md,
+		paddingHorizontal: spacing.xl,
+	},
+	connectionIconLost: { backgroundColor: withAlpha(colors.danger, '1f') },
+	connectionButtons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
 	flex: { flex: 1 },
 	header: {
 		flexDirection: 'row',
