@@ -5,6 +5,9 @@
  * PC で `/remote-control` が実行されたとき (syncedAt の更新) にローカル通知を出す
  * (Phase 1: アプリがフォアグラウンド/起動中のみ。
  * アプリを完全に閉じていても届く本物の push 通知は将来のフェーズで扱う)。
+ *
+ * 利用規約への同意 (App Store Guideline 1.2) もここで持つ。同意した版は端末に保存し
+ * (ログイン前に同意するため)、ログインできたらサーバーにも記録する。
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
@@ -19,6 +22,9 @@ import {
 	subscribeToRemoteSessions,
 } from '../lib/divisionAuth';
 import { clearDivisionSession, loadDivisionSession, saveDivisionSession } from '../lib/divisionSession';
+import { TERMS_VERSION } from '../lib/legal';
+import { needsTermsAgreement, recordTermsAcceptance } from '../lib/terms';
+import { loadAcceptedTermsVersion, saveAcceptedTermsVersion } from './termsStorage';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import { claimRemoteSyncNotice, freshRemoteSync } from '../lib/remoteSession';
 
@@ -30,6 +36,10 @@ type DivisionAuthContextValue = {
 	/** DiscoverScreen が「新着」バッジを出すためのデバイス ID 集合。表示したら dismissNewSession で消す。 */
 	newSessionIds: string[];
 	dismissNewSession: (id: string) => void;
+	/** 最新の利用規約 (TERMS_VERSION) に同意済みか。false ならログインも先に進むこともできない。 */
+	termsAccepted: boolean;
+	/** 最新の利用規約に同意する。端末に保存し、ログイン中ならサーバーにも記録する。 */
+	acceptTerms: () => Promise<void>;
 };
 
 const DivisionAuthContext = createContext<DivisionAuthContextValue | null>(null);
@@ -80,13 +90,19 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 	const [session, setSession] = useState<DivisionSession | null>(null);
 	const [isRestoring, setIsRestoring] = useState(true);
 	const [newSessionIds, setNewSessionIds] = useState<string[]>([]);
+	const [acceptedTermsVersion, setAcceptedTermsVersion] = useState<string | null>(null);
+	/** login のコールバックから最新の値を読むため (state だと古い値を掴む)。 */
+	const acceptedTermsRef = useRef<string | null>(null);
 
 	const unsubscribeRef = useRef<(() => void) | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		void (async () => {
-			const saved = await loadDivisionSession();
+			const [saved, termsVersion] = await Promise.all([loadDivisionSession(), loadAcceptedTermsVersion()]);
+			if (cancelled) return;
+			acceptedTermsRef.current = termsVersion;
+			setAcceptedTermsVersion(termsVersion);
 			if (!saved) {
 				if (!cancelled) setIsRestoring(false);
 				return;
@@ -130,7 +146,16 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 		const next = await signInWithDivision(email, password);
 		setSession(next);
 		await saveDivisionSession(next);
+		// ログイン前に同意した規約をサーバーにも記録する。失敗してもログインは止めない。
+		if (!needsTermsAgreement(acceptedTermsRef.current)) void recordTermsAcceptance(next, TERMS_VERSION);
 	}, []);
+
+	const acceptTerms = useCallback(async () => {
+		acceptedTermsRef.current = TERMS_VERSION;
+		setAcceptedTermsVersion(TERMS_VERSION);
+		await saveAcceptedTermsVersion(TERMS_VERSION);
+		if (session) void recordTermsAcceptance(session, TERMS_VERSION);
+	}, [session]);
 
 	const logout = useCallback(async () => {
 		await signOutDivision();
@@ -145,6 +170,8 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 
 	const value: DivisionAuthContextValue = {
 		session, isRestoring, login, logout, newSessionIds, dismissNewSession,
+		termsAccepted: !needsTermsAgreement(acceptedTermsVersion),
+		acceptTerms,
 	};
 
 	return <DivisionAuthContext.Provider value={value}>{children}</DivisionAuthContext.Provider>;

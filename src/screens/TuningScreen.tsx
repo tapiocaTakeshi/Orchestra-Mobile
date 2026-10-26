@@ -7,6 +7,7 @@
  *   - 利用履歴  … 実測のトークン数と料金 (日別・役割別・モデル別の集計つき)。
  *                 クラウドエージェントのセッションごとの料金 (最近のもの) もここに出す
  *   - 管理      … プラン、クレジット残高、自動チャージ、支払い
+ *                 (iOS は App 内課金だけ。Stripe の購入・自動チャージへの導線は出さない: Guideline 3.1.1)
  *
  * すべて Division (Supabase / Division API) 直結なので、PC に接続していなくても使える。
  */
@@ -40,6 +41,8 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { AppStorePurchaseCard } from '../components/AppStorePurchaseCard';
+import { usesAppStoreBilling } from '../lib/appStorePurchases';
 import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
@@ -750,6 +753,9 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 							</Card>
 
+							{usesAppStoreBilling() ? (
+								<AppStorePurchaseCard session={session} isPlus={profile.isPaid} onPurchased={() => void loadAccount()} />
+							) : <>
 							<Card>
 								<SectionTitle>自動チャージ</SectionTitle>
 								<Muted>残高がしきい値を下回ったときに、登録済みの支払い方法で自動的にチャージします。</Muted>
@@ -814,6 +820,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 								<Muted>支払いはブラウザの Stripe の画面で行います。</Muted>
 							</Card>
+							</>}
 
 							{transactions.length > 0 ? (
 								<Card>

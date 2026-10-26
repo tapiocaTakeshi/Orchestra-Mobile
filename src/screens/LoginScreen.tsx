@@ -4,27 +4,38 @@
  * Division アカウント (デスクトップと共通) でサインインすると、次に DiscoverScreen が
  * ログイン中アカウントに紐づくデスクトップセッションを自動的に探してくれる。
  * アカウントを使わない場合は、下のリンクから今まで通り手動ペアリングもできる。
+ *
+ * App Store Guideline 1.2 のため、利用規約 (不適切なコンテンツ・迷惑行為を許容しない旨を含む) に
+ * 同意しないとログインできない。規約の全文は「利用規約」からアプリ内で読める。
  */
 
 import React, { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
+import { LegalLinks, TermsCheckbox, TermsSheet } from '../components/TermsSheet';
 import { ErrorBanner, IconButton, Input } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 export const LoginScreen = () => {
-	const { login } = useDivisionAuth();
+	const { login, termsAccepted, acceptTerms } = useDivisionAuth();
 
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 	const [showPassword, setShowPassword] = useState(false);
+	/** 以前に最新の規約へ同意していればチェック済みから始める (版が上がっていれば外れている)。 */
+	const [agreed, setAgreed] = useState(termsAccepted);
+	const [showTerms, setShowTerms] = useState(false);
 	const passwordRef = useRef<TextInput>(null);
 
 	const onSubmit = useCallback(async () => {
 		if (busy) return;
+		if (!agreed) {
+			setStatus('ログインするには利用規約に同意してください。');
+			return;
+		}
 		if (!email.trim() || !password) {
 			setStatus('メールアドレスとパスワードを入力してください。');
 			return;
@@ -32,13 +43,15 @@ export const LoginScreen = () => {
 		setBusy(true);
 		setStatus(null);
 		try {
+			// 同意した版を先に保存してからログインする (ログイン後にサーバーへも記録される)。
+			if (!termsAccepted) await acceptTerms();
 			await login(email.trim(), password);
 		} catch (e) {
 			setStatus(e instanceof Error ? e.message : 'ログインに失敗しました。');
 		} finally {
 			setBusy(false);
 		}
-	}, [busy, email, password, login]);
+	}, [busy, agreed, email, password, termsAccepted, acceptTerms, login]);
 
 	// 飾りの箱や色は使わず、ロゴ・見出し・入力欄・ボタンだけを縦に並べる。
 	return (
@@ -91,23 +104,36 @@ export const LoginScreen = () => {
 									onPress={() => setShowPassword(v => !v)}
 								/>
 							</View>
+							<TermsCheckbox
+								checked={agreed}
+								onToggle={() => { setAgreed(v => !v); setStatus(null); }}
+								onOpenTerms={() => setShowTerms(true)}
+							/>
 							{status ? <ErrorBanner message={status} style={styles.bannerFlush} /> : null}
 							<Pressable
 								accessibilityRole='button'
 								accessibilityLabel='ログイン'
-								accessibilityState={{ disabled: busy, busy }}
+								accessibilityHint={agreed ? undefined : '利用規約に同意するとログインできます'}
+								accessibilityState={{ disabled: busy || !agreed, busy }}
 								disabled={busy}
 								onPress={() => { void onSubmit(); }}
-								style={({ pressed }) => [styles.loginButton, pressed && styles.loginButtonPressed, busy && styles.loginButtonBusy]}
+								style={({ pressed }) => [styles.loginButton, pressed && agreed && styles.loginButtonPressed, (busy || !agreed) && styles.loginButtonBusy]}
 							>
 								{busy ? <ActivityIndicator color={colors.bg} size='small' /> : null}
 								<Text style={styles.loginText}>{busy ? 'ログインしています…' : 'ログイン'}</Text>
 							</Pressable>
 							<Text style={styles.noteText}>アカウントの作成はデスクトップの Orchestra から</Text>
+							<View style={styles.legalLinks}><LegalLinks /></View>
 						</View>
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
+			{showTerms ? (
+				<TermsSheet
+					onClose={() => setShowTerms(false)}
+					onAgree={() => { setAgreed(true); setStatus(null); }}
+				/>
+			) : null}
 		</View>
 	);
 };
@@ -144,5 +170,6 @@ const styles = StyleSheet.create({
 	loginButtonPressed: { backgroundColor: colors.fgMuted },
 	loginButtonBusy: { opacity: 0.6 },
 	loginText: { color: colors.bg, fontSize: fontSize.sm - 1, fontWeight: '600' },
+	legalLinks: { alignItems: 'center', marginTop: spacing.sm },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, textAlign: 'center', marginTop: spacing.sm },
 });
