@@ -16,6 +16,8 @@
  *   GET  /api/cloud-sessions/:id/changes     変更ファイルと unified diff
  *   GET  /api/cloud-sessions/:id/pull-request  PR の状態と作成フォームの初期値 (GitHub のリポジトリから始めたセッションだけ)
  *   POST /api/cloud-sessions/:id/pull-request  PR を作成 / 既存の PR に push して更新
+ *   GET  /api/cloud-sessions/:id/approval      承認モードで承認待ちの成果物 (.division/*.md など) と内容
+ *   POST /api/cloud-sessions/:id/approval      承認して続行 / フィードバックを付けて差し戻す (編集した内容も一緒に送れる)
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -30,6 +32,10 @@
  * ラウンドごとにレビュアーが確かめて (review イベント)、目標を達成するまで作業を繰り返す。
  * 'confirm' は未達のラウンドごとに止まり、continueGoal で次のラウンドへ進む。
  *
+ * 承認モード (作成時の approvalMode。Division Project だけ): coder 以外の役割のタスクが成果物 (.division/REVIEW.md など) を
+ * 書き終えるたびに awaiting_approval で止まる。GET .../approval で中身を読み、POST .../approval で
+ * 承認 (次のタスクへ) か差し戻し (同じ役割がフィードバックに沿ってやり直す) をすると再開する (approval イベント)。
+ *
  * 後半の純粋関数 (状態の表示名・イベントの結合・ツールの要約・URL の検証など) は UI 非依存なので
  * そのままテストできる。
  */
@@ -43,7 +49,8 @@ import { colors } from '../theme';
 // 型 (Division 側の DTO と同じ形)
 // ---------------------------------------------------------------------------
 
-export type CloudSessionStatus = 'provisioning' | 'uploading' | 'running' | 'idle' | 'failed' | 'cancelled';
+/** awaiting_approval … 承認モードの Division Project が、役割の成果物の承認を待って止まっている */
+export type CloudSessionStatus = 'provisioning' | 'uploading' | 'running' | 'idle' | 'awaiting_approval' | 'failed' | 'cancelled';
 
 export type CloudWorkspaceInfo = {
 	fileCount: number;
@@ -87,6 +94,8 @@ export type CloudSession = {
 	goalLoop: CloudGoalLoopMode;
 	/** 目標ループのラウンド数の上限 (無ければ null) */
 	goalMaxRounds: number | null;
+	/** 承認モード (Division Project だけ)。古いサーバー・セッションには無い (= false) */
+	approvalMode: boolean;
 };
 
 /**
@@ -128,6 +137,8 @@ export type CloudSessionEventType =
 	| 'user' | 'assistant' | 'tool' | 'status' | 'error' | 'done' | 'plan' | 'task'
 	// 目標ループ: goal は { goal, criteria, maxRounds, mode, model }、review は { round, status: 'start' | 'done', ... } (toCloudGoal / toCloudReview)
 	| 'goal' | 'review'
+	// 承認モード: { taskSeq, index, role, roleName, title, file, status: 'approved' | 'revised', edited, feedback? } (toCloudApprovalEvent)
+	| 'approval'
 	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
 	| 'pull_request';
 
@@ -307,7 +318,7 @@ const idPath = (id: string): string => `/${encodeURIComponent(id)}`;
 // DTO の取り出し (欠けた値で画面が落ちないように)
 // ---------------------------------------------------------------------------
 
-const STATUSES: CloudSessionStatus[] = ['provisioning', 'uploading', 'running', 'idle', 'failed', 'cancelled'];
+const STATUSES: CloudSessionStatus[] = ['provisioning', 'uploading', 'running', 'idle', 'awaiting_approval', 'failed', 'cancelled'];
 
 const str = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
 const strOrNull = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
@@ -376,6 +387,7 @@ export const toCloudSession = (raw: unknown): CloudSession => {
 		...(pullRequest ? { pullRequest } : {}),
 		goalLoop: isGoalLoopMode(s.goalLoop) ? s.goalLoop : 'off',
 		goalMaxRounds: typeof s.goalMaxRounds === 'number' && Number.isFinite(s.goalMaxRounds) ? s.goalMaxRounds : null,
+		approvalMode: s.approvalMode === true,
 	};
 };
 
@@ -440,6 +452,8 @@ export type CreateCloudSessionInput = {
 	workspaceName?: string;
 	/** 省略時はサーバーの既定 ('auto') */
 	goalLoop?: CloudGoalLoopMode;
+	/** 承認モード。Division Project のときだけ送る (サーバーもそれ以外では無視する) */
+	approvalMode?: boolean;
 };
 
 /**
@@ -459,15 +473,16 @@ export const modelInputIssue = (model: string | undefined, projectId: string | u
 		: null;
 
 /** POST /api/cloud-sessions の body。空の値は送らない。Division Project なのにプロジェクトが無ければ投げる。 */
-export const createSessionBody = (input: CreateCloudSessionInput): Record<string, string> => {
+export const createSessionBody = (input: CreateCloudSessionInput): Record<string, string | boolean> => {
 	const issue = modelInputIssue(input.model, input.projectId);
 	if (issue) throw new Error(issue);
-	const body: Record<string, string> = { prompt: input.prompt };
+	const body: Record<string, string | boolean> = { prompt: input.prompt };
 	if (input.title?.trim()) body.title = input.title.trim();
 	if (input.model?.trim()) body.model = input.model.trim();
 	if (input.projectId?.trim()) body.projectId = input.projectId.trim();
 	if (input.workspaceName?.trim()) body.workspaceName = input.workspaceName.trim();
 	if (isGoalLoopMode(input.goalLoop)) body.goalLoop = input.goalLoop;
+	if (input.approvalMode === true && isDivisionProjectModel(input.model)) body.approvalMode = true;
 	return body;
 };
 
@@ -518,6 +533,137 @@ export const archiveCloudSession = async (session: DivisionSession, id: string):
 	await request<{ ok?: boolean }>(session, `${idPath(id)}/archive`, { method: 'POST', body: {} });
 };
 
+// ---------------------------------------------------------------------------
+// 承認モード (Division Project)
+// ---------------------------------------------------------------------------
+
+/** 承認を待っている成果物 (GET .../approval)。 */
+export type CloudApproval = {
+	/** そのタスクの task (done) イベントの seq。POST でそのまま送り返す */
+	taskSeq: number;
+	index: number;
+	role: string;
+	roleName: string;
+	title: string;
+	/** ワークスペースからの相対パス (例: .division/REVIEW.md) */
+	file: string;
+	summary: string;
+	/** ファイルの中身。読めない・大きすぎるときは null (このときは編集できず、そのまま承認する) */
+	content: string | null;
+	/** 大きすぎて中身を返さなかった */
+	tooLarge: boolean;
+};
+
+export type CloudApprovalAction = 'approve' | 'revise';
+
+/** GET .../approval の approval を取り出す。無い・taskSeq が無ければ null。 */
+export const toCloudApproval = (raw: unknown): CloudApproval | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const a = raw as Record<string, unknown>;
+	const taskSeq = num(a.taskSeq, Number.NaN);
+	if (!Number.isInteger(taskSeq) || taskSeq < 1) return null;
+	const role = str(a.role);
+	return {
+		taskSeq,
+		index: num(a.index),
+		role,
+		roleName: str(a.roleName) || role || '担当',
+		title: str(a.title),
+		file: str(a.file),
+		summary: str(a.summary),
+		content: typeof a.content === 'string' ? a.content : null,
+		tooLarge: a.tooLarge === true,
+	};
+};
+
+/** 承認を待っている成果物。待っていなければ null。 */
+export const getCloudApproval = async (session: DivisionSession, id: string): Promise<CloudApproval | null> => {
+	const data = await request<{ approval?: unknown }>(session, `${idPath(id)}/approval`, { timeoutMs: CLOUD_TIMEOUTS.changes });
+	return toCloudApproval(data.approval);
+};
+
+export type ResolveApprovalInput = {
+	taskSeq: number;
+	action: CloudApprovalAction;
+	/** 編集したファイルの中身。編集していなければ省略 (サーバーはファイルをそのままにする) */
+	content?: string;
+	/** 差し戻しの理由 (revise では必須) */
+	feedback?: string;
+};
+
+/** POST .../approval の body。差し戻しなのにフィードバックが空なら投げる。 */
+export const approvalBody = (input: ResolveApprovalInput): Record<string, unknown> => {
+	const feedback = input.feedback?.trim() ?? '';
+	if (input.action === 'revise' && !feedback) throw new Error('差し戻す理由 (フィードバック) を入力してください。');
+	return {
+		taskSeq: input.taskSeq,
+		action: input.action,
+		...(typeof input.content === 'string' ? { content: input.content } : {}),
+		...(feedback ? { feedback } : {}),
+	};
+};
+
+/** 承認して続行 / 差し戻す。セッションは running に戻る。 */
+export const resolveCloudApproval = async (session: DivisionSession, id: string, input: ResolveApprovalInput): Promise<CloudSession> => {
+	const body = approvalBody(input);
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/approval`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.changes });
+	return toCloudSession(data.session);
+};
+
+/** 編集した内容のうち送るもの。中身が読めなかった (null) か、変えていなければ undefined (送らない)。 */
+export const editedApprovalContent = (approval: Pick<CloudApproval, 'content'>, edited: string): string | undefined =>
+	approval.content !== null && edited !== approval.content ? edited : undefined;
+
+/** 承認・差し戻しのエラー。409 などはサーバーの日本語のメッセージ (「画面を更新してください」など) を優先する。 */
+export const approvalErrorText = (e: unknown): string => {
+	if (!(e instanceof DivisionCloudError)) return cloudErrorText(e);
+	const serverText = e.message && !/^HTTP \d+$/.test(e.message) && e.message !== 'timeout' ? e.message : '';
+	if (e.status === 409) return serverText && /[ぁ-んァ-ン一-龥]/.test(serverText) ? serverText : 'この成果物はもう承認待ちではありません。画面を更新してください。';
+	if (e.status === 400 && serverText) return `入力内容が正しくありません (${serverText})。`;
+	return e.userMessage;
+};
+
+/** approval イベントの data。 */
+export type CloudApprovalEvent = {
+	taskSeq: number;
+	index: number;
+	role: string;
+	roleName: string;
+	title: string;
+	file: string;
+	status: 'approved' | 'revised';
+	edited: boolean;
+	feedback?: string;
+};
+
+/** approval イベントの data を取り出す。status が分からなければ null (表示しない)。 */
+export const toCloudApprovalEvent = (data: Record<string, unknown>): CloudApprovalEvent | null => {
+	if (data.status !== 'approved' && data.status !== 'revised') return null;
+	const role = str(data.role);
+	const feedback = str(data.feedback).trim();
+	return {
+		taskSeq: num(data.taskSeq),
+		index: num(data.index),
+		role,
+		roleName: str(data.roleName) || role || '担当',
+		title: str(data.title),
+		file: str(data.file),
+		status: data.status,
+		edited: data.edited === true,
+		...(feedback ? { feedback } : {}),
+	};
+};
+
+/** パスの最後の部分 ('.division/REVIEW.md' → 'REVIEW.md')。 */
+const baseName = (file: string): string => file.split('/').filter(Boolean).pop() ?? file;
+
+/** タイムラインの 1 行。例: "✅ REVIEW.md を承認 (編集あり)" / "↩️ 差し戻し: もっと具体的に"。 */
+export const approvalEventText = (event: CloudApprovalEvent): string => {
+	const name = baseName(event.file) || event.roleName;
+	if (event.status === 'approved') return `✅ ${name} を承認${event.edited ? ' (編集あり)' : ''}`;
+	return `↩️ 差し戻し${event.feedback ? `: ${event.feedback}` : ` (${name})`}${event.edited ? ' (編集あり)' : ''}`;
+};
+
 export const fetchCloudChanges = async (session: DivisionSession, id: string): Promise<CloudChanges> => {
 	const data = await request<{ changes?: unknown[]; patch?: unknown; patchTruncated?: unknown }>(
 		session, `${idPath(id)}/changes`, { timeoutMs: CLOUD_TIMEOUTS.changes },
@@ -538,6 +684,7 @@ export const CLOUD_STATUS_LABELS: Record<CloudSessionStatus, string> = {
 	uploading: 'アップロード中',
 	running: '実行中',
 	idle: '待機中',
+	awaiting_approval: '承認待ち',
 	failed: '失敗',
 	cancelled: '停止',
 };
@@ -548,6 +695,7 @@ export const cloudStatusColor = (status: CloudSessionStatus): string => {
 	switch (status) {
 		case 'running': return colors.running;
 		case 'idle': return colors.success;
+		case 'awaiting_approval': return colors.warning;
 		case 'failed': return colors.danger;
 		case 'cancelled': return colors.fgFaint;
 		default: return colors.fgMuted;
@@ -568,7 +716,7 @@ export const listPollInterval = (sessions: Pick<CloudSession, 'status'>[]): numb
 
 /**
  * 前回と今回の一覧を比べ、動いていた (provisioning/uploading/running) のが
- * 待機中か失敗に変わったセッションを返す。通知を出すのに使う。
+ * 待機中・承認待ち・失敗に変わったセッションを返す。通知を出すのに使う。
  */
 export const finishedSessions = (
 	previous: ReadonlyMap<string, CloudSessionStatus>,
@@ -576,7 +724,7 @@ export const finishedSessions = (
 ): CloudSession[] =>
 	next.filter(s => {
 		const before = previous.get(s.id);
-		return !!before && isActive(before) && (s.status === 'idle' || s.status === 'failed');
+		return !!before && isActive(before) && (s.status === 'idle' || s.status === 'awaiting_approval' || s.status === 'failed');
 	});
 
 // ---------------------------------------------------------------------------
@@ -1267,6 +1415,8 @@ export type LaunchInput = {
 	projectId?: string;
 	/** 目標ループ。省略時はサーバーの既定 */
 	goalLoop?: CloudGoalLoopMode;
+	/** 承認モード (Division Project のときだけ送る) */
+	approvalMode?: boolean;
 	/** 作成できた時点 (開始の前) で呼ぶ。開始は clone などで数分かかるので、先にセッションを開けるようにする */
 	onCreated?: (created: CloudSession, index: number) => void;
 };
@@ -1321,7 +1471,7 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 	return Promise.all(titles.map(async (title, index): Promise<LaunchResult> => {
 		let created: CloudSession | undefined;
 		try {
-			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName, goalLoop: input.goalLoop });
+			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName, goalLoop: input.goalLoop, approvalMode: input.approvalMode });
 			try { input.onCreated?.(created, index); } catch { /* 通知側の失敗で起動は止めない */ }
 			const started = await startCloudSession(session, created.id, { repo });
 			return { index, title, session: started };
