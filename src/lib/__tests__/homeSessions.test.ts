@@ -78,7 +78,7 @@ test('タブの振り分けと件数 (PC のチャットも数える。接続し
 test('新しいチャットがまだ一覧に無くても、開いているチャットとして出す', () => {
 	const items = buildHomeItems({
 		cloudSessions: [],
-		snapshot: { ...snapshot({ threadId: 'fresh' }), threads: [] } as never,
+		snapshot: { ...(snapshot({ threadId: 'fresh' }) as object), threads: [] } as never,
 		connectionStatus: 'connected',
 		pcName: 'PC',
 		devices: [],
