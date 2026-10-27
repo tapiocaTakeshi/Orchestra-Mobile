@@ -32,7 +32,7 @@ export const DIVISION_PLANS: {
 	features: string[];
 }[] = [
 	{ id: 'free', name: 'Free', priceLabel: '¥0 / 月', features: ['基本機能', '個人利用向け'] },
-	{ id: 'plus', name: 'Plus', priceLabel: '¥3,000 / 月', features: ['利用上限アップ', '優先サポート'] },
+	{ id: 'plus', name: 'Plus', priceLabel: '¥3,000 / 月', features: ['毎月 10 クレジット (期末に失効)', '利用上限アップ', '優先サポート'] },
 ];
 
 export type DivisionProfile = {
