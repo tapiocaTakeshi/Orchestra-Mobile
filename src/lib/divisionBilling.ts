@@ -23,13 +23,19 @@ export const DIVISION_DASHBOARD_CREDITS_URL = 'https://division.he-ro.jp/dashboa
 /** この端末で購入・管理の導線 (Web サイトへのリンク) を出すか。ネイティブアプリでは出さない。 */
 export const allowsPurchases = (): boolean => Platform.OS === 'web';
 
-export type DivisionPlanId = 'free' | 'plus';
+/**
+ * profiles.plan の値。Web サイト (division-hp) の Stripe Webhook が `orchestra_plus` を書く。
+ * `plus` は古い Edge Function が書いていた値で、残っていても有料として扱う。
+ */
+export type DivisionPlanId = 'free' | 'orchestra_plus' | 'plus';
+
+const PAID_PLANS: string[] = ['orchestra_plus', 'plus'];
 
 export const isPaidDivisionPlan = (
-	plan: DivisionPlanId,
+	plan: string | null,
 	subscriptionStatus: string | null,
 ): boolean => {
-	if (plan === 'free') return false;
+	if (!plan || !PAID_PLANS.includes(plan)) return false;
 	// Stripe may leave a paid plan in past_due while it is still recoverable.
 	// Canceled/incomplete subscriptions must not be treated as paid.
 	return !['canceled', 'incomplete', 'incomplete_expired', 'unpaid'].includes(subscriptionStatus ?? '');
