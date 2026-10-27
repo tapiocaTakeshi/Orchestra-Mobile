@@ -19,7 +19,6 @@ import { StatusBar } from 'expo-status-bar';
 
 import { TermsAgreementGate } from './src/components/TermsSheet';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
-import { BillingReturnStatus, takeBillingReturn } from './src/lib/divisionBilling';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -35,19 +34,14 @@ import { AppProvider, useApp } from './src/state/AppContext';
 import { DivisionAuthProvider, useDivisionAuth } from './src/state/DivisionAuthContext';
 import { colors, fontSize, spacing } from './src/theme';
 
-const PageContent = ({ page, onOpenPage, cloudSessionId, billingReturn }: {
-	page: PageKey;
-	onOpenPage: OpenPage;
-	cloudSessionId: string | null;
-	billingReturn: BillingReturnStatus | null;
-}) => {
+const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOpenPage: OpenPage; cloudSessionId: string | null }) => {
 	switch (page) {
 		case 'kanban': return <KanbanScreen onOpenPage={onOpenPage} />;
 		case 'projects': return <ProjectsScreen />;
 		case 'cloud': return <CloudAgentsScreen onOpenPage={onOpenPage} initialSessionId={cloudSessionId} />;
 		case 'mcp': return <McpScreen />;
 		case 'social': return <SocialScreen />;
-		case 'tuning': return <TuningScreen onOpenPage={onOpenPage} billingReturn={billingReturn} />;
+		case 'tuning': return <TuningScreen onOpenPage={onOpenPage} />;
 		case 'actions': return <QuickActionsScreen />;
 		case 'settings': return <SettingsScreen />;
 	}
@@ -70,12 +64,6 @@ const Shell = () => {
 		setCloudSessionId(null);
 	}, [session?.userId]);
 
-	// Web 版で Stripe から戻ってきたら、ログインが戻りしだいコストのページ (管理) を開く。
-	const [billingReturn, setBillingReturn] = useState<BillingReturnStatus | null>(takeBillingReturn);
-	useEffect(() => {
-		if (billingReturn && session?.userId) setStack(['tuning']);
-	}, [billingReturn, session?.userId]);
-
 	// 接続が切れたら、繋いでいないと使えないページには留まらない。
 	const connected = !!connection;
 	const visibleStack = useMemo(() => stack.filter(p => canOpenPage(p, connected)), [stack, connected]);
@@ -83,18 +71,15 @@ const Shell = () => {
 
 	/** 最初の画面のメニューから開く。 */
 	const setPage = useCallback((next: PageKey | null) => {
-		setBillingReturn(null);
 		setCloudSessionId(null);
 		setStack(next ? [next] : []);
 	}, []);
 	/** ページの中から開く (重ねる)。 */
 	const pushFromPage = useCallback<OpenPage>((next, options) => {
-		setBillingReturn(null);
 		setCloudSessionId(next === 'cloud' ? options?.cloudSessionId ?? null : null);
 		setStack(prev => pushPage(prev.filter(p => canOpenPage(p, connected)), next));
 	}, [connected]);
 	const popPage = useCallback(() => {
-		setBillingReturn(null);
 		setCloudSessionId(null);
 		setStack(prev => prev.filter(p => canOpenPage(p, connected)).slice(0, -1));
 	}, [connected]);
@@ -164,7 +149,7 @@ const Shell = () => {
 					</Pressable>
 				) : null}
 				{/* key: 重なりか開くセッションが変わったら作り直す (カンバンの「クラウドで開く」で、開くセッションを渡し直す) */}
-				<PageContent key={`${visibleStack.length}:${openPage}:${cloudSessionId ?? ''}`} page={openPage} onOpenPage={pushFromPage} cloudSessionId={cloudSessionId} billingReturn={billingReturn} />
+				<PageContent key={`${visibleStack.length}:${openPage}:${cloudSessionId ?? ''}`} page={openPage} onOpenPage={pushFromPage} cloudSessionId={cloudSessionId} />
 			</BackProvider>
 		);
 	} else {
