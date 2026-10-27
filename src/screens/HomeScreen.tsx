@@ -128,7 +128,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 	/** ドロワーや一覧の中から開くページ (App のページの重なりに積む) */
 	onOpenPage: (page: PageKey) => void;
 }) => {
-	const { connection, connectionStatus, snapshot, disconnect } = useApp();
+	const { connection, connectionStatus, connectionRoute, snapshot, disconnect } = useApp();
 	const { session, logout } = useDivisionAuth();
 	const [sheet, setSheet] = useState<'account' | null>(null);
 	// ナビゲーションドロワーの開閉。閉じている (初期状態) ときは画面にナビゲーションの痕跡を残さない。
@@ -168,9 +168,13 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 
 	// リモートコントロールの状態: 未接続 / 接続中 / 接続済み / 接続切れ
 	const pcName = snapshot?.ide?.workspaceName || connection?.label || 'PC';
+	// 外出先から中継で繋いでいるときは、そうと分かるようにする
+	const statusLabel = connectionStatus === 'connected' && connectionRoute === 'relay'
+		? `${REMOTE_CONNECTION_LABELS.connected} (外出先)`
+		: REMOTE_CONNECTION_LABELS[connectionStatus];
 	const remoteSubtitle = connectionStatus === 'disconnected'
 		? 'PC に未接続'
-		: `${REMOTE_CONNECTION_LABELS[connectionStatus]} · ${pcName}`;
+		: `${statusLabel} · ${pcName}`;
 	const homeHeader = (
 		<View style={styles.headerRow}>
 			<IconButton
@@ -191,7 +195,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 			<IconButton icon='chevron-left' accessibilityLabel='一覧に戻る' onPress={() => onPcChatOpenChange(false)} />
 			<View style={styles.switcher}>
 				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>{pcName}</Text>
-				<Text style={styles.switcherSubtitle} numberOfLines={1}>リモートコントロール · {REMOTE_CONNECTION_LABELS[connectionStatus]}</Text>
+				<Text style={styles.switcherSubtitle} numberOfLines={1}>リモートコントロール · {statusLabel}</Text>
 			</View>
 		</View>
 	);

@@ -14,6 +14,7 @@ import {
 	verifyAndConnect,
 } from '../connect';
 import { OrchestraApiError } from '../../api/client';
+import { setRelayChannelFactory } from '../../api/relay';
 import { Connection } from '../../api/types';
 
 const TOKEN = 'connect-test-token';
@@ -66,6 +67,17 @@ beforeAll(async () => {
 afterAll(async () => {
 	await new Promise<void>(resolve => server.close(() => resolve()));
 });
+
+// LAN で繋がらないときの中継 (外出先) は、ここでは参加できないものとして扱う
+let restoreRelay: () => void = () => undefined;
+beforeAll(() => {
+	restoreRelay = setRelayChannelFactory(() => ({
+		ready: Promise.reject(new Error('CHANNEL_ERROR')),
+		send: async () => undefined,
+		close: () => undefined,
+	}));
+});
+afterAll(() => restoreRelay());
 
 beforeEach(() => {
 	protocolVersionToReturn = 1;

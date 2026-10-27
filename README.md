@@ -75,6 +75,16 @@ PC 側も、アプリが送る Division の JWT のユーザーが PC のアカ�
 通信を止め (同じアカウントでログインし直せば復帰します)、別のアカウントでログインすると接続を切ります。
 PC 側のアカウントが途中で変わった場合も、その場で切断します。
 
+#### 外出先から接続する
+
+PC と同じ Wi-Fi にいないとき (モバイルデータ・別の Wi-Fi) は、自動で中継 (Supabase Realtime) 経由に
+切り替わります。設定は要りません。PC で Orchestra が起動していて Division にログインしていれば、
+外出先からもチャット・承認・カンバンなどをそのまま操作できます。中継中はヘッダーに「接続済み (外出先)」と
+出て、同じ Wi-Fi に戻ると 30 秒ほどで直接の接続に戻ります。
+
+中継に流れる内容は、ペアリングのトークンから作った鍵でエンドツーエンド暗号化されます (AES-256-GCM)。
+通信量を抑えるため、中継中は状態の取得間隔を少し空けます (通常 5 秒、実行中 2 秒)。
+
 ### PC のチャットをスマホで続ける (`/remote-control`)
 
 PC のチャット欄で `/remote-control` と送ると、そのチャットがスマホと同期されます。
@@ -240,6 +250,8 @@ src/navigation.ts              ページとドロワーに並べるページ、�
 src/api/types.ts               IDE の remoteControlTypes.ts に対応する型
 src/api/client.ts               HTTP クライアント (React 非依存 = テスト可能)
 src/lib/connect.ts             接続候補の検証 (ping→state→connect) の共通ロジック
+src/api/relay.ts               外出先から PC に繋ぐ中継 (Supabase Realtime)
+src/api/relayCodec.ts          中継メッセージの暗号化・圧縮・分割 (IDE 側と同じ形式)
 src/lib/remoteSession.ts       PC の /remote-control で同期されたセッションの通知判定
 src/lib/divisionAuthConfig.ts  Division (Supabase / Division API) の公開設定
 src/lib/divisionAuth.ts        Division ログイン・RemoteSession 一覧取得・購読
@@ -409,14 +421,17 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
 ## セキュリティ
 
 - 認証はトークン 1 本 (`X-Orchestra-Token` ヘッダ) です。トークンを知っている端末は IDE を操作できます。
-- 平文 HTTP なので、信頼できる LAN の中だけで使ってください。公衆 Wi-Fi では使わないでください。
+- LAN 内の直接接続は平文 HTTP なので、信頼できる LAN の中だけで使ってください。公衆 Wi-Fi では
+  直接繋がず、中継 (エンドツーエンド暗号化) を使います。
 - IDE 側の設定で「エージェントへの指示 / カンバン編集 / プロジェクト編集 / コマンド実行」を
   個別にオフにできます。閲覧だけ許可する運用も可能です。
 - トークンが漏れたときは IDE 側で `Remote Control: Regenerate Token` を実行してください。
 - Division アカウントのログインセッション (Supabase JWT) は `expo-secure-store` (iOS Keychain /
   Android Keystore) に保存され、接続情報 (`Connection`) とは別に管理されます。
 - 自動検出はアカウントに紐づく `RemoteSession` テーブルの行 (LAN アドレスとトークン) を読むだけで、
-  操作そのものは引き続き LAN 直結です。ログアウトすると、その端末の行は IDE 側で削除されます。
+  操作は LAN 直結か、外出先なら暗号化した中継経由です。中継のチャンネル名と鍵はトークンから作るので、
+  トークンを知らない人は参加も解読もできません。PC は中継のリクエストでも Division の JWT を確かめます。
+  ログアウトすると、その端末の行は IDE 側で削除されます。
 - 共有ページに出す投稿はログイン済みユーザー全員が読めます。公開するのは役割とモデルの組み合わせだけで、
   API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
 - Division APIはログイン中のSupabase JWTで認証します。JWTの期限が切れた場合はrefresh tokenで更新します。
