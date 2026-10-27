@@ -3,11 +3,12 @@
  *
  * IDE 側の void-login-tsx/divisionBilling.ts と同じテーブル・Edge Function を
  * 使う。支払いは Stripe の Checkout / Billing Portal で行う。ネイティブアプリ (iOS / Android)
- * では課金しない (購入・申し込み・支払い管理・自動チャージの導線を出さない)。購入できるのは
- * Web 版だけ。
+ * では課金しない (購入・申し込み・支払い管理・自動チャージの導線を出さない)。購入と支払いの
+ * 管理は Web 版 (ブラウザで開くアプリ) で行う。Web 版では Stripe を同じタブで開き、終わったら
+ * `?billing=<status>` 付きで Web 版に戻ってくる (takeBillingReturn で受け取る)。
  */
 
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 
 import { DivisionSession, getDivisionSupabase } from './divisionAuth';
 import {
@@ -164,6 +165,41 @@ export const listCreditTransactions = async (
 	});
 };
 
+/** Stripe から Web 版に戻ってきたときの状態 */
+export type BillingReturnStatus = 'success' | 'cancel' | 'portal';
+
+const BILLING_RETURN_PARAM = 'billing';
+const BILLING_RETURN_STATUSES: BillingReturnStatus[] = ['success', 'cancel', 'portal'];
+
+const isWeb = (): boolean => Platform.OS === 'web' && typeof window !== 'undefined';
+
+/** Stripe のあとに戻ってくる URL (Web 版のいまのページ)。サーバーが許可した origin だけ使われる。 */
+export const billingReturnUrl = (): string | undefined =>
+	isWeb() ? `${window.location.origin}${window.location.pathname}` : undefined;
+
+/**
+ * Stripe から戻ってきたか。戻ってきたなら URL から `?billing=` を消して状態を返す
+ * (再読み込みで二度扱わないように)。
+ */
+export const takeBillingReturn = (): BillingReturnStatus | null => {
+	if (!isWeb()) return null;
+	const url = new URL(window.location.href);
+	const status = url.searchParams.get(BILLING_RETURN_PARAM) as BillingReturnStatus | null;
+	if (!status) return null;
+	url.searchParams.delete(BILLING_RETURN_PARAM);
+	window.history.replaceState(window.history.state, '', url.toString());
+	return BILLING_RETURN_STATUSES.includes(status) ? status : null;
+};
+
+/** Stripe の画面を開く。Web 版は同じタブで移動し、終わったら戻ってくる。 */
+export const openBillingPage = async (url: string): Promise<void> => {
+	if (isWeb()) {
+		window.location.assign(url);
+		return;
+	}
+	await Linking.openURL(url);
+};
+
 const callBillingFunction = async (
 	path: string,
 	accessToken: string,
@@ -183,7 +219,7 @@ const callBillingFunction = async (
 export const createCheckoutUrl = (
 	session: DivisionSession,
 	planId: Exclude<DivisionPlanId, 'free'>,
-): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { planId });
+): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { planId, returnUrl: billingReturnUrl() });
 
 /** Stripe で買えるクレジットパック (1 クレジット = 1 USD)。サーバーの create-checkout-session と揃える。 */
 export const DIVISION_CREDIT_PACKS: number[] = [20, 50];
@@ -192,8 +228,8 @@ export const DIVISION_CREDIT_PACKS: number[] = [20, 50];
 export const createCreditCheckoutUrl = (
 	session: DivisionSession,
 	credits: number,
-): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { credits });
+): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { credits, returnUrl: billingReturnUrl() });
 
 /** 支払い方法の変更・解約 (Stripe Billing Portal) の URL。 */
 export const createPortalUrl = (session: DivisionSession): Promise<string> =>
-	callBillingFunction('create-billing-portal-session', session.accessToken);
+	callBillingFunction('create-billing-portal-session', session.accessToken, { returnUrl: billingReturnUrl() });

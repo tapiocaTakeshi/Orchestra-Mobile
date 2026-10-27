@@ -14,7 +14,6 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-	Linking,
 	RefreshControl,
 	ScrollView,
 	StyleSheet,
@@ -47,6 +46,7 @@ import {
 	CreditTransaction,
 	DIVISION_CREDIT_PACKS,
 	DIVISION_PLANS,
+	BillingReturnStatus,
 	DivisionProfile,
 	allowsPurchases,
 	createCheckoutUrl,
@@ -54,6 +54,7 @@ import {
 	createPortalUrl,
 	fetchDivisionProfile,
 	listCreditTransactions,
+	openBillingPage,
 	saveAutoChargeSettings,
 } from '../lib/divisionBilling';
 import {
@@ -197,7 +198,18 @@ const CloudCostCard = ({ sessions, loading, error, onReload, onOpenCloud }: {
 	);
 };
 
-export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: string; onOpenPage?: OpenPage } = {}) => {
+const BILLING_RETURN_TEXT: Record<BillingReturnStatus, string> = {
+	success: 'お支払いが完了しました。反映まで数秒かかることがあります。',
+	cancel: '手続きをキャンセルしました。',
+	portal: '支払いの設定を更新しました。',
+};
+
+export const TuningScreen = ({ composerPrompt, onOpenPage, billingReturn }: {
+	composerPrompt?: string;
+	onOpenPage?: OpenPage;
+	/** Web 版で Stripe から戻ってきたとき (管理を開いて残高を読み直す) */
+	billingReturn?: BillingReturnStatus | null;
+} = {}) => {
 	const { session } = useDivisionAuth();
 	const toast = useToast();
 	// チャットの入力欄から開いたときはシートの中に出すので、見出しはシート側に任せる。
@@ -293,6 +305,17 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 	}, [session]);
 
 	useEffect(() => { void loadAccount(); }, [loadAccount]);
+
+	// Stripe から戻ってきたら管理を開く。付与は Webhook で少し遅れるので、少し待ってもう一度読む。
+	useEffect(() => {
+		if (!billingReturn) return;
+		setSection('account');
+		toast.show(BILLING_RETURN_TEXT[billingReturn], billingReturn === 'cancel' ? undefined : 'success');
+		if (billingReturn === 'cancel') return;
+		const timer = setTimeout(() => { void loadAccount(); }, 4000);
+		return () => clearTimeout(timer);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [billingReturn]);
 
 	const loadHistory = useCallback(async (more = false) => {
 		if (!session) return;
@@ -425,7 +448,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 		setError(null);
 		try {
 			const url = await make();
-			await Linking.openURL(url);
+			await openBillingPage(url);
 		} catch (e) {
 			setError(errorText(e));
 		}
@@ -767,7 +790,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 										/>
 									</Row>
 								))}
-								<Muted>購入したクレジットに有効期限はありません。支払いはブラウザの Stripe の画面で行い、完了後に画面を下に引いて更新すると残高に反映されます。</Muted>
+								<Muted>購入したクレジットに有効期限はありません。支払いはブラウザの Stripe の画面で行い、完了するとこの画面に戻り、残高に反映されます。</Muted>
 							</Card>
 
 							<Card>

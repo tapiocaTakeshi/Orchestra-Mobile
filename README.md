@@ -435,4 +435,6 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
 - 共有ページに出す投稿はログイン済みユーザー全員が読めます。公開するのは役割とモデルの組み合わせだけで、
   API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
 - Division APIはログイン中のSupabase JWTで認証します。JWTの期限が切れた場合はrefresh tokenで更新します。
-- ネイティブアプリ (iOS / Android) では課金しません (購入・申し込みの導線を出さない)。購入・プラン変更は Web 版で行い、支払いは Stripe の画面で行います。
+- ネイティブアプリ (iOS / Android) では課金しません (購入・申し込みの導線を出さない)。購入・プラン変更・支払い方法の管理・自動チャージは Web 版 (ブラウザで開くアプリ) の「コスト > 管理」で行います。
+  Web 版では Stripe の画面を同じタブで開き、終わると `?billing=success|cancel|portal` 付きで Web 版の管理に戻ります
+  (戻り先として許可する origin はサーバーの `BILLING_RETURN_ORIGINS`、既定は `https://tapiocatakeshi.github.io` と `http://localhost:8081`)。
