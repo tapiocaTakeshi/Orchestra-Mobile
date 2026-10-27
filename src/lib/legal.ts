@@ -8,13 +8,11 @@
  * (上げると、次回ログイン時にもう一度同意を求める)。
  */
 
-export const TERMS_VERSION = '2026-10-26';
+export const TERMS_VERSION = '2026-10-27';
 
 export const TERMS_URL = 'https://division.he-ro.jp/terms';
 export const PRIVACY_URL = 'https://division.he-ro.jp/privacy';
 export const CONTACT_URL = 'https://division.he-ro.jp/contact';
-/** Apple の標準 EULA (サブスクリプションの購入画面に載せる) */
-export const APPLE_STANDARD_EULA_URL = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 
 export type LegalSection = { heading: string; body: string[] };
 
@@ -54,9 +52,9 @@ export const TERMS_SECTIONS: LegalSection[] = [
 	{
 		heading: '第5条 (有料サービス)',
 		body: [
-			'本サービスには、サブスクリプション (Orchestra Plus) およびクレジットの購入があります。iOS アプリでの購入は Apple の App 内課金により行われ、代金の請求・更新・解約・返金は Apple のアカウント設定と Apple のポリシーに従います。',
-			'サブスクリプションは、現在の期間が終了する 24 時間前までに解約しない限り自動的に更新されます。解約は iOS の「設定」> Apple ID >「サブスクリプション」から行えます。',
-			'サブスクリプションで付与されたクレジットはその期間の終了時に失効します。購入したクレジットは失効しません。クレジットは AI モデルの利用料に充てられ、現金への払い戻しはできません (法令または Apple のポリシーで認められる場合を除きます)。',
+			'本サービスには、サブスクリプション (Orchestra Plus) およびクレジットの購入があります。モバイルアプリ内では購入できません。代金の決済は Stripe により行われ、請求・更新・解約・返金は当社の定めと Stripe の規約に従います。',
+			'サブスクリプションは、解約しない限り期間ごとに自動的に更新されます。解約すると、その時点の期間の終了まで利用できます。',
+			'サブスクリプションで付与されたクレジットはその期間の終了時に失効します。購入したクレジットは失効しません。クレジットは AI モデルの利用料に充てられ、現金への払い戻しはできません (法令で認められる場合を除きます)。',
 		],
 	},
 	{

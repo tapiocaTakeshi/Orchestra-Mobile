@@ -2,38 +2,44 @@
  * プラン・クレジット残高まわり (チューニングタブの「管理」側)。
  *
  * IDE 側の void-login-tsx/divisionBilling.ts と同じテーブル・Edge Function を
- * 使う。支払いそのものはアプリ内では行わず、Stripe の Checkout / Billing Portal を
- * 既定ブラウザで開く。
+ * 使う。アプリでは残高・プラン・履歴を見せるだけで、課金はしない。Plus の申し込み・
+ * クレジットの購入・支払い方法・自動チャージは Division の Web サイト
+ * (https://division.he-ro.jp/dashboard) で管理する。ネイティブアプリ (iOS / Android) では
+ * そのサイトへの導線も出さない (App Store Guideline 3.1.1)。Web 版だけリンクを出す。
  */
+
+import { Platform } from 'react-native';
 
 import { DivisionSession, getDivisionSupabase } from './divisionAuth';
 import {
 	DIVISION_CREDIT_TRANSACTION_TABLE,
-	DIVISION_FUNCTIONS_BASE_URL,
 	DIVISION_PROFILES_TABLE,
 } from './divisionAuthConfig';
 
-export type DivisionPlanId = 'free' | 'plus';
+/** Division の Web サイトのダッシュボード (プラン・クレジットの管理) */
+export const DIVISION_DASHBOARD_PLAN_URL = 'https://division.he-ro.jp/dashboard?tab=plan';
+export const DIVISION_DASHBOARD_CREDITS_URL = 'https://division.he-ro.jp/dashboard?tab=credits';
+
+/** この端末で購入・管理の導線 (Web サイトへのリンク) を出すか。ネイティブアプリでは出さない。 */
+export const allowsPurchases = (): boolean => Platform.OS === 'web';
+
+/**
+ * profiles.plan の値。Web サイト (division-hp) の Stripe Webhook が `orchestra_plus` を書く。
+ * `plus` は古い Edge Function が書いていた値で、残っていても有料として扱う。
+ */
+export type DivisionPlanId = 'free' | 'orchestra_plus' | 'plus';
+
+const PAID_PLANS: string[] = ['orchestra_plus', 'plus'];
 
 export const isPaidDivisionPlan = (
-	plan: DivisionPlanId,
+	plan: string | null,
 	subscriptionStatus: string | null,
 ): boolean => {
-	if (plan === 'free') return false;
+	if (!plan || !PAID_PLANS.includes(plan)) return false;
 	// Stripe may leave a paid plan in past_due while it is still recoverable.
 	// Canceled/incomplete subscriptions must not be treated as paid.
 	return !['canceled', 'incomplete', 'incomplete_expired', 'unpaid'].includes(subscriptionStatus ?? '');
 };
-
-export const DIVISION_PLANS: {
-	id: DivisionPlanId;
-	name: string;
-	priceLabel: string;
-	features: string[];
-}[] = [
-	{ id: 'free', name: 'Free', priceLabel: '¥0 / 月', features: ['基本機能', '個人利用向け'] },
-	{ id: 'plus', name: 'Plus', priceLabel: '¥3,000 / 月', features: ['利用上限アップ', '優先サポート'] },
-];
 
 export type DivisionProfile = {
 	plan: DivisionPlanId;
@@ -111,27 +117,6 @@ export const fetchDivisionProfile = async (session: DivisionSession): Promise<Di
 	};
 };
 
-/** 自動チャージの設定。profiles は自分の行だけ更新できる。 */
-export const saveAutoChargeSettings = async (
-	session: DivisionSession,
-	settings: { autoCharge: boolean; threshold: number; amount: number },
-): Promise<void> => {
-	if (!(settings.threshold >= 0) || !(settings.amount > 0)) {
-		throw new Error('しきい値は 0 以上、チャージ額は 0 より大きい値にしてください。');
-	}
-	const sb = await withSession(session);
-	const { error } = await sb
-		.from(DIVISION_PROFILES_TABLE)
-		.update({
-			auto_charge: settings.autoCharge,
-			auto_charge_threshold: settings.threshold,
-			auto_charge_amount: settings.amount,
-			updated_at: new Date().toISOString(),
-		})
-		.eq('id', session.userId);
-	if (error) throw new Error(`自動チャージ設定の保存に失敗しました: ${error.message}`);
-};
-
 export const listCreditTransactions = async (
 	session: DivisionSession,
 	limit = 30,
@@ -157,28 +142,3 @@ export const listCreditTransactions = async (
 		};
 	});
 };
-
-const callBillingFunction = async (
-	path: string,
-	accessToken: string,
-	body?: unknown,
-): Promise<string> => {
-	const res = await fetch(`${DIVISION_FUNCTIONS_BASE_URL}/${path}`, {
-		method: 'POST',
-		headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-		body: JSON.stringify(body ?? {}),
-	});
-	const json = (await res.json().catch(() => ({}))) as { url?: string; error?: string };
-	if (!res.ok || !json.url) throw new Error(json.error || `リクエストに失敗しました (HTTP ${res.status})`);
-	return json.url;
-};
-
-/** プラン変更 (Stripe Checkout) の URL。ブラウザで開く。 */
-export const createCheckoutUrl = (
-	session: DivisionSession,
-	planId: Exclude<DivisionPlanId, 'free'>,
-): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { planId });
-
-/** 支払い方法の変更・解約 (Stripe Billing Portal) の URL。 */
-export const createPortalUrl = (session: DivisionSession): Promise<string> =>
-	callBillingFunction('create-billing-portal-session', session.accessToken);

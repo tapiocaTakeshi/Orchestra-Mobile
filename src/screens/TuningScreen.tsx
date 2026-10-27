@@ -6,8 +6,8 @@
  *   - 見積もり  … 依頼文を Jev に判定させ、役割ごとの想定コストを出す
  *   - 利用履歴  … 実測のトークン数と料金 (日別・役割別・モデル別の集計つき)。
  *                 クラウドエージェントのセッションごとの料金 (最近のもの) もここに出す
- *   - 管理      … プラン、クレジット残高、自動チャージ、支払い
- *                 (iOS は App 内課金だけ。Stripe の購入・自動チャージへの導線は出さない: Guideline 3.1.1)
+ *   - 管理      … プラン、クレジット残高、クレジットの増減
+ *                 (課金はアプリ内では行わない。Web 版だけ、Division の Web サイトのダッシュボードへのリンクを出す)
  *
  * すべて Division (Supabase / Division API) 直結なので、PC に接続していなくても使える。
  */
@@ -41,19 +41,16 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
-import { AppStorePurchaseCard } from '../components/AppStorePurchaseCard';
-import { usesAppStoreBilling } from '../lib/appStorePurchases';
 import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
 	CreditTransaction,
-	DIVISION_PLANS,
+	DIVISION_DASHBOARD_CREDITS_URL,
+	DIVISION_DASHBOARD_PLAN_URL,
 	DivisionProfile,
-	createCheckoutUrl,
-	createPortalUrl,
+	allowsPurchases,
 	fetchDivisionProfile,
 	listCreditTransactions,
-	saveAutoChargeSettings,
 } from '../lib/divisionBilling';
 import {
 	DEFAULT_ROUTING_POLICY,
@@ -91,6 +88,8 @@ import { OpenPage } from '../navigation';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { loadRoutingPolicy, saveRoutingPolicy } from '../state/tuningStorage';
 import { colors, fontSize, radius, spacing } from '../theme';
+
+const openUrl = (url: string) => { void Linking.openURL(url).catch(() => undefined); };
 
 const errorText = (e: unknown): string =>
 	e instanceof DivisionRoutingError ? e.userMessage : e instanceof Error ? e.message : String(e);
@@ -218,8 +217,6 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 	// --- アカウント ---
 	const [profile, setProfile] = useState<DivisionProfile | null>(null);
 	const [transactions, setTransactions] = useState<CreditTransaction[]>([]);
-	const [autoChargeDraft, setAutoChargeDraft] = useState({ enabled: false, threshold: '5', amount: '20' });
-	const [savingAutoCharge, setSavingAutoCharge] = useState(false);
 
 	// --- 見積もり ---
 	const [promptText, setPromptText] = useState(composerPrompt ?? '');
@@ -281,17 +278,13 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 			]);
 			setProfile(nextProfile);
 			setTransactions(nextTransactions);
-			setAutoChargeDraft({
-				enabled: nextProfile.autoCharge,
-				threshold: String(nextProfile.autoChargeThreshold),
-				amount: String(nextProfile.autoChargeAmount),
-			});
 		} catch (e) {
 			setError(errorText(e));
 		}
 	}, [session]);
 
 	useEffect(() => { void loadAccount(); }, [loadAccount]);
+
 
 	const loadHistory = useCallback(async (more = false) => {
 		if (!session) return;
@@ -392,43 +385,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 		}
 	}, [session, toast]);
 
-	const saveAutoCharge = useCallback(async () => {
-		if (!session) return;
-		// 残高から自動で金額が動く更新なので、内容を提示してから確定する。
-		const ok = await confirmAction({
-			title: '自動チャージを保存しますか？',
-			message: autoChargeDraft.enabled
-				? `残高が $${autoChargeDraft.threshold || '0'} を下回ったら、$${autoChargeDraft.amount || '0'} を自動でチャージします。`
-				: '自動チャージを無効にします。',
-			confirmLabel: '保存',
-		});
-		if (!ok) return;
-		setSavingAutoCharge(true);
-		setError(null);
-		try {
-			await saveAutoChargeSettings(session, {
-				autoCharge: autoChargeDraft.enabled,
-				threshold: Number(autoChargeDraft.threshold),
-				amount: Number(autoChargeDraft.amount),
-			});
-			toast.show('自動チャージの設定を保存しました', 'success');
-			await loadAccount();
-		} catch (e) {
-			setError(errorText(e));
-		} finally {
-			setSavingAutoCharge(false);
-		}
-	}, [session, autoChargeDraft, loadAccount, toast]);
 
-	const openBillingUrl = useCallback(async (make: () => Promise<string>) => {
-		setError(null);
-		try {
-			const url = await make();
-			await Linking.openURL(url);
-		} catch (e) {
-			setError(errorText(e));
-		}
-	}, []);
 
 	// --- 集計 ---
 
@@ -753,74 +710,16 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 							</Card>
 
-							{usesAppStoreBilling() ? (
-								<AppStorePurchaseCard session={session} isPlus={profile.isPaid} onPurchased={() => void loadAccount()} />
-							) : <>
-							<Card>
-								<SectionTitle>自動チャージ</SectionTitle>
-								<Muted>残高がしきい値を下回ったときに、登録済みの支払い方法で自動的にチャージします。</Muted>
-								<Row style={styles.spread}>
-									<Muted>自動チャージを使う</Muted>
-									<Toggle
-										value={autoChargeDraft.enabled}
-										onValueChange={value => setAutoChargeDraft(d => ({ ...d, enabled: value }))}
-										accessibilityLabel='自動チャージを使う'
-									/>
-								</Row>
-								<NumberField
-									label='しきい値 (USD)'
-									value={autoChargeDraft.threshold}
-									invalid={!(Number(autoChargeDraft.threshold) >= 0)}
-									onChange={text => setAutoChargeDraft(d => ({ ...d, threshold: text }))}
-								/>
-								<NumberField
-									label='1 回のチャージ額 (USD)'
-									value={autoChargeDraft.amount}
-									invalid={!(Number(autoChargeDraft.amount) > 0)}
-									onChange={text => setAutoChargeDraft(d => ({ ...d, amount: text }))}
-								/>
-								<Button
-									title='自動チャージの設定を保存'
-									loading={savingAutoCharge}
-									disabled={!(Number(autoChargeDraft.threshold) >= 0) || !(Number(autoChargeDraft.amount) > 0)}
-									onPress={() => void saveAutoCharge()}
-								/>
-								{!profile.hasStripeCustomer ? (
-									<Muted>支払い方法がまだ登録されていません。先にプランの登録かチャージを行ってください。</Muted>
-								) : null}
-							</Card>
-
-							<Card>
-								<SectionTitle>プランと支払い</SectionTitle>
-								{DIVISION_PLANS.map(plan => (
-									<View key={plan.id} style={styles.planRow}>
-										<Row style={styles.spread}>
-											<View style={styles.flex}>
-												<Body>{plan.name} · {plan.priceLabel}</Body>
-												<Muted>{plan.features.join(' / ')}</Muted>
-											</View>
-											{plan.id === profile.plan
-												? <Badge label='利用中' color={colors.success} />
-												: plan.id === 'free'
-													? null
-													: <Button
-														title='申し込む'
-														variant='secondary'
-														onPress={() => void openBillingUrl(() => createCheckoutUrl(session, plan.id as 'plus'))}
-													/>}
-										</Row>
-									</View>
-								))}
-								{profile.hasStripeCustomer ? (
-									<Button
-										title='支払い方法・請求履歴を開く'
-										variant='secondary'
-										onPress={() => void openBillingUrl(() => createPortalUrl(session))}
-									/>
-								) : null}
-								<Muted>支払いはブラウザの Stripe の画面で行います。</Muted>
-							</Card>
-							</>}
+							{allowsPurchases() ? (
+								<Card>
+									<SectionTitle>プランとクレジットの管理</SectionTitle>
+									<Muted>Plus の申し込み・クレジットの購入・支払い方法・自動チャージは Division の Web サイトで管理します。</Muted>
+									<Row style={styles.actions}>
+										<Button title='プランを管理' variant='secondary' onPress={() => openUrl(DIVISION_DASHBOARD_PLAN_URL)} />
+										<Button title='クレジットを管理' variant='secondary' onPress={() => openUrl(DIVISION_DASHBOARD_CREDITS_URL)} />
+									</Row>
+								</Card>
+							) : null}
 
 							{transactions.length > 0 ? (
 								<Card>
@@ -851,6 +750,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 };
 
 const styles = StyleSheet.create({
+	actions: { gap: spacing.sm, flexWrap: 'wrap' },
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	alignStart: { alignSelf: 'flex-start' },
