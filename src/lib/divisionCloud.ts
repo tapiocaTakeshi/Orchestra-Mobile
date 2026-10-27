@@ -212,8 +212,8 @@ export class DivisionCloudError extends Error {
 					: 'Division API に接続できません。通信環境を確認してください。';
 			case 400: return `入力内容が正しくありません (${this.message})。`;
 			case 401: return 'Division のログインが切れました。もう一度ログインしてください。';
-			case 402: return 'クレジットが不足しています。コストページの「管理」からチャージしてください。';
-			case 403: return 'クラウドエージェントには Orchestra Plus が必要です。コストページの「管理」からプランを確認してください。';
+			case 402: return 'クレジットが不足しています。';
+			case 403: return 'クラウドエージェントには Orchestra Plus が必要です。';
 			case 404: return 'セッションが見つかりません。アーカイブされたか、Division API がクラウドエージェントに未対応です。';
 			case 409: return 'いまのセッションの状態では、この操作はできません。';
 			case 429: return this.message || '同時に実行できるクラウドエージェントの上限に達しました。';

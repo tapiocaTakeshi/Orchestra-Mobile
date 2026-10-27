@@ -48,6 +48,7 @@ import {
 	DIVISION_CREDIT_PACKS,
 	DIVISION_PLANS,
 	DivisionProfile,
+	allowsPurchases,
 	createCheckoutUrl,
 	createCreditCheckoutUrl,
 	createPortalUrl,
@@ -753,6 +754,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 							</Card>
 
+							{allowsPurchases() ? <>
 							<Card>
 								<SectionTitle>クレジットの購入</SectionTitle>
 								{DIVISION_CREDIT_PACKS.map(credits => (
@@ -832,6 +834,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 								<Muted>支払いはブラウザの Stripe の画面で行います。</Muted>
 							</Card>
+							</> : null}
 
 							{transactions.length > 0 ? (
 								<Card>

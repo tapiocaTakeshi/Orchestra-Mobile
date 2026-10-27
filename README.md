@@ -257,7 +257,7 @@ src/lib/divisionAuthConfig.ts  Division (Supabase / Division API) の公開設�
 src/lib/divisionAuth.ts        Division ログイン・RemoteSession 一覧取得・購読
 src/lib/divisionSession.ts     Division セッションの secure-store 永続化
 src/lib/divisionSocial.ts      共有投稿 (AssignmentPost) の取得・公開・いいね・取り込み
-src/lib/divisionBilling.ts     プラン・クレジット残高・自動チャージ・Stripe 導線
+src/lib/divisionBilling.ts     プラン・クレジット残高・自動チャージ・Stripe 導線 (Web 版のみ)
 src/lib/divisionRouting.ts     Division API のルーティング見積もり / 利用履歴
 src/lib/divisionCloud.ts       Division API のクラウドエージェント (セッションの起動・イベント・変更) と表示用の補助関数
 src/lib/divisionGitHub.ts      Division API の GitHub アカウント連携 (状態・連携・解除・リポジトリ / ブランチ一覧・連携の完了待ち)
@@ -402,7 +402,7 @@ Division の「どの役割をどのモデルに振るか」という組み合�
 | 方針 | 最低性能スコア (0〜100) / 1 回のモデル呼び出しの上限 (USD) / 割り当て可能な最大出力トークン。検証の条件は IDE 側の `AutoRouting.tsx` と同じ |
 | 見積もり | 依頼文を Jev に判定させ、リーダー・コーダー・レビューの想定コストを表示 (**判定のたびに料金が発生します**)。入力トークン数は依頼文から自動で概算 |
 | 利用履歴 | モデル実行ごとの実測トークン数と料金。日別 / 役割別 / モデル別の集計、見積もりとの差、リクエスト単位の合計 |
-| 管理 | クレジット残高 (購入分・プラン付与分)、これまでの利用額、自動チャージ設定、プラン変更と支払い (Stripe) |
+| 管理 | クレジット残高 (購入分・プラン付与分)、これまでの利用額、自動チャージ設定、プラン変更と支払い (Stripe, Web 版のみ) |
 
 方針はこの端末に保存され、見積もりの条件として使われます。IDE 側の
 「設定 → Division」の `divisionAutoRouting` とは別管理です。
@@ -435,4 +435,4 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
 - 共有ページに出す投稿はログイン済みユーザー全員が読めます。公開するのは役割とモデルの組み合わせだけで、
   API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
 - Division APIはログイン中のSupabase JWTで認証します。JWTの期限が切れた場合はrefresh tokenで更新します。
-- 支払いはアプリ内では行わず、Stripe の画面をブラウザで開きます。
+- ネイティブアプリ (iOS / Android) では課金しません (購入・申し込みの導線を出さない)。購入・プラン変更は Web 版で行い、支払いは Stripe の画面で行います。

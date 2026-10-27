@@ -2,9 +2,12 @@
  * プラン・クレジット残高まわり (チューニングタブの「管理」側)。
  *
  * IDE 側の void-login-tsx/divisionBilling.ts と同じテーブル・Edge Function を
- * 使う。プラン (サブスクリプション) もクレジットも、支払いはアプリ内では行わず
- * Stripe の Checkout / Billing Portal を既定ブラウザで開く (iOS も App 内課金は使わない)。
+ * 使う。支払いは Stripe の Checkout / Billing Portal で行う。ネイティブアプリ (iOS / Android)
+ * では課金しない (購入・申し込み・支払い管理・自動チャージの導線を出さない)。購入できるのは
+ * Web 版だけ。
  */
+
+import { Platform } from 'react-native';
 
 import { DivisionSession, getDivisionSupabase } from './divisionAuth';
 import {
@@ -12,6 +15,9 @@ import {
 	DIVISION_FUNCTIONS_BASE_URL,
 	DIVISION_PROFILES_TABLE,
 } from './divisionAuthConfig';
+
+/** この端末で購入・申し込みの導線を出すか。ネイティブアプリでは課金しない。 */
+export const allowsPurchases = (): boolean => Platform.OS === 'web';
 
 export type DivisionPlanId = 'free' | 'plus';
 
