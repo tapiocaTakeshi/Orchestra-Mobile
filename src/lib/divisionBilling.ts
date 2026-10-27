@@ -2,8 +2,8 @@
  * プラン・クレジット残高まわり (チューニングタブの「管理」側)。
  *
  * IDE 側の void-login-tsx/divisionBilling.ts と同じテーブル・Edge Function を
- * 使う。支払いそのものはアプリ内では行わず、Stripe の Checkout / Billing Portal を
- * 既定ブラウザで開く。
+ * 使う。プラン (サブスクリプション) もクレジットも、支払いはアプリ内では行わず
+ * Stripe の Checkout / Billing Portal を既定ブラウザで開く (iOS も App 内課金は使わない)。
  */
 
 import { DivisionSession, getDivisionSupabase } from './divisionAuth';
@@ -178,6 +178,15 @@ export const createCheckoutUrl = (
 	session: DivisionSession,
 	planId: Exclude<DivisionPlanId, 'free'>,
 ): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { planId });
+
+/** Stripe で買えるクレジットパック (1 クレジット = 1 USD)。サーバーの create-checkout-session と揃える。 */
+export const DIVISION_CREDIT_PACKS: number[] = [20, 50];
+
+/** クレジット購入 (Stripe Checkout, 1 回払い) の URL。付与は stripe-webhook が行う。 */
+export const createCreditCheckoutUrl = (
+	session: DivisionSession,
+	credits: number,
+): Promise<string> => callBillingFunction('create-checkout-session', session.accessToken, { credits });
 
 /** 支払い方法の変更・解約 (Stripe Billing Portal) の URL。 */
 export const createPortalUrl = (session: DivisionSession): Promise<string> =>

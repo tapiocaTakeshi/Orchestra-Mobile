@@ -41,15 +41,15 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
-import { AppStorePurchaseCard } from '../components/AppStorePurchaseCard';
-import { usesAppStoreBilling } from '../lib/appStorePurchases';
 import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
 	CreditTransaction,
+	DIVISION_CREDIT_PACKS,
 	DIVISION_PLANS,
 	DivisionProfile,
 	createCheckoutUrl,
+	createCreditCheckoutUrl,
 	createPortalUrl,
 	fetchDivisionProfile,
 	listCreditTransactions,
@@ -753,9 +753,21 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 							</Card>
 
-							{usesAppStoreBilling() ? (
-								<AppStorePurchaseCard session={session} isPlus={profile.isPaid} onPurchased={() => void loadAccount()} />
-							) : <>
+							<Card>
+								<SectionTitle>クレジットの購入</SectionTitle>
+								{DIVISION_CREDIT_PACKS.map(credits => (
+									<Row key={credits} style={styles.spread}>
+										<Body>{formatUsdShort(credits)} 分のクレジット</Body>
+										<Button
+											title='購入'
+											variant='secondary'
+											onPress={() => void openBillingUrl(() => createCreditCheckoutUrl(session, credits))}
+										/>
+									</Row>
+								))}
+								<Muted>購入したクレジットに有効期限はありません。支払いはブラウザの Stripe の画面で行い、完了後に画面を下に引いて更新すると残高に反映されます。</Muted>
+							</Card>
+
 							<Card>
 								<SectionTitle>自動チャージ</SectionTitle>
 								<Muted>残高がしきい値を下回ったときに、登録済みの支払い方法で自動的にチャージします。</Muted>
@@ -820,7 +832,6 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								) : null}
 								<Muted>支払いはブラウザの Stripe の画面で行います。</Muted>
 							</Card>
-							</>}
 
 							{transactions.length > 0 ? (
 								<Card>

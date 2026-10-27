@@ -13,8 +13,6 @@ export const TERMS_VERSION = '2026-10-26';
 export const TERMS_URL = 'https://division.he-ro.jp/terms';
 export const PRIVACY_URL = 'https://division.he-ro.jp/privacy';
 export const CONTACT_URL = 'https://division.he-ro.jp/contact';
-/** Apple の標準 EULA (サブスクリプションの購入画面に載せる) */
-export const APPLE_STANDARD_EULA_URL = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
 
 export type LegalSection = { heading: string; body: string[] };
 
