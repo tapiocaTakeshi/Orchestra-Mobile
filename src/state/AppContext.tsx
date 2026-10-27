@@ -22,7 +22,7 @@ import React, {
 } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 
-import { OrchestraApiError, OrchestraClient } from '../api/client';
+import { ConnectionRoute, OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, Snapshot } from '../api/types';
 import { useToast } from '../components/ui';
 import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
@@ -44,6 +44,9 @@ const POLL_INTERVAL_MS = 3_000;
 const POLL_INTERVAL_BUSY_MS = 1_200;
 /** 連続で失敗している間は間隔を空ける (電池とログを無駄にしないため)。 */
 const POLL_INTERVAL_ERROR_MS = 8_000;
+/** 外出先から中継で繋いでいる間は、通信量を抑えるために少し間隔を空ける。 */
+const RELAY_POLL_INTERVAL_MS = 5_000;
+const RELAY_POLL_INTERVAL_BUSY_MS = 2_000;
 
 type AppContextValue = {
 	// 接続
@@ -61,6 +64,8 @@ type AppContextValue = {
 	connectionStatus: RemoteConnectionStatus;
 	/** 最後に PC から状態を受け取れた時刻 (ms)。接続切れのとき「いつの内容か」を出すため */
 	lastSuccessAt: number | null;
+	/** PC への経路。同じ Wi-Fi なら lan、外出先からは relay (中継)。未接続なら null */
+	connectionRoute: ConnectionRoute | null;
 
 	// スナップショット
 	snapshot: Snapshot | null;
@@ -99,6 +104,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 	const [error, setError] = useState<string | null>(null);
 	const [isRefreshing, setIsRefreshing] = useState(false);
 	const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
+	const [connectionRoute, setConnectionRoute] = useState<ConnectionRoute | null>(null);
 
 	const clientRef = useRef<OrchestraClient | null>(null);
 	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -116,7 +122,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			return null;
 		}
 		if (clientRef.current) clientRef.current.setConnection(accountConnection);
-		else clientRef.current = new OrchestraClient(accountConnection);
+		else clientRef.current = new OrchestraClient(accountConnection, { relay: true });
 		clientRef.current.setDivisionAccessToken(session?.accessToken);
 		return clientRef.current;
 	}, [accountConnection, session?.accessToken]);
@@ -151,6 +157,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		snapshotRef.current = null;
 		setError(null);
 		setLastSuccessAt(null);
+		setConnectionRoute(null);
 		await saveActiveUrl(null);
 	}, []);
 
@@ -176,6 +183,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			failuresRef.current = 0;
 			setError(null);
 			setLastSuccessAt(Date.now());
+			setConnectionRoute(current.route);
 			const previous = snapshotRef.current;
 			if (previous && previous.revision !== next.revision) {
 				if (!previous.chat.awaitingApproval && next.chat.awaitingApproval) {
@@ -198,6 +206,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			setSnapshot(prev => (prev && prev.revision === next.revision && prev.generatedAt !== 0 ? prev : next));
 
 			const busy = next.chat.isRunning || next.kanban.runtime.isRunning;
+			if (current.route === 'relay') return busy ? RELAY_POLL_INTERVAL_BUSY_MS : RELAY_POLL_INTERVAL_MS;
 			return busy ? POLL_INTERVAL_BUSY_MS : POLL_INTERVAL_MS;
 		} catch (e) {
 			if (controller.signal.aborted) return POLL_INTERVAL_MS;
@@ -238,6 +247,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			snapshotRef.current = null;
 			setError(null);
 			setLastSuccessAt(null);
+			setConnectionRoute(null);
 			return;
 		}
 		failuresRef.current = 0;
@@ -299,6 +309,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		setSnapshot(null);
 		setError(null);
 		setLastSuccessAt(null);
+		setConnectionRoute(null);
 		await Promise.all([saveConnections(updated), saveActiveUrl(owned.url)]);
 	}, [connections, session]);
 
@@ -329,6 +340,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		connection: accountConnection,
 		connectionStatus,
 		lastSuccessAt,
+		connectionRoute,
 		client,
 		isRestoring,
 		connect,
@@ -339,7 +351,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		isRefreshing,
 		refresh,
 		invalidate,
-	}), [accountConnections, accountConnection, connectionStatus, lastSuccessAt, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
+	}), [accountConnections, accountConnection, connectionStatus, lastSuccessAt, connectionRoute, client, isRestoring, connect, disconnect, forget, snapshot, error, isRefreshing, refresh, invalidate]);
 
 	return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };

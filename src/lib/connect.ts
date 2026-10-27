@@ -7,6 +7,8 @@
  * 有効にするとアカウントの RemoteSession にペアリングのトークンを載せるので、候補のトークンが
  * その一覧にあるかで確かめる。別アカウントの PC の接続情報を渡されても繋がない
  * (PC 側も X-Division-Access-Token のユーザーを見て、違えば 403 account_mismatch を返す)。
+ *
+ * 同じ LAN に PC がいなければ、OrchestraClient が中継 (外出先からの接続) に切り替えて確かめる。
  */
 
 import { OrchestraApiError, OrchestraClient } from '../api/client';
@@ -53,7 +55,7 @@ export const verifyAndConnect = async (
 		return { ok: false, message: NOT_ACCOUNT_SESSION_MESSAGE };
 	}
 	try {
-		const client = new OrchestraClient(candidate);
+		const client = new OrchestraClient(candidate, { relay: true });
 		client.setDivisionAccessToken(account.accessToken);
 
 		const pong = await client.ping();
