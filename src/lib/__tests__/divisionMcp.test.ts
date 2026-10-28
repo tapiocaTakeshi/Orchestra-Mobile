@@ -25,7 +25,7 @@ import {
 } from '../divisionMcp';
 import { DivisionCloudError } from '../divisionCloud';
 
-const BASE = 'https://api.division.he-ro.jp/api/mcp-servers';
+const BASE = 'https://api.division.he-ro.io/api/mcp-servers';
 const auth = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
 type FetchCall = { url: string; init: RequestInit };
