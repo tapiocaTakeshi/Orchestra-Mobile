@@ -89,7 +89,7 @@ const DecisionCard = ({ decision, busy, onOption }: {
 							onPress={() => onOption(primary)}
 							style={({ pressed }) => [styles.primary, (pressed || busy) && styles.pressed]}
 						>
-							{busy ? <ActivityIndicator size='small' color={colors.bg} /> : <Text style={styles.primaryText}>{primary.label}</Text>}
+							{busy ? <ActivityIndicator size='small' color={colors.onAccent} /> : <Text style={styles.primaryText}>{primary.label}</Text>}
 						</Pressable>
 					) : null}
 					{secondary.map(o => (
@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
 	header: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	headerTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
 	count: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.danger },
-	countText: { color: colors.bg, fontSize: 11, fontWeight: '700' },
+	countText: { color: colors.onAccent, fontSize: 11, fontWeight: '700' },
 	headline: { lineHeight: 18 },
 	card: {
 		gap: spacing.xs,
@@ -225,8 +225,8 @@ const styles = StyleSheet.create({
 	riskText: { flex: 1, color: colors.warning, fontSize: fontSize.xs, lineHeight: 17 },
 	recommendation: { color: colors.fg, fontSize: fontSize.xs, lineHeight: 17 },
 	actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
-	primary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fgStrong },
-	primaryText: { color: colors.bg, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	primary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
+	primaryText: { color: colors.onAccent, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	secondary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.borderStrong },
 	secondaryText: { color: colors.fg, fontSize: fontSize.xs + 1 },
 	pressed: { opacity: 0.6 },

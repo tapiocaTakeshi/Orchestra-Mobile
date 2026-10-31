@@ -91,7 +91,7 @@ type ButtonProps = {
 };
 
 /**
- * 主ボタンは明るい塗りに暗い文字 (色を足さない)、それ以外は枠だけか文字だけ。
+ * 主ボタンは控えめなテラコッタの塗りに白い文字 (Claude のアプリと同じ)、それ以外は枠だけか文字だけ。
  * 危険な操作は赤い塗りではなく、赤い文字で出す。
  */
 const buttonTextColor = (variant: ButtonProps['variant']) => {
@@ -99,7 +99,7 @@ const buttonTextColor = (variant: ButtonProps['variant']) => {
 		case 'ghost': return colors.fgMuted;
 		case 'secondary': return colors.fg;
 		case 'danger': return colors.danger;
-		default: return colors.bg;
+		default: return colors.onAccent;
 	}
 };
 
@@ -220,9 +220,9 @@ export const Toggle = ({ value, onValueChange, accessibilityLabel, disabled }: {
 		disabled={disabled}
 		accessibilityLabel={accessibilityLabel}
 		trackColor={{ true: colors.accentText, false: colors.borderStrong }}
-		thumbColor={value ? colors.fgStrong : colors.fgMuted}
+		thumbColor={colors.bgElevated}
 		ios_backgroundColor={colors.borderStrong}
-		{...(Platform.OS === 'web' ? { activeThumbColor: colors.fgStrong } : {})}
+		{...(Platform.OS === 'web' ? { activeThumbColor: colors.bgElevated } : {})}
 	/>
 );
 
@@ -258,7 +258,7 @@ export const ErrorBanner = ({ message, onRetry, tone = 'error', style }: {
 		accessibilityLiveRegion='polite'
 		style={[styles.errorBanner, tone === 'warning' && styles.warningBanner, style]}
 	>
-		<Icon name='alert-circle' size={16} color={tone === 'warning' ? colors.warning : '#fecdd3'} />
+		<Icon name='alert-circle' size={16} color={tone === 'warning' ? colors.warning : colors.danger} />
 		<Text style={[styles.errorText, tone === 'warning' && styles.warningText]}>{message}</Text>
 		{onRetry ? <Button title='再試行' variant='ghost' size='sm' onPress={onRetry} /> : null}
 	</View>
@@ -547,11 +547,11 @@ const styles = StyleSheet.create({
 		minHeight: 56,
 		paddingHorizontal: spacing.lg,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
+		borderBottomColor: colors.border,
 	},
 	screenHeaderWithBack: { paddingLeft: spacing.xs, paddingRight: spacing.sm },
 	screenHeaderTitle: { flex: 1 },
-	inputFocused: { borderColor: colors.fgFaint },
+	inputFocused: { borderColor: colors.accent },
 	emptyIcon: { marginBottom: spacing.xs },
 	screen: {
 		flex: 1,
@@ -562,7 +562,7 @@ const styles = StyleSheet.create({
 		paddingVertical: spacing.lg,
 		gap: spacing.md,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
+		borderBottomColor: colors.border,
 	},
 	sectionTitleRow: {
 		flexDirection: 'row',
@@ -580,11 +580,12 @@ const styles = StyleSheet.create({
 		color: colors.fgStrong,
 		fontSize: fontSize.md,
 		fontWeight: '600',
+		letterSpacing: 0.1,
 	},
 	body: {
 		color: colors.fg,
 		fontSize: fontSize.sm,
-		lineHeight: 23,
+		lineHeight: 24,
 	},
 	muted: {
 		color: colors.fgMuted,
@@ -604,9 +605,9 @@ const styles = StyleSheet.create({
 	},
 	buttonSmall: { minHeight: 38, paddingHorizontal: spacing.sm + 2, paddingVertical: spacing.xs },
 	buttonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs + 2, flexShrink: 1 },
-	buttonPrimary: { backgroundColor: colors.fg },
-	buttonPrimaryPressed: { backgroundColor: colors.fgMuted },
-	buttonSecondary: { backgroundColor: 'transparent', borderColor: colors.borderStrong },
+	buttonPrimary: { backgroundColor: colors.accent },
+	buttonPrimaryPressed: { backgroundColor: colors.accentPressed },
+	buttonSecondary: { backgroundColor: colors.bgElevated, borderColor: colors.borderStrong },
 	buttonDanger: { backgroundColor: 'transparent', borderColor: withAlpha(colors.danger, '44') },
 	buttonGhost: { backgroundColor: 'transparent', borderColor: 'transparent' },
 	buttonPressed: { backgroundColor: colors.bgHover },
@@ -636,11 +637,11 @@ const styles = StyleSheet.create({
 		height: 16,
 		borderRadius: 8,
 		paddingHorizontal: 3,
-		backgroundColor: colors.fg,
+		backgroundColor: colors.accent,
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	iconBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '700' },
+	iconBadgeText: { color: colors.onAccent, fontSize: 10, fontWeight: '700' },
 	input: {
 		minHeight: 46,
 		minWidth: 0,
@@ -680,7 +681,7 @@ const styles = StyleSheet.create({
 	},
 	divider: {
 		height: StyleSheet.hairlineWidth,
-		backgroundColor: colors.borderStrong,
+		backgroundColor: colors.border,
 		marginVertical: spacing.sm,
 	},
 	empty: {
@@ -725,7 +726,7 @@ const styles = StyleSheet.create({
 	warningText: { color: colors.warning },
 	segmented: {
 		flexDirection: 'row',
-		backgroundColor: colors.bgElevated,
+		backgroundColor: colors.bgHover,
 		borderRadius: radius.md,
 		padding: 3,
 		gap: 3,
@@ -738,8 +739,8 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		paddingHorizontal: spacing.xs,
 	},
-	segmentActive: { backgroundColor: colors.bgHover },
-	segmentText: { color: colors.fgFaint, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	segmentActive: { backgroundColor: colors.bgElevated, shadowColor: colors.shadow, shadowOpacity: 0.08, shadowRadius: 2, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+	segmentText: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	segmentTextActive: { color: colors.fgStrong },
 	toastWrap: {
 		position: 'absolute',
@@ -754,16 +755,16 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		gap: spacing.sm,
 		maxWidth: 480,
-		backgroundColor: colors.bgInput,
+		backgroundColor: colors.bgElevated,
 		borderWidth: 1,
 		borderRadius: radius.md,
 		paddingHorizontal: spacing.md,
 		paddingVertical: spacing.sm + 2,
-		shadowColor: '#000000',
-		shadowOpacity: 0.5,
+		shadowColor: colors.shadow,
+		shadowOpacity: 0.12,
 		shadowRadius: 16,
 		shadowOffset: { width: 0, height: 6 },
-		elevation: 8,
+		elevation: 4,
 	},
 	toastText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 19, flexShrink: 1 },
 	toastAction: {
@@ -782,7 +783,7 @@ const styles = StyleSheet.create({
 		paddingRight: spacing.sm,
 		paddingVertical: spacing.sm,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
+		borderBottomColor: colors.border,
 	},
 	sheetTitle: { flex: 1, gap: 2, paddingVertical: spacing.xs },
 	sheetBody: { flex: 1 },
@@ -811,10 +812,10 @@ const styles = StyleSheet.create({
 		paddingRight: spacing.sm,
 		paddingVertical: spacing.sm,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
+		borderBottomColor: colors.border,
 	},
 	drawerTitle: { flex: 1, color: colors.fgStrong, fontSize: fontSize.md, fontWeight: '600' },
-	drawerScrim: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)' },
+	drawerScrim: { flex: 1, backgroundColor: colors.scrim },
 	chipRow: {
 		flexDirection: 'row',
 		flexWrap: 'wrap',
@@ -828,13 +829,13 @@ const styles = StyleSheet.create({
 		borderRadius: 999,
 		paddingHorizontal: spacing.md,
 	},
-	chipSelected: { backgroundColor: colors.bgHover, borderColor: colors.borderStrong },
+	chipSelected: { backgroundColor: withAlpha(colors.accent, '14'), borderColor: withAlpha(colors.accent, '66') },
 	chipText: {
 		color: colors.fgMuted,
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
-	chipTextSelected: { color: colors.fgStrong },
+	chipTextSelected: { color: colors.accentText },
 	loading: {
 		padding: spacing.xl,
 		alignItems: 'center',

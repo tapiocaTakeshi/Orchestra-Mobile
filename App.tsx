@@ -169,7 +169,7 @@ const Shell = () => {
 export default function App() {
 	return (
 		<SafeAreaProvider>
-			<StatusBar style='light' />
+			<StatusBar style='dark' />
 			<ToastProvider>
 				<DivisionAuthProvider>
 					<AppProvider>
@@ -195,9 +195,11 @@ const styles = StyleSheet.create({
 		gap: spacing.sm,
 		minHeight: 40,
 		paddingHorizontal: spacing.lg,
-		backgroundColor: colors.bgHover,
+		backgroundColor: colors.bgSidebar,
+		borderBottomWidth: StyleSheet.hairlineWidth,
+		borderBottomColor: colors.border,
 	},
 	approvalDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
 	approvalText: { flex: 1, color: colors.fg, fontSize: fontSize.xs + 1 },
-	approvalLink: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	approvalLink: { color: colors.accentText, fontSize: fontSize.xs + 1, fontWeight: '600' },
 });

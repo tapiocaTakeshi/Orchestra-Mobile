@@ -5,13 +5,13 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "orchestra",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0e0c0b"
+      "backgroundColor": "#faf9f5"
     },
     "assetBundlePatterns": [
       "**/*"
