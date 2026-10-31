@@ -176,6 +176,7 @@ import {
 	GitHubRepoSelection,
 	useGitHubConnection,
 } from '../components/GitHubRepoPicker';
+import { DecisionInbox } from '../components/DecisionInbox';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import {
@@ -2041,6 +2042,8 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	const [targetSheetOpen, setTargetSheetOpen] = useState(false);
 	const [sendingToPc, setSendingToPc] = useState(false);
 	const [connectingDeviceId, setConnectingDeviceId] = useState<string | null>(null);
+	/** 引っ張って更新した回数 (判断の受信箱も読み直す) */
+	const [pullCount, setPullCount] = useState(0);
 
 	const sessionsRef = useRef<CloudSession[]>([]);
 	const launchingRef = useRef(0);
@@ -2139,6 +2142,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	const onPull = useCallback(async () => {
 		setRefreshing(true);
 		reloadProjects();
+		setPullCount(n => n + 1);
 		try { await loadList(); } finally { setRefreshing(false); }
 	}, [loadList, reloadProjects]);
 
@@ -2217,6 +2221,15 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	}, [session, draft, toast, loadList]);
 
 	const selected = useMemo(() => sessions.find(s => s.id === selectedId) ?? null, [sessions, selectedId]);
+	// 判断の受信箱は、セッションの状態 (承認待ち・変更・PR) が変わったときだけ読み直す (ポーリングのたびには読まない)。
+	const inboxKey = useMemo(
+		() => `${pullCount}#${sessions.map(s => `${s.id}:${s.status}:${s.changedFiles}:${s.pullRequest?.number ?? ''}`).join('|')}`,
+		[sessions, pullCount],
+	);
+	const onInvestigationStarted = useCallback((started: CloudSession) => {
+		setSessions(prev => (prev.some(s => s.id === started.id) ? prev : [started, ...prev]));
+		setSelectedId(started.id);
+	}, []);
 	// 開いていたセッションが一覧から消えたら (PC でアーカイブされたなど)、一覧に戻る。
 	useEffect(() => {
 		if (selectedId && !selected && !loading) setSelectedId(null);
@@ -2378,6 +2391,15 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onPull()} tintColor={colors.fgMuted} />}
 				>
 					{onOpenPage && headerTitle === undefined ? <ShortcutRow items={shortcuts} connected={connected} onOpen={page => onOpenPage(page)} /> : null}
+
+					{session ? (
+						<DecisionInbox
+							auth={session}
+							refreshKey={inboxKey}
+							onOpenSession={id => setSelectedId(id)}
+							onSessionStarted={onInvestigationStarted}
+						/>
+					) : null}
 
 					{launching > 0 ? (
 						<View style={styles.launching} accessibilityLiveRegion='polite'>
