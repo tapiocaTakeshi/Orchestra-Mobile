@@ -198,6 +198,8 @@ const EVENTS_PAGE = 500;
 const MAX_DIFF_LINES = 1_000;
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
+/** 空の画面の見出しだけに使うセリフ体 (Claude のアプリの見出しの雰囲気に寄せる。端末標準のフォントで依存は増やさない) */
+const SERIF = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia, serif' });
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 
@@ -823,12 +825,15 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 							accessibilityLabel={`モデル: ${draftModelLabel(draft, projects.projects)}。変更する`}
 							onPress={() => onOptionsOpen(true)}
 						/>
-						<ComposerChip
-							icon='repeat'
-							label={`ループ · ${GOAL_LOOP_LABELS[draft.goalLoop]}`}
-							accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[draft.goalLoop]}。変更する`}
-							onPress={() => onOptionsOpen(true)}
-						/>
+						{/* 目標ループは既定値から変えたときだけ見せる (既定値なら「始める場所」「モデル」から開く設定で変えられる) */}
+						{draft.goalLoop !== DEFAULT_GOAL_LOOP ? (
+							<ComposerChip
+								icon='repeat'
+								label={`ループ · ${GOAL_LOOP_LABELS[draft.goalLoop]}`}
+								accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[draft.goalLoop]}。変更する`}
+								onPress={() => onOptionsOpen(true)}
+							/>
+						) : null}
 						{draft.modelMode === 'division' && draft.approvalMode ? (
 							<ComposerChip icon='check-square' label='承認モード' accessibilityLabel='承認モード: オン。変更する' onPress={() => onOptionsOpen(true)} />
 						) : null}
@@ -911,7 +916,7 @@ const SendButton = ({ icon, disabled, loading, accessibilityLabel, onPress }: {
 		onPress={onPress}
 		style={({ pressed }) => [styles.sendButton, (disabled || loading) && styles.sendButtonDisabled, pressed && styles.rowPressed]}
 	>
-		{loading ? <ActivityIndicator size='small' color={colors.bg} /> : <Icon name={icon} size={18} color={colors.bg} />}
+		{loading ? <ActivityIndicator size='small' color={colors.onAccent} /> : <Icon name={icon} size={18} color={colors.onAccent} />}
 	</Pressable>
 );
 
@@ -1640,8 +1645,8 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, archivi
 				onPress={onToggleChanges}
 				style={({ pressed }) => [styles.diffPill, showChanges && styles.diffPillActive, pressed && styles.rowPressed]}
 			>
-				<Icon name={showChanges ? 'message-square' : 'git-commit'} size={14} color={showChanges ? colors.bg : colors.fgMuted} />
-				<Text style={[styles.diffPillText, showChanges && { color: colors.bg }]}>
+				<Icon name={showChanges ? 'message-square' : 'git-commit'} size={14} color={showChanges ? colors.onAccent : colors.fgMuted} />
+				<Text style={[styles.diffPillText, showChanges && { color: colors.onAccent }]}>
 					{showChanges ? 'ログ' : session.changedFiles > 0 ? `${session.changedFiles}` : '差分'}
 				</Text>
 			</Pressable>
@@ -2590,9 +2595,9 @@ const styles = StyleSheet.create({
 		borderColor: colors.border,
 	},
 	welcome: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xl * 2 },
-	welcomeMark: { color: colors.accentText, fontSize: fontSize.xl },
-	welcomeTitle: { color: colors.fgStrong, fontSize: fontSize.md, fontWeight: '600', textAlign: 'center' },
-	welcomeText: { textAlign: 'center', lineHeight: 20, maxWidth: 320 },
+	welcomeMark: { color: colors.accent, fontSize: fontSize.xl + 6 },
+	welcomeTitle: { color: colors.fgStrong, fontSize: fontSize.lg, fontWeight: '500', textAlign: 'center', fontFamily: SERIF },
+	welcomeText: { textAlign: 'center', lineHeight: 21, maxWidth: 320 },
 	listHeader: {
 		flexDirection: 'row',
 		alignItems: 'center',
@@ -2625,14 +2630,19 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.sm,
 	},
 	composerBox: {
-		borderRadius: 26,
+		borderRadius: 24,
 		borderWidth: 1,
-		borderColor: colors.borderStrong,
+		borderColor: colors.border,
 		backgroundColor: colors.bgElevated,
 		paddingHorizontal: spacing.sm,
 		paddingTop: spacing.xs,
 		paddingBottom: spacing.sm,
 		gap: spacing.xs,
+		shadowColor: colors.shadow,
+		shadowOpacity: 0.06,
+		shadowRadius: 10,
+		shadowOffset: { width: 0, height: 2 },
+		elevation: 2,
 	},
 	composerInput: {
 		minHeight: 44,
@@ -2664,12 +2674,12 @@ const styles = StyleSheet.create({
 	sendButton: {
 		width: 34,
 		height: 34,
-		borderRadius: 17,
+		borderRadius: radius.sm,
 		alignItems: 'center',
 		justifyContent: 'center',
-		backgroundColor: colors.fgStrong,
+		backgroundColor: colors.accent,
 	},
-	sendButtonDisabled: { backgroundColor: colors.fgFaint, opacity: 0.5 },
+	sendButtonDisabled: { backgroundColor: colors.accent, opacity: 0.4 },
 
 	// 起動の設定
 	sheetContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
@@ -2706,7 +2716,7 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderColor: colors.borderStrong,
 	},
-	diffPillActive: { backgroundColor: colors.fgStrong, borderColor: colors.fgStrong },
+	diffPillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
 	diffPillText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', fontVariant: ['tabular-nums'] },
 	headerSpinner: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 	detailError: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm },
@@ -2754,9 +2764,9 @@ const styles = StyleSheet.create({
 		borderRadius: 13,
 		alignItems: 'center',
 		justifyContent: 'center',
-		backgroundColor: withAlpha(colors.accentText, '26'),
+		backgroundColor: withAlpha(colors.accent, '1f'),
 	},
-	avatarGlyph: { color: colors.accentText, fontSize: 14, lineHeight: 18 },
+	avatarGlyph: { color: colors.accent, fontSize: 14, lineHeight: 18 },
 	agentName: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	agentBody: { gap: spacing.md, paddingLeft: 34 },
 	assistantBody: { gap: spacing.xs },

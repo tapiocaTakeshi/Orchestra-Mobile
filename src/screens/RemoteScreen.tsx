@@ -475,8 +475,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 									style={({ pressed }) => [styles.roundButton, canSend ? styles.roundButtonOn : styles.roundButtonOff, pressed && styles.roundButtonPressed]}
 								>
 									{sending
-										? <ActivityIndicator size='small' color={colors.bg} />
-										: <Icon name='arrow-up' size={18} color={canSend ? colors.bg : colors.fgFaint} />}
+										? <ActivityIndicator size='small' color={colors.onAccent} />
+										: <Icon name='arrow-up' size={18} color={canSend ? colors.onAccent : colors.fgFaint} />}
 								</Pressable>
 							)}
 						</View>
@@ -683,8 +683,8 @@ const styles = StyleSheet.create({
 	composerChipPressed: { backgroundColor: colors.bgHover },
 	composerChipText: { color: colors.fgFaint, fontSize: fontSize.xs },
 	roundButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-	roundButtonOn: { backgroundColor: colors.fg },
+	roundButtonOn: { backgroundColor: colors.accent },
 	roundButtonOff: { backgroundColor: colors.bgHover },
 	roundButtonPressed: { opacity: 0.75 },
-	stopSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.bg },
+	stopSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.onAccent },
 });
