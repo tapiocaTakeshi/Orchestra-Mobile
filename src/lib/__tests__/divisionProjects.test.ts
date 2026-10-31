@@ -39,7 +39,7 @@ describe('listServerProjects', () => {
 		]);
 		const projects = await listServerProjects(auth);
 		expect(calls).toHaveLength(1);
-		expect(calls[0].url).toBe('https://api.division.he-ro.jp/api/projects');
+		expect(calls[0].url).toBe('https://api.division.he-ro.io/api/projects');
 		expect(calls[0].init.method).toBe('GET');
 		expect((calls[0].init.headers as Record<string, string>).Authorization).toBe('Bearer jwt-token');
 		expect(projects).toEqual([

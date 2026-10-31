@@ -25,7 +25,7 @@ import {
 	watchGitHubConnection,
 } from '../divisionGitHub';
 
-const BASE = 'https://api.division.he-ro.jp/api/github';
+const BASE = 'https://api.division.he-ro.io/api/github';
 const auth = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
 type FetchCall = { url: string; init: RequestInit };

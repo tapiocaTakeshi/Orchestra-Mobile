@@ -436,5 +436,5 @@ IDE 側のエンドポイント一覧は Orchestra リポジトリの
   API キーやコードは含めません。投稿の編集・削除は投稿者本人に限られます。
 - Division APIはログイン中のSupabase JWTで認証します。JWTの期限が切れた場合はrefresh tokenで更新します。
 - アプリでは課金しません。Plus の申し込み・クレジットの購入・支払い方法・自動チャージは Division の Web サイト
-  (https://division.he-ro.jp/dashboard) で管理します。ネイティブアプリ (iOS / Android) ではそのサイトへの導線も出さず、
+  (https://division.he-ro.io/dashboard) で管理します。ネイティブアプリ (iOS / Android) ではそのサイトへの導線も出さず、
   Web 版だけダッシュボードへのリンクを出します。

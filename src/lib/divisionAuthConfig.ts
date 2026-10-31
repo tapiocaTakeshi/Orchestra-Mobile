@@ -30,4 +30,4 @@ export const DIVISION_IMPORT_POST_FUNCTION = 'import_assignment_post';
 export const DIVISION_FUNCTIONS_BASE_URL = `${DIVISION_SUPABASE_URL}/functions/v1`;
 
 /** Division API (ルーティングの見積もり・利用履歴) の既定のエンドポイント。 */
-export const DIVISION_API_BASE_URL = 'https://api.division.he-ro.jp';
+export const DIVISION_API_BASE_URL = 'https://api.division.he-ro.io';

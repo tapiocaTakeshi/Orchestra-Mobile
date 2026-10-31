@@ -10,9 +10,9 @@
 
 export const TERMS_VERSION = '2026-10-27';
 
-export const TERMS_URL = 'https://division.he-ro.jp/terms';
-export const PRIVACY_URL = 'https://division.he-ro.jp/privacy';
-export const CONTACT_URL = 'https://division.he-ro.jp/contact';
+export const TERMS_URL = 'https://division.he-ro.io/terms';
+export const PRIVACY_URL = 'https://division.he-ro.io/privacy';
+export const CONTACT_URL = 'https://division.he-ro.io/contact';
 
 export type LegalSection = { heading: string; body: string[] };
 
