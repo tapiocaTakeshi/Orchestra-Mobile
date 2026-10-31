@@ -5,7 +5,7 @@
 
 > **2026-10-27 変更**: App 内課金 (StoreKit / `expo-iap`) は取りやめ、ネイティブアプリ (iOS / Android) では
 > 課金しないことにした。管理タブには残高・プラン・履歴だけを表示し、購入・申し込み・支払い管理・自動チャージや
-> 外部の購入ページへの導線は出さない (購入・管理は Division の Web サイト https://division.he-ro.jp で行う)。以下の App 内課金の商品・`apple-iap`
+> 外部の購入ページへの導線は出さない (購入・管理は Division の Web サイト https://division.he-ro.io で行う)。以下の App 内課金の商品・`apple-iap`
 > 関連の作業は現在のアプリには当てはまらない。3.1.1 には「アプリ内で購入できるものはなく、購入への導線もない」
 > と回答する。
 
@@ -44,8 +44,8 @@ division-hp の `supabase/migrations/20261026_app_review_moderation_iap.sql` を
 - ユーザとアクセス > 統合 > App 内課金 でキーを作成し、Issuer ID・Key ID・.p8 を控える。
 - App 情報 > App Store サーバ通知 (本番・サンドボックスとも, バージョン 2):
   `https://wmhrbhcnxglvqwvnbxlt.supabase.co/functions/v1/apple-iap-notifications`
-- App 情報に **プライバシーポリシー URL** `https://division.he-ro.jp/privacy` を設定し、
-  App の説明欄に利用規約 (EULA) のリンク (`https://division.he-ro.jp/terms` または Apple 標準 EULA) を入れる。
+- App 情報に **プライバシーポリシー URL** `https://division.he-ro.io/privacy` を設定し、
+  App の説明欄に利用規約 (EULA) のリンク (`https://division.he-ro.io/terms` または Apple 標準 EULA) を入れる。
 
 ### 4. Supabase Edge Function のシークレットとデプロイ
 ```

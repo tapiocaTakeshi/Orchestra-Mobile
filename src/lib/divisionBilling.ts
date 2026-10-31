@@ -4,7 +4,7 @@
  * IDE 側の void-login-tsx/divisionBilling.ts と同じテーブル・Edge Function を
  * 使う。アプリでは残高・プラン・履歴を見せるだけで、課金はしない。Plus の申し込み・
  * クレジットの購入・支払い方法・自動チャージは Division の Web サイト
- * (https://division.he-ro.jp/dashboard) で管理する。ネイティブアプリ (iOS / Android) では
+ * (https://division.he-ro.io/dashboard) で管理する。ネイティブアプリ (iOS / Android) では
  * そのサイトへの導線も出さない (App Store Guideline 3.1.1)。Web 版だけリンクを出す。
  */
 
@@ -17,8 +17,8 @@ import {
 } from './divisionAuthConfig';
 
 /** Division の Web サイトのダッシュボード (プラン・クレジットの管理) */
-export const DIVISION_DASHBOARD_PLAN_URL = 'https://division.he-ro.jp/dashboard?tab=plan';
-export const DIVISION_DASHBOARD_CREDITS_URL = 'https://division.he-ro.jp/dashboard?tab=credits';
+export const DIVISION_DASHBOARD_PLAN_URL = 'https://division.he-ro.io/dashboard?tab=plan';
+export const DIVISION_DASHBOARD_CREDITS_URL = 'https://division.he-ro.io/dashboard?tab=credits';
 
 /** この端末で購入・管理の導線 (Web サイトへのリンク) を出すか。ネイティブアプリでは出さない。 */
 export const allowsPurchases = (): boolean => Platform.OS === 'web';

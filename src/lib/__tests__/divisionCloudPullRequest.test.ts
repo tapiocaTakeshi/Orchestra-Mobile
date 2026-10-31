@@ -37,7 +37,7 @@ import {
 	validatePullRequestBranch,
 } from '../divisionCloud';
 
-const BASE = 'https://api.division.he-ro.jp/api/cloud-sessions';
+const BASE = 'https://api.division.he-ro.io/api/cloud-sessions';
 const auth = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
 type FetchCall = { url: string; init: RequestInit };
