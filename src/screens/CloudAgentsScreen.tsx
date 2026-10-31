@@ -2001,6 +2001,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 // ページ本体
 // ---------------------------------------------------------------------------
 
+/** これ以上の項目があるときだけ、一覧の上に絞り込み (全て / 稼働中 / 承認待ち / エラー) を出す */
+const FILTER_MIN_ITEMS = 6;
+
 export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, onOpenPcChat }: {
 	/** 「プロジェクト」「コスト」「カンバン」を開く (App のページの重なりに積む) */
 	onOpenPage?: OpenPage;
@@ -2447,12 +2450,15 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 									</Pressable>
 								) : null}
 							</View>
-							<SegmentedControl<CloudSessionFilter>
-								options={filterOptions}
-								value={listFilter}
-								onChange={setListFilter}
-								style={styles.filterTabs}
-							/>
+							{/* 絞り込みは一覧が長いときだけ (短いうちは見れば足りる)。絞り込み中は戻せるよう出したまま */}
+							{items.length >= FILTER_MIN_ITEMS || listFilter !== 'all' ? (
+								<SegmentedControl<CloudSessionFilter>
+									options={filterOptions}
+									value={listFilter}
+									onChange={setListFilter}
+									style={styles.filterTabs}
+								/>
+							) : null}
 							<View>
 								{visibleItems.map(item => item.kind === 'cloud' ? (
 									<SessionRow
@@ -2481,11 +2487,6 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 									</Muted>
 								) : null}
 							</View>
-							<Muted style={styles.footnote}>
-								{unified
-									? 'クラウドのセッションの変更を手元に取り込むのは PC の Orchestra で行います。PC のチャットは PC で動いています。'
-									: '変更を手元に取り込むのは PC の Orchestra で行います。'}
-							</Muted>
 						</>
 					)}
 				</ScrollView>
@@ -2616,7 +2617,6 @@ const styles = StyleSheet.create({
 	rowTime: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	rowMeta: { color: colors.fgFaint, fontSize: fontSize.xs, fontFamily: MONO, marginTop: 3 },
 	statusDotWrap: { width: 20, alignItems: 'center' },
-	footnote: { marginTop: spacing.lg },
 
 	// 入力欄 (一覧・詳細で共通)
 	composerWrap: {
