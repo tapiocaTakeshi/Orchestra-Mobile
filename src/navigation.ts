@@ -32,15 +32,31 @@ export const PAGES: PageEntry[] = [
 ];
 
 /**
- * ホームのナビゲーションドロワーに並べるページ。コストはホームの入力欄から、クラウドはホームそのもので扱うので置かない。
- * title はドロワーの行に出す名前 (読み上げにも使う)。label は短い名前で、ドロワーでは行に title を出す。
+ * ドロワーの 1 行。title は行に出す名前 (読み上げにも使う)、detail は名前の下に出す 1 行の説明
+ * (名前だけでは中身が分かりにくいページの入口を明確にする)。label は短い名前。
  */
-export const DRAWER_PAGES: (PageEntry & { title: string })[] = [
-	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: false },
-	{ key: 'mcp', label: 'MCP', title: 'MCP (ストア・サーバー設定)', icon: 'package', needsConnection: false },
-	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
-	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', icon: 'sliders', needsConnection: true },
-	{ key: 'social', label: 'ソーシャル', title: 'ソーシャル (共有)', icon: 'share-2', needsConnection: false },
+export type DrawerPage = PageEntry & { title: string; detail: string };
+
+/**
+ * ホームのナビゲーションドロワーの「ページ」(主要画面)。クラウドはホームそのもので扱うので置かない。
+ */
+export const DRAWER_PAGES: DrawerPage[] = [
+	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', detail: 'プロジェクトとタスクの割り当て', icon: 'layers', needsConnection: false },
+	{ key: 'mcp', label: 'MCP', title: 'MCP (ストア・サーバー設定)', detail: 'エージェントが使うツールを追加', icon: 'package', needsConnection: false },
+	{ key: 'kanban', label: 'カンバン', title: 'カンバン', detail: 'PC のタスクを列で管理', icon: 'columns', needsConnection: true },
+	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', detail: 'PC のエディタを端末から操作', icon: 'sliders', needsConnection: true },
+	{ key: 'social', label: 'ソーシャル', title: 'ソーシャル (共有)', detail: '共有されたプロンプトやセッション', icon: 'share-2', needsConnection: false },
+];
+
+/**
+ * ドロワーの「設定」(補助機能)。主要画面とは区切って下に置く。
+ * ホームの見出しから外した接続状態と、入力欄から外したコストの入口をここに集め、
+ * どちらもドロワーから 1 タップ (ホームから 2 タップ) で開けるようにする。
+ * detail は既定の説明で、接続は表示時に現在の接続状態で置き換える。
+ */
+export const DRAWER_SETTINGS_PAGES: DrawerPage[] = [
+	{ key: 'settings', label: '接続', title: 'PC との接続', detail: 'PC に繋ぐとカンバンや UI 操作が使えます', icon: 'link', needsConnection: true },
+	{ key: 'tuning', label: 'コスト', title: 'コストの方針と残高', detail: '見積もり・料金・残高', icon: 'bar-chart-2', needsConnection: false },
 ];
 
 export const pagesFor = (connected: boolean): PageEntry[] =>

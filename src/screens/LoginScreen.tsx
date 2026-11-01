@@ -119,7 +119,7 @@ export const LoginScreen = () => {
 								onPress={() => { void onSubmit(); }}
 								style={({ pressed }) => [styles.loginButton, pressed && agreed && styles.loginButtonPressed, (busy || !agreed) && styles.loginButtonBusy]}
 							>
-								{busy ? <ActivityIndicator color={colors.bg} size='small' /> : null}
+								{busy ? <ActivityIndicator color={colors.onAccent} size='small' /> : null}
 								<Text style={styles.loginText}>{busy ? 'ログインしています…' : 'ログイン'}</Text>
 							</Pressable>
 							<Text style={styles.noteText}>アカウントの作成はデスクトップの Orchestra から</Text>
@@ -165,11 +165,11 @@ const styles = StyleSheet.create({
 		gap: spacing.sm,
 		minHeight: 48,
 		borderRadius: radius.md,
-		backgroundColor: colors.fg,
+		backgroundColor: colors.accent,
 	},
-	loginButtonPressed: { backgroundColor: colors.fgMuted },
+	loginButtonPressed: { backgroundColor: colors.accentPressed },
 	loginButtonBusy: { opacity: 0.6 },
-	loginText: { color: colors.bg, fontSize: fontSize.sm - 1, fontWeight: '600' },
+	loginText: { color: colors.onAccent, fontSize: fontSize.sm - 1, fontWeight: '600' },
 	legalLinks: { alignItems: 'center', marginTop: spacing.sm },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, textAlign: 'center', marginTop: spacing.sm },
 });

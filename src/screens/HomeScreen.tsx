@@ -21,16 +21,17 @@ import { CloudAgentsScreen } from './CloudAgentsScreen';
 import { RemoteScreen } from './RemoteScreen';
 import { REMOTE_CONNECTION_LABELS } from '../lib/remoteSession';
 import { Drawer, Icon, IconButton, IconName, Muted, Sheet, confirmAction, useToast } from '../components/ui';
-import { PageKey, DRAWER_PAGES, canOpenPage } from '../navigation';
+import { PageKey, DRAWER_PAGES, DRAWER_SETTINGS_PAGES, DrawerPage, canOpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
 
-/** ドロワーの 1 項目。アイコンと名前を横に並べた 1 行 (ChatGPT のアプリのドロワーと同じ形)。 */
-const DrawerItem = ({ icon, label, title, locked, onPress }: {
+/** ドロワーの 1 項目。アイコンと名前、その下に 1 行の説明を並べる。 */
+const DrawerItem = ({ icon, label, title, detail, locked, onPress }: {
 	icon: IconName;
 	label: string;
 	title: string;
+	detail?: string;
 	locked?: boolean;
 	onPress: () => void;
 }) => (
@@ -42,7 +43,10 @@ const DrawerItem = ({ icon, label, title, locked, onPress }: {
 		style={({ pressed }) => [styles.drawerItem, pressed && styles.sheetRowPressed]}
 	>
 		<Icon name={icon} size={20} color={locked ? colors.fgFaint : colors.fg} />
-		<Text style={[styles.drawerItemLabel, locked && styles.drawerItemLabelLocked]} numberOfLines={1}>{label}</Text>
+		<View style={styles.flex}>
+			<Text style={[styles.drawerItemLabel, locked && styles.drawerItemLabelLocked]} numberOfLines={1}>{label}</Text>
+			{detail ? <Text style={styles.drawerItemDetail} numberOfLines={1}>{detail}</Text> : null}
+		</View>
 		{locked ? <Icon name='lock' size={13} color={colors.fgFaint} /> : null}
 	</Pressable>
 );
@@ -51,34 +55,44 @@ const DrawerItem = ({ icon, label, title, locked, onPress }: {
  * 開閉できるナビゲーションドロワー。open=false のとき Drawer ごと描かないので、
  * 閉じている画面にはアイコン・ラベル・幅・余白・不可視の操作領域が一切残らない。
  */
-const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccount }: {
+const NavigationDrawer = ({ open, connected, connectionDetail, email, onClose, onOpenPage, onAccount }: {
 	open: boolean;
 	connected: boolean;
+	/** 「PC との接続」の行に出す現在の接続状態 */
+	connectionDetail: string;
 	email: string;
 	onClose: () => void;
 	onOpenPage: (page: PageKey) => void;
 	onAccount: () => void;
 }) => {
 	const toast = useToast();
+	const renderItem = (page: DrawerPage, detail = page.detail) => {
+		const enabled = canOpenPage(page.key, connected);
+		const lockedMessage = page.key === 'settings'
+			? 'ホームの一覧に出る PC を押すと接続できます'
+			: `${page.title}は PC に接続すると使えます`;
+		return (
+			<DrawerItem
+				key={page.key}
+				icon={page.icon}
+				label={page.title}
+				title={page.title}
+				detail={detail}
+				locked={!enabled}
+				onPress={() => (enabled ? onOpenPage(page.key) : toast.show(lockedMessage, 'info'))}
+			/>
+		);
+	};
 	return (
 		<Drawer open={open} onClose={onClose}>
 			<ScrollView style={styles.flex} contentContainerStyle={styles.drawerBody} showsVerticalScrollIndicator={false}>
 				<View style={styles.drawerLogo}>
 					<Image source={require('../../assets/logo.png')} style={styles.drawerLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
 				</View>
-				{DRAWER_PAGES.map(page => {
-					const enabled = canOpenPage(page.key, connected);
-					return (
-						<DrawerItem
-							key={page.key}
-							icon={page.icon}
-							label={page.title}
-							title={page.title}
-							locked={!enabled}
-							onPress={() => (enabled ? onOpenPage(page.key) : toast.show(`${page.title}は PC に接続すると使えます`, 'info'))}
-						/>
-					);
-				})}
+				<Text accessibilityRole='header' style={styles.drawerSection}>ページ</Text>
+				{DRAWER_PAGES.map(page => renderItem(page))}
+				<Text accessibilityRole='header' style={[styles.drawerSection, styles.drawerSectionGap]}>設定</Text>
+				{DRAWER_SETTINGS_PAGES.map(page => renderItem(page, page.key === 'settings' ? connectionDetail : page.detail))}
 			</ScrollView>
 			<Pressable
 				accessibilityRole='button'
@@ -172,9 +186,16 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 	const statusLabel = connectionStatus === 'connected' && connectionRoute === 'relay'
 		? `${REMOTE_CONNECTION_LABELS.connected} (外出先)`
 		: REMOTE_CONNECTION_LABELS[connectionStatus];
-	const remoteSubtitle = connectionStatus === 'disconnected'
-		? 'PC に未接続'
-		: `${statusLabel} · ${pcName}`;
+	// 見出しの接続状態は「気にする必要があるとき」だけ出す (段階的開示)。
+	// 未接続 (クラウドだけで使う既定の状態) と、手元のネットワークで接続済み (正常) は出さない。
+	// 接続中・外出先 (中継) で接続済みは状態だけ、接続切れは押すと接続の設定 (復旧の入口) を開く。
+	const connectionNotice: { text: string; tone: 'info' | 'danger' } | null =
+		connectionStatus === 'lost' ? { text: `${statusLabel} · ${pcName} · 押して再接続`, tone: 'danger' }
+			: connectionStatus === 'connecting' ? { text: `${statusLabel} · ${pcName}`, tone: 'info' }
+				: connectionStatus === 'connected' && connectionRoute === 'relay' ? { text: `${statusLabel} · ${pcName}`, tone: 'info' }
+					: null;
+	// ドロワーの「PC との接続」の行に出す現在の状態 (見出しから外した情報はここで常に確かめられる)
+	const connectionDetail = connectionStatus === 'disconnected' ? 'PC に未接続' : `${statusLabel} · ${pcName}`;
 	const homeHeader = (
 		<View style={styles.headerRow}>
 			<IconButton
@@ -185,7 +206,22 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 			/>
 			<View style={styles.switcher}>
 				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>Orchestra</Text>
-				<Text style={styles.switcherSubtitle} numberOfLines={1}>{remoteSubtitle}</Text>
+				{connectionNotice ? (
+					connectionNotice.tone === 'danger' ? (
+						<Pressable
+							accessibilityRole='button'
+							accessibilityLabel={`${statusLabel}。接続の設定を開いて再接続する`}
+							hitSlop={6}
+							onPress={() => onOpenPage('settings')}
+							style={({ pressed }) => [styles.switcherLine, pressed && styles.pressed]}
+						>
+							<Icon name='alert-circle' size={11} color={colors.danger} />
+							<Text style={[styles.switcherSubtitle, styles.switcherSubtitleDanger]} numberOfLines={1}>{connectionNotice.text}</Text>
+						</Pressable>
+					) : (
+						<Text style={styles.switcherSubtitle} numberOfLines={1}>{connectionNotice.text}</Text>
+					)
+				) : null}
 			</View>
 		</View>
 	);
@@ -210,6 +246,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 			<NavigationDrawer
 				open={drawerOpen}
 				connected={connected}
+				connectionDetail={connectionDetail}
 				email={session.email}
 				onClose={() => setDrawerOpen(false)}
 				onOpenPage={openFromDrawer}
@@ -225,7 +262,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 								<SheetRow icon='x-circle' title='PC との接続を切る' onPress={() => { setSheet(null); void disconnect(); }} />
 							</>
 						) : null}
-						<SheetRow icon='bar-chart-2' title='コストの方針と残高' detail='入力欄の「コスト」からも開けます' onPress={() => { setSheet(null); onOpenPage('tuning'); }} />
+						<SheetRow icon='bar-chart-2' title='コストの方針と残高' detail='メニューの「設定」からも開けます' onPress={() => { setSheet(null); onOpenPage('tuning'); }} />
 						<SheetRow icon='log-out' title='ログアウト' tone='danger' onPress={() => { void onLogout(); }} />
 					</View>
 				</Sheet>
@@ -252,8 +289,11 @@ const styles = StyleSheet.create({
 		paddingHorizontal: spacing.md,
 		borderRadius: radius.md,
 	},
-	drawerItemLabel: { flex: 1, color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
+	drawerItemLabel: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
 	drawerItemLabelLocked: { color: colors.fgFaint },
+	drawerItemDetail: { color: colors.fgFaint, fontSize: fontSize.xs, marginTop: 1 },
+	drawerSection: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '600', paddingHorizontal: spacing.md, paddingTop: spacing.xs, paddingBottom: 2 },
+	drawerSectionGap: { marginTop: spacing.md },
 	drawerAccount: {
 		flexDirection: 'row',
 		alignItems: 'center',
@@ -279,6 +319,7 @@ const styles = StyleSheet.create({
 	switcherLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
 	switcherTitle: { color: colors.fgStrong, fontSize: fontSize.md, fontWeight: '600', flexShrink: 1 },
 	switcherSubtitle: { color: colors.fgFaint, fontSize: fontSize.xs, marginTop: 1 },
+	switcherSubtitleDanger: { color: colors.danger, marginTop: 0 },
 
 	sheetContent: { paddingHorizontal: spacing.md, paddingBottom: spacing.xl, gap: spacing.xs },
 	sheetRow: {

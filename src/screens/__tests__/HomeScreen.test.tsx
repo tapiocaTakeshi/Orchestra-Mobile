@@ -23,15 +23,21 @@ import type { PageKey } from '../../navigation';
 
 // --- 外部依存のモック --------------------------------------------------------
 
+// 接続状態はテストごとに差し替える (既定は未接続)
+type MockApp = {
+	connection: { label: string } | null;
+	connectionStatus: 'disconnected' | 'connecting' | 'connected' | 'lost';
+	connectionRoute?: 'lan' | 'relay' | null;
+	snapshot: null;
+	disconnect: jest.Mock;
+};
+const mockDisconnected = (): MockApp => ({ connection: null, connectionStatus: 'disconnected', connectionRoute: null, snapshot: null, disconnect: jest.fn() });
+let mockApp: MockApp = mockDisconnected();
 jest.mock('../../state/AppContext', () => ({
-	useApp: () => ({
-		connection: null,
-		connectionStatus: 'disconnected',
-		snapshot: null,
-		disconnect: jest.fn(),
-	}),
+	useApp: () => mockApp,
 }));
 
+const mockLogout = jest.fn();
 jest.mock('../../state/DivisionAuthContext', () => ({
 	useDivisionAuth: () => ({
 		session: {
@@ -40,17 +46,24 @@ jest.mock('../../state/DivisionAuthContext', () => ({
 			accessToken: 'access-token',
 			refreshToken: 'refresh-token',
 		},
-		logout: jest.fn(),
+		logout: mockLogout,
 	}),
 }));
 
 const mockToastShow = jest.fn();
+const mockConfirm = jest.fn(async () => true);
 jest.mock('../../components/ui', () => {
 	const actual = jest.requireActual('../../components/ui');
 	return {
 		...actual,
 		useToast: () => ({ show: mockToastShow }),
-		confirmAction: jest.fn(async () => true),
+		// Modal はテストレンダラーのツリーに出ないので、シートの中身をその場に描く
+		Sheet: ({ title, children }: { title: string; children: React.ReactNode }) => {
+			// eslint-disable-next-line @typescript-eslint/no-var-requires
+			const R = require('react') as typeof React;
+			return R.createElement(R.Fragment, null, R.createElement('Text', null, title), children);
+		},
+		confirmAction: (...args: unknown[]) => (mockConfirm as unknown as (...a: unknown[]) => Promise<boolean>)(...args),
 	};
 });
 
@@ -143,19 +156,49 @@ afterEach(async () => {
 	}
 	jest.clearAllMocks();
 	mockCloudProps.length = 0;
+	mockApp = mockDisconnected();
 });
 
 describe('HomeScreen の一覧 (クラウドと PC を混ぜる)', () => {
-	it('クラウドの一覧に PC のチャットを混ぜて出し、見出しに PC との接続状態を出す', async () => {
+	it('クラウドの一覧に PC のチャットを混ぜて出し、未接続 (既定) では見出しに接続状態を出さない', async () => {
 		const r = await render();
 		expect(findTextNode(r.root, 'Orchestra')).toBeTruthy();
-		expect(findTextNode(r.root, 'PC に未接続')).toBeTruthy();
+		// 未接続はクラウドだけで使う既定の状態なので、見出しは題名だけ (主操作の邪魔をしない)
+		expect(findTextNode(r.root, 'PC に未接続')).toBeUndefined();
 		// モードの切り替えは無くなった
 		expect(findTextNode(r.root, 'リモートコントロール')).toBeUndefined();
 		const props = mockCloudProps[mockCloudProps.length - 1];
 		expect(typeof props.onOpenPcChat).toBe('function');
 		await act(async () => { props.onOpenPcChat!(); });
 		expect(onPcChatOpenChange).toHaveBeenCalledWith(true);
+	});
+});
+
+describe('HomeScreen の見出しの接続状態 (必要なときだけ出す)', () => {
+	it('手元のネットワークで接続済み (正常) なら出さない', async () => {
+		mockApp = { ...mockDisconnected(), connection: { label: 'MyPC' }, connectionStatus: 'connected', connectionRoute: 'lan' };
+		const r = await render();
+		expect(findTextNode(r.root, '接続済み · MyPC')).toBeUndefined();
+	});
+
+	it('接続中と外出先 (中継) での接続は状態だけ出す', async () => {
+		mockApp = { ...mockDisconnected(), connection: { label: 'MyPC' }, connectionStatus: 'connecting' };
+		let r = await render();
+		expect(findTextNode(r.root, '接続中 · MyPC')).toBeTruthy();
+		await act(async () => { r.unmount(); });
+		renderer = null;
+
+		mockApp = { ...mockDisconnected(), connection: { label: 'MyPC' }, connectionStatus: 'connected', connectionRoute: 'relay' };
+		r = await render();
+		expect(findTextNode(r.root, '接続済み (外出先) · MyPC')).toBeTruthy();
+	});
+
+	it('接続切れは見出しに出し、押すと接続の設定 (復旧の入口) を開く', async () => {
+		mockApp = { ...mockDisconnected(), connection: { label: 'MyPC' }, connectionStatus: 'lost' };
+		const r = await render();
+		expect(findTextNode(r.root, '接続切れ · MyPC · 押して再接続')).toBeTruthy();
+		await press(findButtonsByLabel(r.root, '接続切れ。接続の設定を開いて再接続する')[0]);
+		expect(onOpenPage).toHaveBeenCalledWith('settings' satisfies PageKey);
 	});
 });
 
@@ -182,6 +225,13 @@ describe('HomeScreen のナビゲーションドロワー', () => {
 		expect(findTextNode(r.root, 'カンバン')).toBeTruthy();
 		expect(findTextNode(r.root, 'エディタの UI 操作')).toBeTruthy();
 		expect(findTextNode(r.root, 'ソーシャル (共有)')).toBeTruthy();
+		// 主要画面 (ページ) と補助機能 (設定) を分け、各行に 1 行の説明を出す
+		expect(findTextNode(r.root, 'ページ')).toBeTruthy();
+		expect(findTextNode(r.root, '設定')).toBeTruthy();
+		expect(findTextNode(r.root, 'PC のエディタを端末から操作')).toBeTruthy();
+		expect(findTextNode(r.root, 'PC との接続')).toBeTruthy();
+		expect(findTextNode(r.root, 'PC に未接続')).toBeTruthy();
+		expect(findTextNode(r.root, 'コストの方針と残高')).toBeTruthy();
 		expect(findTextNode(r.root, 'me@example.com')).toBeTruthy();
 		// ドロワーの中からも閉じられる (パネル右上のボタンと、背景のスクリム)
 		expect(findButtonsByLabel(r.root, 'メニューを閉じる').length).toBeGreaterThanOrEqual(1);
@@ -216,5 +266,40 @@ describe('HomeScreen のナビゲーションドロワー', () => {
 		expect(mockToastShow).toHaveBeenCalledWith('カンバンは PC に接続すると使えます', 'info');
 		// ドロワーは開いたまま (案内を見て別の項目を選べる)
 		expect(findTextNode(r.root, DRAWER_ONLY_TEXT)).toBeTruthy();
+	});
+
+	it('「設定」のコストはドロワーから 1 タップで開く (ホームから 2 タップ)', async () => {
+		const r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+		await press(findRowByTitle(r.root, 'コストの方針と残高'));
+		expect(onOpenPage).toHaveBeenCalledWith('tuning' satisfies PageKey);
+		expect(findTextNode(r.root, DRAWER_ONLY_TEXT)).toBeUndefined();
+	});
+
+	it('未接続の「PC との接続」は接続の仕方を案内し、接続済みなら接続の設定を開いて現在の状態を出す', async () => {
+		let r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+		await press(findRowByTitle(r.root, 'PC との接続'));
+		expect(onOpenPage).not.toHaveBeenCalled();
+		expect(mockToastShow).toHaveBeenCalledWith('ホームの一覧に出る PC を押すと接続できます', 'info');
+		await act(async () => { r.unmount(); });
+		renderer = null;
+
+		mockApp = { ...mockDisconnected(), connection: { label: 'MyPC' }, connectionStatus: 'connected', connectionRoute: 'lan' };
+		r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+		expect(findTextNode(r.root, '接続済み · MyPC')).toBeTruthy();
+		await press(findRowByTitle(r.root, 'PC との接続'));
+		expect(onOpenPage).toHaveBeenCalledWith('settings' satisfies PageKey);
+	});
+
+	it('アカウントからのログアウトは確認を挟み、キャンセルすればログアウトしない (取り消し手段)', async () => {
+		const r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+		await press(findButtonsByLabel(r.root, 'アカウント me@example.com')[0]);
+		mockConfirm.mockResolvedValueOnce(false);
+		await press(findRowByTitle(r.root, 'ログアウト'));
+		expect(mockConfirm).toHaveBeenCalledTimes(1);
+		expect(mockLogout).not.toHaveBeenCalled();
 	});
 });

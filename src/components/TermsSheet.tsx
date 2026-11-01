@@ -76,7 +76,7 @@ export const TermsCheckbox = ({ checked, onToggle, onOpenTerms }: {
 			onPress={onToggle}
 			style={[styles.checkbox, checked && styles.checkboxChecked]}
 		>
-			{checked ? <Icon name='check' size={16} color={colors.bg} /> : null}
+			{checked ? <Icon name='check' size={16} color={colors.onAccent} /> : null}
 		</Pressable>
 		<Text style={styles.checkText} onPress={onToggle}>
 			<Text accessibilityRole='link' style={styles.link} onPress={onOpenTerms}>利用規約</Text>
@@ -128,7 +128,7 @@ const styles = StyleSheet.create({
 		alignItems: 'center',
 		justifyContent: 'center',
 	},
-	checkboxChecked: { backgroundColor: colors.fg, borderColor: colors.fg },
+	checkboxChecked: { backgroundColor: colors.accent, borderColor: colors.accent },
 	checkText: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1, lineHeight: 21 },
 	gate: { flex: 1 },
 	gateHeader: {

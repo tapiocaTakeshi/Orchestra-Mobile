@@ -9,6 +9,8 @@
  * クラウドセッションを起動し、その項目を「AI が対応中」にする。PR の作成・承認は必ずセッションの画面で行う。
  *
  * 項目が無いとき・サーバーが未対応のときは何も描かない (ホームを邪魔しない)。
+ * 項目があるときも既定は 1 行のサマリー (件数と先頭の題名) に畳み、押すとカードを展開する
+ * (一覧と入力欄を押し下げない。件数バッジで「判断が必要」なことには気づける)。
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -89,7 +91,7 @@ const DecisionCard = ({ decision, busy, onOption }: {
 							onPress={() => onOption(primary)}
 							style={({ pressed }) => [styles.primary, (pressed || busy) && styles.pressed]}
 						>
-							{busy ? <ActivityIndicator size='small' color={colors.bg} /> : <Text style={styles.primaryText}>{primary.label}</Text>}
+							{busy ? <ActivityIndicator size='small' color={colors.onAccent} /> : <Text style={styles.primaryText}>{primary.label}</Text>}
 						</Pressable>
 					) : null}
 					{secondary.map(o => (
@@ -122,6 +124,8 @@ export const DecisionInbox = ({ auth, refreshKey, onOpenSession, onSessionStarte
 	const [headline, setHeadline] = useState('');
 	const [items, setItems] = useState<Decision[]>([]);
 	const [hidden, setHidden] = useState(false);
+	// showCards: カードを展開しているか (既定は 1 行のサマリー)。expanded: 展開中に全件を出すか
+	const [showCards, setShowCards] = useState(false);
 	const [expanded, setExpanded] = useState(false);
 	const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -177,14 +181,42 @@ export const DecisionInbox = ({ auth, refreshKey, onOpenSession, onSessionStarte
 	if (hidden || items.length === 0) return null;
 	const visible = expanded ? items : items.slice(0, COLLAPSED);
 	const open = openCount(items);
+	const first = items.find(d => d.status === 'open') ?? items[0];
 
-	return (
-		<View style={styles.root} accessibilityLabel={`判断が必要な項目 ${open} 件`}>
-			<View style={styles.header}>
+	if (!showCards) {
+		return (
+			<Pressable
+				accessibilityRole='button'
+				accessibilityLabel={`判断が必要な項目 ${open} 件。${first.title}。押して表示する`}
+				accessibilityState={{ expanded: false }}
+				onPress={() => setShowCards(true)}
+				style={({ pressed }) => [styles.summary, pressed && styles.pressed]}
+			>
 				<Icon name='inbox' size={16} color={colors.fg} />
 				<Text style={styles.headerTitle}>判断が必要</Text>
 				{open ? <View style={styles.count}><Text style={styles.countText}>{open}</Text></View> : null}
-			</View>
+				<Text style={styles.summaryTitle} numberOfLines={1}>{first.title}</Text>
+				<Icon name='chevron-down' size={14} color={colors.fgFaint} />
+			</Pressable>
+		);
+	}
+
+	return (
+		<View style={styles.root} accessibilityLabel={`判断が必要な項目 ${open} 件`}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityLabel='判断が必要な項目を畳む'
+				accessibilityState={{ expanded: true }}
+				onPress={() => { setShowCards(false); setExpanded(false); }}
+				style={({ pressed }) => [styles.header, pressed && styles.pressed]}
+			>
+				<Icon name='inbox' size={16} color={colors.fg} />
+				<Text style={styles.headerTitle}>判断が必要</Text>
+				{open ? <View style={styles.count}><Text style={styles.countText}>{open}</Text></View> : null}
+				<View style={styles.flex} />
+				<Text style={styles.moreText}>畳む</Text>
+				<Icon name='chevron-up' size={14} color={colors.fgFaint} />
+			</Pressable>
 			{headline ? <Muted style={styles.headline}>{headline}</Muted> : null}
 			{visible.map(d => (
 				<DecisionCard key={d.id} decision={d} busy={busyId === d.id} onOption={o => void onOption(d, o)} />
@@ -200,10 +232,24 @@ export const DecisionInbox = ({ auth, refreshKey, onOpenSession, onSessionStarte
 
 const styles = StyleSheet.create({
 	root: { gap: spacing.sm, marginBottom: spacing.lg },
-	header: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+	flex: { flex: 1 },
+	header: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 32 },
+	summary: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: spacing.xs,
+		minHeight: 44,
+		paddingHorizontal: spacing.md,
+		marginBottom: spacing.lg,
+		borderRadius: radius.lg,
+		borderWidth: StyleSheet.hairlineWidth,
+		borderColor: colors.borderStrong,
+		backgroundColor: colors.bgElevated,
+	},
+	summaryTitle: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1, marginLeft: spacing.xs },
 	headerTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
 	count: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.danger },
-	countText: { color: colors.bg, fontSize: 11, fontWeight: '700' },
+	countText: { color: colors.onAccent, fontSize: 11, fontWeight: '700' },
 	headline: { lineHeight: 18 },
 	card: {
 		gap: spacing.xs,
@@ -225,8 +271,8 @@ const styles = StyleSheet.create({
 	riskText: { flex: 1, color: colors.warning, fontSize: fontSize.xs, lineHeight: 17 },
 	recommendation: { color: colors.fg, fontSize: fontSize.xs, lineHeight: 17 },
 	actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
-	primary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.fgStrong },
-	primaryText: { color: colors.bg, fontSize: fontSize.xs + 1, fontWeight: '600' },
+	primary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
+	primaryText: { color: colors.onAccent, fontSize: fontSize.xs + 1, fontWeight: '600' },
 	secondary: { minHeight: 36, paddingHorizontal: spacing.md, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.borderStrong },
 	secondaryText: { color: colors.fg, fontSize: fontSize.xs + 1 },
 	pressed: { opacity: 0.6 },
