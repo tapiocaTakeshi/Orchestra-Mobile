@@ -3,6 +3,7 @@
  *  - エージェントの返答を Markdown として描く (記号のまま出さない)
  *  - 目標ループの切り替え (自動 ⇄ 毎回確認)。古い IDE / Division API 以外では出さない
  *  - 「毎回確認」で止まったときは、ツールの承認ではなく次のラウンドへ進むか聞く
+ *  - 入力欄: 複数行で書け、入力 → 送信ボタン 1 タップ (2 操作) で送れる。空のときは送れない
  */
 
 import React from 'react';
@@ -122,5 +123,40 @@ describe('RemoteScreen', () => {
 		await act(async () => { next.props.onPress(); });
 		expect(mockClient.approveTool).toHaveBeenCalled();
 		expect(mockToast).toHaveBeenCalledWith('次のラウンドに進みました', 'success');
+	});
+
+	it('入力欄は複数行で、空のあいだは送信ボタンが無効', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		const input = tree.root.find(n => n.props.accessibilityLabel === 'エージェントへの指示' && typeof n.props.onChangeText === 'function');
+		expect(input.props.multiline).toBe(true);
+		const sendButton = byLabel(tree, /^送信$/);
+		expect(sendButton.props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+		await act(async () => { input.props.onChangeText('   '); });
+		expect(byLabel(tree, /^送信$/).props.accessibilityState).toEqual(expect.objectContaining({ disabled: true }));
+	});
+
+	it('入力 → 送信ボタン 1 タップの 2 操作で送れる (改行を含む指示もそのまま送る)', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		const input = tree.root.find(n => n.props.accessibilityLabel === 'エージェントへの指示' && typeof n.props.onChangeText === 'function');
+		// 操作 1: 入力
+		await act(async () => { input.props.onChangeText('ログインを直して\nテストも足して'); });
+		const sendButton = byLabel(tree, /^送信$/);
+		expect(sendButton.props.accessibilityState).toEqual(expect.objectContaining({ disabled: false }));
+		// 操作 2: 送信ボタン
+		await act(async () => { sendButton.props.onPress(); });
+		expect(mockClient.sendPrompt).toHaveBeenCalledTimes(1);
+		expect(mockClient.sendPrompt).toHaveBeenCalledWith('ログインを直して\nテストも足して');
+		expect(mockInvalidate).toHaveBeenCalled();
+		// 送ったら入力欄は空に戻る
+		const after = tree.root.find(n => n.props.accessibilityLabel === 'エージェントへの指示' && typeof n.props.onChangeText === 'function');
+		expect(after.props.value).toBe('');
+	});
+
+	it('自分の発言は右寄せの吹き出しで出す', async () => {
+		mockSnapshot = snapshotWith({ messages: [{ role: 'user', text: 'こんにちは' }] });
+		const tree = await render();
+		expect(() => tree.root.find(n => n.props.accessibilityLabel === 'あなた: こんにちは')).not.toThrow();
 	});
 });

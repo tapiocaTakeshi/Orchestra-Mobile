@@ -421,7 +421,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 							placeholder={lost ? 'PC との接続が切れています' : isRunning ? 'エージェントが作業中です…' : 'エージェントに指示する…'}
 							editable={!lost}
 							placeholderTextColor={colors.fgFaint}
-							selectionColor={colors.fgMuted}
+							selectionColor={colors.accentText}
 							accessibilityLabel='エージェントへの指示'
 							multiline
 							style={styles.composerInput}
@@ -476,7 +476,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 								>
 									{sending
 										? <ActivityIndicator size='small' color={colors.onAccent} />
-										: <Icon name='arrow-up' size={18} color={canSend ? colors.onAccent : colors.fgFaint} />}
+										: <Icon name='arrow-up' size={18} color={colors.onAccent} />}
 								</Pressable>
 							)}
 						</View>
@@ -555,16 +555,17 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.xl,
 	},
 	conversation: { gap: spacing.lg },
-	userWrap: { alignItems: 'flex-end' },
+	// 会話の見た目はクラウドのチャット (CloudAgentsScreen) と揃える: 自分の吹き出しは右寄せ・右下だけ小さい角
+	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
 	userBubble: {
-		maxWidth: '85%',
-		borderRadius: 18,
+		borderRadius: 20,
+		borderBottomRightRadius: 6,
 		paddingHorizontal: spacing.md + 2,
 		paddingVertical: spacing.sm + 2,
 		backgroundColor: colors.bgHover,
 	},
 	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 25 },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
 	tool: { gap: 2 },
 	toolHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	toolDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint },
@@ -652,18 +653,23 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.sm,
 	},
 	composer: {
-		borderRadius: 26,
+		borderRadius: 24,
 		borderWidth: 1,
 		borderColor: colors.border,
 		backgroundColor: colors.bgElevated,
 		paddingHorizontal: spacing.sm,
 		paddingTop: spacing.xs,
 		paddingBottom: spacing.sm,
+		shadowColor: colors.shadow,
+		shadowOpacity: 0.06,
+		shadowRadius: 10,
+		shadowOffset: { width: 0, height: 2 },
+		elevation: 2,
 	},
 	composerInput: {
-		minHeight: 40,
-		maxHeight: 140,
-		paddingHorizontal: spacing.sm,
+		minHeight: 44,
+		maxHeight: 160,
+		paddingHorizontal: spacing.xs + 2,
 		paddingTop: spacing.sm,
 		paddingBottom: spacing.xs,
 		color: colors.fg,
@@ -682,9 +688,10 @@ const styles = StyleSheet.create({
 	},
 	composerChipPressed: { backgroundColor: colors.bgHover },
 	composerChipText: { color: colors.fgFaint, fontSize: fontSize.xs },
-	roundButton: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+	// 送信 / 停止はクラウドのチャットと同じ角丸の正方形。無効時は accent のまま薄くする
+	roundButton: { width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
 	roundButtonOn: { backgroundColor: colors.accent },
-	roundButtonOff: { backgroundColor: colors.bgHover },
+	roundButtonOff: { backgroundColor: colors.accent, opacity: 0.4 },
 	roundButtonPressed: { opacity: 0.75 },
 	stopSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.onAccent },
 });
