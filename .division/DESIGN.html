@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchestra Mobile — Claude 風デザインシステム</title>
+<style>
+:root{
+  --color-bg:#faf9f5; --color-bg-sidebar:#f0eee6; --color-bg-elevated:#ffffff; --color-bg-input:#ffffff; --color-bg-hover:#ebe8de;
+  --color-border:#e6e2d6; --color-border-strong:#d6d1c3;
+  --color-fg:#3d3929; --color-fg-strong:#1f1e1b; --color-fg-muted:#5e5a4c; --color-fg-faint:#78735f;
+  --color-accent:#b95a3a; --color-accent-pressed:#a24f30; --color-on-accent:#ffffff; --color-accent-text:#b5532f;
+  --color-success:#2f7d4f; --color-warning:#9c610c; --color-danger:#b3261e; --color-running:#3b6db3;
+  --color-scrim:rgba(31,30,27,.32); --color-shadow:#3d3929;
+  --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-serif:Georgia,"Hiragino Mincho ProN",serif;
+  --font-mono:Menlo,Consolas,monospace;
+  --space-xs:4px; --space-sm:8px; --space-md:12px; --space-lg:16px; --space-xl:24px; --space-2xl:48px; --space-3xl:64px;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:24px; --radius-pill:999px;
+  --shadow-1:0 1px 2px rgba(61,57,41,.05); --shadow-2:0 2px 10px rgba(61,57,41,.06); --shadow-3:0 8px 28px rgba(61,57,41,.12);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --color-bg:#1f1e1b; --color-bg-sidebar:#262420; --color-bg-elevated:#2b2924; --color-bg-input:#2b2924; --color-bg-hover:#3a372f;
+    --color-border:#3a372f; --color-border-strong:#4a463c;
+    --color-fg:#e8e4d8; --color-fg-strong:#f5f2ea; --color-fg-muted:#b3ad9c; --color-fg-faint:#8d8776;
+    --color-accent:#d07855; --color-accent-pressed:#b95a3a; --color-on-accent:#1f1e1b; --color-accent-text:#d99a7f;
+    --color-success:#6fb389; --color-warning:#d19a4a; --color-danger:#e08a84; --color-running:#8aa9d4;
+    --color-scrim:rgba(0,0,0,.5); --color-shadow:#000000;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--color-bg);color:var(--color-fg);font-family:var(--font-body);font-size:15px;line-height:1.65;padding:var(--space-lg)}
+main{max-width:920px;margin:0 auto}
+h1{font-family:var(--font-serif);color:var(--color-fg-strong);font-size:30px;font-weight:500;line-height:1.25;margin:0 0 var(--space-sm)}
+h2{font-family:var(--font-serif);color:var(--color-fg-strong);font-size:22px;font-weight:500;margin:var(--space-2xl) 0 var(--space-md);border-bottom:1px solid var(--color-border);padding-bottom:var(--space-sm)}
+h3{color:var(--color-fg-strong);font-size:17px;margin:var(--space-xl) 0 var(--space-sm)}
+p{margin:0 0 var(--space-md);max-width:70ch}
+ul{margin:0 0 var(--space-md);padding-left:var(--space-xl)}
+li{margin-bottom:var(--space-xs)}
+code{font-family:var(--font-mono);font-size:12px;background:var(--color-bg-hover);padding:2px 5px;border-radius:5px;color:var(--color-fg-strong)}
+pre{font-family:var(--font-mono);font-size:12px;line-height:1.6;background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-md);overflow:auto;margin:0 0 var(--space-md)}
+table{border-collapse:collapse;width:100%;margin:0 0 var(--space-md);font-size:13px}
+th,td{border:1px solid var(--color-border);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:var(--color-bg-sidebar);color:var(--color-fg-strong);font-weight:600}
+section{margin-bottom:var(--space-xl)}
+.note{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-left:3px solid var(--color-accent);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);margin-bottom:var(--space-lg);font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--space-md);margin-bottom:var(--space-md)}
+.swatch{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-md);overflow:hidden}
+.swatch .chip{height:52px}
+.swatch .meta{padding:var(--space-sm) var(--space-md);font-size:12px;line-height:1.5}
+.swatch .meta b{color:var(--color-fg-strong);display:block}
+.swatch .meta code{background:none;padding:0}
+.row{display:flex;gap:var(--space-md);flex-wrap:wrap;align-items:center;margin-bottom:var(--space-md)}
+.demo{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:var(--space-lg);margin-bottom:var(--space-md)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 var(--space-lg);border-radius:var(--radius-md);font-size:15px;font-weight:600;font-family:var(--font-body);border:1px solid transparent;cursor:default}
+.btn-primary{background:var(--color-accent);color:var(--color-on-accent)}
+.btn-primary.pressed{background:var(--color-accent-pressed)}
+.btn-primary.disabled{opacity:.4}
+.btn-secondary{background:var(--color-bg-elevated);color:var(--color-fg-strong);border-color:var(--color-border-strong)}
+.btn-ghost{background:transparent;color:var(--color-accent-text)}
+.btn-danger{background:var(--color-danger);color:#fff}
+.btn.focus{outline:2px solid var(--color-accent-text);outline-offset:2px}
+.input{width:min(320px,100%);min-height:44px;padding:0 var(--space-md);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-input);color:var(--color-fg);font-size:15px;font-family:var(--font-body)}
+.input::placeholder{color:var(--color-fg-faint)}
+.input.focus{border-color:var(--color-accent-text);outline:1px solid var(--color-accent-text)}
+.card{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:var(--space-lg);box-shadow:var(--shadow-2);max-width:340px}
+.composer{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);box-shadow:var(--shadow-2);max-width:560px}
+.composer .area{color:var(--color-fg-faint);font-size:15px;padding:var(--space-sm) 0}
+.composer .bar{display:flex;align-items:center;gap:var(--space-sm)}
+.chipset{display:flex;gap:6px;flex:1;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:var(--radius-pill);border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-fg-muted);font-family:var(--font-mono);font-size:12px}
+.send{width:34px;height:34px;border-radius:var(--radius-sm);background:var(--color-accent);color:var(--color-on-accent);display:inline-flex;align-items:center;justify-content:center;font-size:17px}
+.send.disabled{opacity:.4}
+.chat{max-width:560px;display:flex;flex-direction:column;gap:var(--space-lg)}
+.user-wrap{display:flex;justify-content:flex-end;padding-left:var(--space-2xl)}
+.user-bubble{background:var(--color-bg-hover);border-radius:20px;border-bottom-right-radius:6px;padding:10px 14px;color:var(--color-fg);font-size:15px;line-height:22px;max-width:100%}
+.agent-turn{display:flex;flex-direction:column;gap:var(--space-sm)}
+.agent-head{display:flex;align-items:center;gap:var(--space-sm)}
+.avatar{width:26px;height:26px;border-radius:13px;background:rgba(185,90,58,.12);color:var(--color-accent);display:inline-flex;align-items:center;justify-content:center;font-size:14px}
+.agent-name{color:var(--color-fg-muted);font-size:13px;font-weight:600}
+.agent-body{padding-left:34px;font-size:15px;line-height:23px;display:flex;flex-direction:column;gap:var(--space-sm)}
+.tool-line{font-family:var(--font-mono);font-size:12px;color:var(--color-fg-faint)}
+.badge{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--radius-pill);font-size:12px;font-weight:600;border:1px solid var(--color-border);color:var(--color-fg-muted)}
+.dot{width:8px;height:8px;border-radius:4px;display:inline-block}
+.bars{display:flex;flex-direction:column;gap:6px;margin-bottom:var(--space-md)}
+.bar-row{display:flex;align-items:center;gap:var(--space-md);font-family:var(--font-mono);font-size:12px;color:var(--color-fg-muted)}
+.bar-row .b{height:14px;background:var(--color-accent);border-radius:3px;opacity:.75}
+.wire{background:var(--color-bg-sidebar);border:1px solid var(--color-border);border-radius:var(--radius-md);padding:var(--space-md);max-width:340px;display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--color-fg-muted)}
+.wire .box{background:var(--color-bg-elevated);border:1px dashed var(--color-border-strong);border-radius:var(--radius-sm);padding:var(--space-sm);text-align:center}
+.wire .box.accent{border-color:var(--color-accent);color:var(--color-accent-text)}
+.elev{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--space-md)}
+.elev .lvl{background:var(--color-bg-elevated);border-radius:var(--radius-lg);padding:var(--space-lg);font-size:12px;color:var(--color-fg-muted)}
+.elev .lvl b{display:block;color:var(--color-fg-strong);margin-bottom:4px}
+.dodont{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md)}
+@media(max-width:640px){.dodont{grid-template-columns:1fr}}
+.do,.dont{border-radius:var(--radius-md);padding:var(--space-md);font-size:13px}
+.do{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-top:3px solid var(--color-success)}
+.dont{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-top:3px solid var(--color-danger)}
+.do h3,.dont h3{margin-top:0}
+.spec-table td:first-child{white-space:nowrap;font-weight:600;color:var(--color-fg-strong)}
+.small{font-size:12px;color:var(--color-fg-muted)}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Orchestra Mobile — Claude 風デザインシステム</h1>
+<div class="note">前提: ブランド指定はないため、Claude のアプリの雰囲気（暖色・余白・落ち着いた会話体験）を参考にした独自システムとする。実装上の正は <code>src/theme.ts</code> で、この文書のトークンはその値と一致させてある。機能・画面遷移・型安全性は変えない。詳細な画面整理の判断は <code>docs/design-claude-style.md</code> を参照。</div>
+
+<section id="theme">
+<h2>1. Visual Theme &amp; Atmosphere</h2>
+<p>全体の空気は「紙の上で会話する」ような暖かさと静けさ。地は暖かいオフホワイトで、情報は白い面（カード・入力欄）に載せ、視線の主役は常に会話の本文にする。アクセントのテラコッタは主な操作とリンクだけに絞り、面で多用しない。</p>
+<p>密度は中程度よりやや低く、余白は 4/8/12/16/24px の 5 段階でリズムを作る。角はやや大きめに丸め（8/12/16px、入力欄の箱は 24px）、影はほとんど見えない程度に抑えて、縁は淡いベージュの線で区切る。見出しだけ端末標準のセリフ体にして、会話の落ち着きと少しの品格を出す。</p>
+<p>原則は「追加より先に整理」。既定値の設定チップは畳み、変更された設定だけを見せる。新しい要素は、整理後も主目的を達成できない場合に限り、既存要素との置き換えで提案する。</p>
+<p><b>Key characteristics</b></p>
+<ul>
+<li>暖色オフホワイトの地 <code>#faf9f5</code> と白い会話面</li>
+<li>控えめなテラコッタのアクセント <code>#b95a3a</code>（主操作・リンクのみ）</li>
+<li>濃い茶系の文字で 4.5:1 以上のコントラスト</li>
+<li>5 段階の余白と 3 段階＋特別の角丸、ほぼ見えない影</li>
+<li>見出しのみセリフ体、メタ情報とコードは等幅</li>
+</ul>
+</section>
+
+<section id="colors">
+<h2>2. Color Palette &amp; Roles</h2>
+<p>役割ごとに分けたトークン。実装名は <code>src/theme.ts</code> の <code>colors.*</code> と対応する。文字/背景の組み合わせは WCAG AA（4.5:1）以上を確認済み（accent × 白 = 4.58）。</p>
+<h3>Primary / Accent</h3>
+<div class="grid">
+<div class="swatch"><div class="chip" style="background:#b95a3a"></div><div class="meta"><b>accent</b>#b95a3a<br><code>--color-accent</code> · 主ボタン・送信の塗り</div></div>
+<div class="swatch"><div class="chip" style="background:#a24f30"></div><div class="meta"><b>accentPressed</b>#a24f30<br><code>--color-accent-pressed</code> · 押下時</div></div>
+<div class="swatch"><div class="chip" style="background:#b5532f"></div><div class="meta"><b>accentText</b>#b5532f<br><code>--color-accent-text</code> · リンク・選択印の文字</div></div>
+<div class="swatch"><div class="chip" style="background:#ffffff;border-bottom:1px solid #e6e2d6"></div><div class="meta"><b>onAccent</b>#ffffff<br><code>--color-on-accent</code> · accent 上の文字</div></div>
+</div>
+<h3>Neutrals &amp; Surfaces</h3>
+<div class="grid">
+<div class="swatch"><div class="chip" style="background:#faf9f5"></div><div class="meta"><b>bg</b>#faf9f5<br><code>--color-bg</code> · 画面の地</div></div>
+<div class="swatch"><div class="chip" style="background:#ffffff"></div><div class="meta"><b>bgElevated / bgInput</b>#ffffff<br><code>--color-bg-elevated</code> · カード・入力欄</div></div>
+<div class="swatch"><div class="chip" style="background:#f0eee6"></div><div class="meta"><b>bgSidebar</b>#f0eee6<br><code>--color-bg-sidebar</code> · ドロワーの地</div></div>
+<div class="swatch"><div class="chip" style="background:#ebe8de"></div><div class="meta"><b>bgHover</b>#ebe8de<br><code>--color-bg-hover</code> · 押下・自分の吹き出し</div></div>
+</div>
+<h3>Text</h3>
+<div class="grid">
+<div class="swatch"><div class="chip" style="background:#3d3929"></div><div class="meta"><b>fg</b>#3d3929<br><code>--color-fg</code> · 本文</div></div>
+<div class="swatch"><div class="chip" style="background:#1f1e1b"></div><div class="meta"><b>fgStrong</b>#1f1e1b<br><code>--color-fg-strong</code> · 見出し</div></div>
+<div class="swatch"><div class="chip" style="background:#5e5a4c"></div><div class="meta"><b>fgMuted</b>#5e5a4c<br><code>--color-fg-muted</code> · 補足</div></div>
+<div class="swatch"><div class="chip" style="background:#78735f"></div><div class="meta"><b>fgFaint</b>#78735f<br><code>--color-fg-faint</code> · プレースホルダ（4.5:1 以上）</div></div>
+</div>
+<h3>Semantic</h3>
+<div class="grid">
+<div class="swatch"><div class="chip" style="background:#2f7d4f"></div><div class="meta"><b>success</b>#2f7d4f<br><code>--color-success</code> · 完了</div></div>
+<div class="swatch"><div class="chip" style="background:#9c610c"></div><div class="meta"><b>warning</b>#9c610c<br><code>--color-warning</code> · 確認待ち・警告</div></div>
+<div class="swatch"><div class="chip" style="background:#b3261e"></div><div class="meta"><b>danger</b>#b3261e<br><code>--color-danger</code> · 失敗・削除</div></div>
+<div class="swatch"><div class="chip" style="background:#3b6db3"></div><div class="meta"><b>running</b>#3b6db3<br><code>--color-running</code> · 作業中</div></div>
+</div>
+<h3>Borders</h3>
+<div class="grid">
+<div class="swatch"><div class="chip" style="background:#e6e2d6"></div><div class="meta"><b>border</b>#e6e2d6<br><code>--color-border</code> · 淡い線</div></div>
+<div class="swatch"><div class="chip" style="background:#d6d1c3"></div><div class="meta"><b>borderStrong</b>#d6d1c3<br><code>--color-border-strong</code> · 強い線・枠</div></div>
+</div>
+<p class="small">ダークモード値はこの文書の <code>:root</code>（prefers-color-scheme: dark）を参照。モバイル版は現状 light 固定（<code>app.json</code> の <code>userInterfaceStyle: light</code>）のため、dark は将来対応の目安。</p>
+</section>
+
+<section id="typography">
+<h2>3. Typography Rules</h2>
+<p>カスタムフォントは読み込まず、端末標準で組む。本文はシステムのサンセリフ、見出しと空画面のタイトルだけセリフ体（Georgia / serif）、メタ情報とコードは等幅（Menlo / monospace）。</p>
+<table class="spec-table">
+<tr><th>Role</th><th>Font</th><th>Size</th><th>Weight</th><th>Line height</th><th>Letter spacing</th><th>Notes</th></tr>
+<tr><td>Display</td><td style="font-family:var(--font-serif)">Aa セリフ</td><td>30px</td><td>500</td><td>1.25</td><td>0</td><td>空画面の大見出しのみ</td></tr>
+<tr><td>H1</td><td style="font-family:var(--font-serif);font-size:22px">画面のタイトル</td><td>22px</td><td>500</td><td>1.3</td><td>0</td><td>fontSize.lg・セリフ</td></tr>
+<tr><td>H2</td><td style="font-size:17px;font-weight:600;color:var(--color-fg-strong)">セクション見出し</td><td>17px</td><td>600</td><td>1.4</td><td>0</td><td>fontSize.md・サンセリフ</td></tr>
+<tr><td>H3</td><td style="font-size:15px;font-weight:600">行の見出し</td><td>15px</td><td>600</td><td>1.4</td><td>0</td><td>fontSize.sm</td></tr>
+<tr><td>Body M</td><td>本文はこのサイズで読みやすく。</td><td>15px</td><td>400</td><td>22–23px</td><td>0</td><td>チャット本文・行</td></tr>
+<tr><td>Body L</td><td style="font-size:17px">入力欄の本文。</td><td>17px</td><td>400</td><td>1.45</td><td>0</td><td>入力・シート本文</td></tr>
+<tr><td>Body S</td><td style="font-size:13px">補足・2 行目の説明。</td><td>13px</td><td>400</td><td>18px</td><td>0</td><td>fgMuted</td></tr>
+<tr><td>Caption</td><td style="font-size:12px;color:var(--color-fg-faint)">時刻・状態など</td><td>12px</td><td>400</td><td>1.4</td><td>0</td><td>fgFaint</td></tr>
+<tr><td>Label / Button</td><td style="font-size:15px;font-weight:600">送信する</td><td>15px</td><td>600</td><td>1</td><td>0</td><td>ボタン・チップ</td></tr>
+<tr><td>Code</td><td style="font-family:var(--font-mono);font-size:12px">npm run typecheck</td><td>12–13px</td><td>400</td><td>18–20px</td><td>0</td><td>Menlo / monospace</td></tr>
+</table>
+<p><b>原則</b></p>
+<ul>
+<li>セリフ体は見出しだけに使い、本文は読みやすさ優先でサンセリフにする。</li>
+<li>行間は本文 22–23px を基準にし、詰めすぎない。15px 未満の本文は使わない。</li>
+<li>等幅は時刻・ファイル数・コードなど「そろえて読む」情報に限定する。</li>
+</ul>
+</section>
+
+<section id="components">
+<h2>4. Component Stylings</h2>
+<h3>Buttons</h3>
+<div class="demo">
+<div class="row">
+<span class="btn btn-primary">セッションを起動</span>
+<span class="btn btn-primary pressed">押下時</span>
+<span class="btn btn-primary disabled">無効</span>
+</div>
+<div class="row">
+<span class="btn btn-secondary">キャンセル</span>
+<span class="btn btn-ghost">詳しく見る</span>
+<span class="btn btn-danger">ログアウト</span>
+<span class="btn btn-secondary focus">フォーカス</span>
+</div>
+<p class="small">Primary: 背景 <code>accent</code>・文字 <code>onAccent</code>・角丸 12・高さ最小 44。押下は <code>accentPressed</code>、無効は <code>opacity .4</code>。Secondary: 白地・<code>borderStrong</code> の枠。Ghost: 文字のみ <code>accentText</code>。フォーカスは 2px の <code>accentText</code> アウトライン。</p>
+</div>
+<h3>Inputs</h3>
+<div class="demo">
+<div class="row"><input class="input" placeholder="エージェントに頼みたいことを書く…" readonly></div>
+<div class="row"><input class="input focus" value="フォーカス時はアクセント枠" readonly></div>
+<p class="small">背景 <code>bgInput</code>・1px <code>border</code>・角丸 12・高さ最小 44・padding 0 16。フォーカスは <code>accentText</code> の枠。プレースホルダは <code>fgFaint</code>。</p>
+</div>
+<h3>Cards</h3>
+<div class="demo"><div class="card"><b style="color:var(--color-fg-strong)">カード</b><p class="small" style="margin:6px 0 0">白地・1px の淡い縁・角丸 16・影は <code>shadow-2</code>（ごく薄く）。内容の上下余白は 16–24px。</p></div></div>
+<h3>Navigation</h3>
+<div class="demo">
+<div class="wire">
+<div class="box">☰ 　Orchestra ／ 接続状態（2 行ヘッダ、高さ 56）</div>
+<div class="box accent">ナビゲーションドロワー（bgSidebar、閉じているときは完全非表示）</div>
+<div class="box">行: アイコン 20 + ラベル 15px/500、高さ 48、角丸 12</div>
+<div class="box">下端: アカウント行（上に 1px の境界線）</div>
+</div>
+</div>
+<h3>Chat bubbles（会話画面の中核）</h3>
+<div class="demo">
+<div class="chat">
+<div class="user-wrap"><div class="user-bubble">この画面の配色を Claude 風に整えてください。背景は暖かい色で、余白は広めに。</div></div>
+<div class="agent-turn">
+<div class="agent-head"><span class="avatar">✻</span><span class="agent-name">エージェント</span></div>
+<div class="agent-body">
+<div>了解しました。地は暖かいオフホワイトに、主な操作だけテラコッタを使います。続けて 3 つのツールを実行しました。</div>
+<div class="tool-line">● ツールを 3 回実行　⎿ 読み取り・検索・置換</div>
+</div>
+</div>
+</div>
+<p class="small">自分: 右寄せ、背景 <code>bgHover</code>、角丸 20・右下 6、文字 <code>fg</code> 15px/22。エージェント: 左に ✻ アバター（accent の 12% の丸）と名前、本文は 34px 下げて 15px/23。</p>
+</div>
+<h3>Composer（入力欄）</h3>
+<div class="demo">
+<div class="composer">
+<div class="area">エージェントに頼みたいことを書く…</div>
+<div class="bar">
+<div class="chipset">
+<span class="chip">☁ クラウド ▾</span><span class="chip">⑂ リポジトリ ▾</span><span class="chip">⚙ モデル ▾</span><span class="chip">📊 コスト</span>
+</div>
+<span class="send">↑</span>
+</div>
+</div>
+<p class="small">白い箱・角丸 24・1px <code>border</code>・影 <code>shadow-2</code>。入力 min 44 / max 160、15px/21。送信は 34×34 の <code>accent</code> 塗り＋<code>onAccent</code> アイコン、無効は <code>opacity .4</code>。チップは高さ 28 の全丸、等幅 12px、<code>fgMuted</code>。既定値のチップ（ループ off など）は畳み、変更時だけ表示する。</p>
+</div>
+<h3>Badges / 状態</h3>
+<div class="demo">
+<div class="row">
+<span class="badge"><span class="dot" style="background:var(--color-running)"></span>作業中</span>
+<span class="badge"><span class="dot" style="background:var(--color-warning)"></span>承認待ち</span>
+<span class="badge"><span class="dot" style="background:var(--color-success)"></span>完了</span>
+<span class="badge"><span class="dot" style="background:var(--color-danger)"></span>エラー</span>
+</div>
+<p class="small">高さ 22 の全丸、1px <code>border</code>、12px/600、状態は 8px のドットで示す。確認待ちは画面上部に細い帯（<code>bgSidebar</code> 地）でも知らせるが、操作は遮らない。</p>
+</div>
+</section>
+
+<section id="layout">
+<h2>5. Layout Principles</h2>
+<h3>Spacing scale</h3>
+<div class="bars">
+<div class="bar-row"><span style="width:36px">xs 4</span><span class="b" style="width:4px"></span></div>
+<div class="bar-row"><span style="width:36px">sm 8</span><span class="b" style="width:8px"></span></div>
+<div class="bar-row"><span style="width:36px">md 12</span><span class="b" style="width:12px"></span></div>
+<div class="bar-row"><span style="width:36px">lg 16</span><span class="b" style="width:16px"></span></div>
+<div class="bar-row"><span style="width:36px">xl 24</span><span class="b" style="width:24px"></span></div>
+<div class="bar-row"><span style="width:36px">2xl 48</span><span class="b" style="width:48px"></span></div>
+<div class="bar-row"><span style="width:36px">3xl 64</span><span class="b" style="width:64px"></span></div>
+</div>
+<p>モバイルは 1 カラム。画面の左右余白は <code>spacing.md</code>（12px）、カード内は 16–24px。要素間は 8/12、セクション間は 24–48px で区切る。角丸は 8（小）/ 12（中）/ 16（大）、入力欄の箱は 24、チップとピルは全丸 999。</p>
+<h3>Wireframe — 会話画面（ホーム / 詳細共通）</h3>
+<div class="wire">
+<div class="box">ヘッダ: ☰ + タイトル / 接続状態（56）</div>
+<div class="box" style="flex:1;min-height:110px">会話ログ（ユーザー右・エージェント左、余白 16）</div>
+<div class="box">（必要時のみ）承認待ちの細い帯・絞り込みタブ</div>
+<div class="box accent">入力欄（白・角丸 24・影 2）+ 送信ボタン</div>
+</div>
+<h3>Wireframe — ページ（カンバン等）</h3>
+<div class="wire">
+<div class="box">ヘッダ: ← + ページ名（56）</div>
+<div class="box" style="min-height:70px">本文（カードの列、間隔 12）</div>
+<div class="box">固定バーは置かない。主操作は画面内の主ボタンか入力欄に集約</div>
+</div>
+</section>
+
+<section id="elevation">
+<h2>6. Depth &amp; Elevation</h2>
+<p>面の上下関係は「地 → カード → 入力欄 → シート/ドロワー」の 4 段。影はほぼ見えない強さに留め、境は色と淡い縁で示す。</p>
+<div class="elev">
+<div class="lvl" style="border:1px solid var(--color-border)"><b>Level 0 — 地</b>bg、影なし。画面そのもの。</div>
+<div class="lvl" style="border:1px solid var(--color-border);box-shadow:var(--shadow-1)"><b>Level 1 — カード</b>bgElevated + 1px border + shadow-1。</div>
+<div class="lvl" style="border:1px solid var(--color-border);box-shadow:var(--shadow-2)"><b>Level 2 — 入力欄</b>bgElevated + border + shadow-2。会話の主役。</div>
+<div class="lvl" style="border:1px solid var(--color-border);box-shadow:var(--shadow-3)"><b>Level 3 — シート</b>bgElevated + shadow-3 + 背後に scrim。</div>
+</div>
+<p class="small">scrim は <code>rgba(31,30,27,.32)</code>。ドロワーは浮かせず <code>bgSidebar</code> の一段沈んだ地にして、本文との違いは色だけで示す。</p>
+</section>
+
+<section id="dos-donts">
+<h2>7. Do's and Don'ts</h2>
+<div class="dodont">
+<div class="do"><h3>Do</h3><ul>
+<li>主な操作は画面に 1 つ、<code>accent</code> の主ボタンで示す。</li>
+<li>既定値の設定は畳み、変更された値だけチップに出す。</li>
+<li>自分の発言は右・相手は左、余白で会話の流れを作る。</li>
+<li>文字は 15px 以上・行間 22px 以上で組む。</li>
+<li>取り消し手段（ログアウト確認・承認の帯）は必ず残す。</li>
+<li>色の意味は状態色（成功/警告/失敗/作業中）に限定する。</li>
+<li>タップ領域は最小 44px を確保する。</li>
+</ul></div>
+<div class="dont"><h3>Don't</h3><ul>
+<li>アクセント色を面いっぱいに使わない（背景・帯をテラコッタにしない）。</li>
+<li>既定値のチップを常時並べて入力欄を圧迫しない。</li>
+<li>濃い塗りの上に <code>bg</code> の文字を置かない（ライト配色で読めなくなる）。必ず <code>accent</code> × <code>onAccent</code>。</li>
+<li>影を強くしない、二重の枠線を引かない。</li>
+<li>操作を遮るモーダルや常設の固定バーを新たに追加しない。</li>
+<li>15px 未満の本文、4.5:1 未満の文字色を使わない。</li>
+<li>機能や画面遷移をデザイン改修で削除・改名しない。</li>
+</ul></div>
+</div>
+</section>
+
+<section id="responsive">
+<h2>8. Responsive Behavior</h2>
+<table>
+<tr><th>Breakpoint</th><th>Width</th><th>Key changes</th></tr>
+<tr><td>Small</td><td>〜360px</td><td>左右余白は 12 のまま。チップは横スクロール、見出しは 1 行で省略</td></tr>
+<tr><td>Standard</td><td>361–600px</td><td>基準。1 カラム、入力欄は全幅−24</td></tr>
+<tr><td>Large / Tablet</td><td>601px〜</td><td>本文の最大幅を 680px に絞り中央寄せ。カードは 2 列まで</td></tr>
+</table>
+<ul>
+<li>タッチターゲットは最小 44px（チップは hitSlop 上下 6 で確保）。</li>
+<li>ナビゲーションは小画面ではドロワーに畳み、閉じているときは幅・余白を残さない（既存仕様を維持）。</li>
+<li>グリッドは 1 カラムが基本で、広い画面でも会話の行長を伸ばしすぎない。</li>
+<li>文字サイズは画面幅で変えず、行数と余白で調整する。</li>
+</ul>
+</section>
+
+<section id="agent-guide">
+<h2>9. Agent Prompt Guide</h2>
+<h3>Quick color reference</h3>
+<table>
+<tr><th>Token</th><th>Hex</th><th>Use</th></tr>
+<tr><td><code>--color-bg</code></td><td>#faf9f5</td><td>画面の地</td></tr>
+<tr><td><code>--color-bg-elevated</code></td><td>#ffffff</td><td>カード・入力欄</td></tr>
+<tr><td><code>--color-bg-hover</code></td><td>#ebe8de</td><td>押下・自分の吹き出し</td></tr>
+<tr><td><code>--color-fg</code> / <code>--color-fg-strong</code></td><td>#3d3929 / #1f1e1b</td><td>本文 / 見出し</td></tr>
+<tr><td><code>--color-accent</code></td><td>#b95a3a</td><td>主ボタン・送信</td></tr>
+<tr><td><code>--color-accent-text</code></td><td>#b5532f</td><td>リンク・選択印</td></tr>
+<tr><td><code>--color-border</code></td><td>#e6e2d6</td><td>淡い線</td></tr>
+</table>
+<h3>Ready-to-paste component prompts</h3>
+<pre>「Composer を Claude 風に: 白い箱 (#ffffff)、角丸 24、1px の #e6e2d6 の縁、ごく薄い影。
+入力は min 44 / max 160、15px・lineHeight 21。送信は 34×34 の #b95a3a 塗りに白い ↑。
+下のチップは高さ 28 の全丸、等幅 12px。既定値のチップは畳み、変更時だけ表示。」</pre>
+<pre>「会話の吹き出し: 自分は右寄せ・背景 #ebe8de・角丸 20（右下のみ 6）・文字 #3d3929 15px/22。
+エージェントは左に ✻ アバター（#b95a3a の 12% の丸）と名前、本文は 34px 下げて 15px/23。」</pre>
+<pre>「主ボタン: 背景 #b95a3a・文字 #ffffff・角丸 12・高さ最小 44・15px/600。
+押下は #a24f30、無効は opacity .4、フォーカスは 2px の #b5532f アウトライン。」</pre>
+<pre>「画面の地: #faf9f5。カードは #ffffff + 1px #e6e2d6 + 角丸 16 + ほぼ見えない影。
+見出しだけセリフ体（Georgia / serif）。アクセントの面使いは禁止。」</pre>
+<h3>Iteration guide（システムから外れないために）</h3>
+<ul>
+<li>色・余白・角丸は必ず <code>src/theme.ts</code> のトークン経由にし、画面への直書き色を増やさない。</li>
+<li>新しい要素を足す前に「整理で代替できないか」を確認し、既存要素の置き換えを優先する。</li>
+<li>コントラストが 4.5:1 を割る組み合わせは使わない。迷ったら <code>fg</code> × <code>bg</code>。</li>
+</ul>
+<h3>Coder handoff notes</h3>
+<ul>
+<li>実装の正は <code>src/theme.ts</code>。値は上の Quick reference と一致しているため、画面側はトークン参照のままでよい。</li>
+<li>共通部品は <code>src/components/ui.tsx</code>（Button / Input / Card / Badge / Sheet / Drawer / Toast）。画面個所は <code>src/screens/*</code>。</li>
+<li>フレームワーク: Expo / React Native 0.81。フォント読み込みはなく、セリフ・等幅は <code>Platform.select</code> で指定。</li>
+<li>画像素材: ロゴ（<code>assets/logo.png</code>）のみ既存。新規画像が必要になった場合のみ <code>imager</code> に依頼する。</li>
+<li>検証: <code>npm run typecheck</code> と <code>npx jest --runInBand</code>。評価指標は「会話画面で入力開始から送信完了までの操作数 = 2」を維持する。</li>
+</ul>
+<h3>:root トークン（コピー用）</h3>
+<pre>:root{
+  --color-bg:#faf9f5; --color-bg-sidebar:#f0eee6; --color-bg-elevated:#ffffff;
+  --color-bg-input:#ffffff; --color-bg-hover:#ebe8de;
+  --color-border:#e6e2d6; --color-border-strong:#d6d1c3;
+  --color-fg:#3d3929; --color-fg-strong:#1f1e1b; --color-fg-muted:#5e5a4c; --color-fg-faint:#78735f;
+  --color-accent:#b95a3a; --color-accent-pressed:#a24f30; --color-on-accent:#ffffff; --color-accent-text:#b5532f;
+  --color-success:#2f7d4f; --color-warning:#9c610c; --color-danger:#b3261e; --color-running:#3b6db3;
+  --color-scrim:rgba(31,30,27,.32); --color-shadow:#3d3929;
+  --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-serif:Georgia,"Hiragino Mincho ProN",serif; --font-mono:Menlo,Consolas,monospace;
+  --space-xs:4px; --space-sm:8px; --space-md:12px; --space-lg:16px; --space-xl:24px; --space-2xl:48px; --space-3xl:64px;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:24px; --radius-pill:999px;
+  --shadow-1:0 1px 2px rgba(61,57,41,.05); --shadow-2:0 2px 10px rgba(61,57,41,.06); --shadow-3:0 8px 28px rgba(61,57,41,.12);
+}</pre>
+</section>
+
+</main>
+</body>
+</html>
