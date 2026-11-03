@@ -38,6 +38,7 @@ import {
 	AppState,
 	BackHandler,
 	KeyboardAvoidingView,
+	Linking,
 	Platform,
 	Pressable,
 	RefreshControl,
@@ -151,6 +152,8 @@ import {
 	toCloudReview,
 	toCloudTaskEvent,
 	repoLabel,
+	searchedSitesOf,
+	siteLabel,
 	toolCallParts,
 	toolCallSummary,
 	truncateLines,
@@ -1061,6 +1064,54 @@ const ToolRow = ({ data }: { data: Record<string, unknown> }) => {
 	);
 };
 
+/**
+ * モデルが Web 検索したサイト。「● 検索したサイト (N 件)」と「⎿ 1 件目 … +N 件」の 2 行にし、
+ * 押すと全部開く。開いた一覧の各行を押すとブラウザで開く。
+ */
+const SearchedSitesRow = ({ sites }: { sites: string[] }) => {
+	const [open, setOpen] = useState(false);
+	if (!sites.length) return null;
+	return (
+		<View style={styles.tool}>
+			<Pressable
+				accessibilityRole='button'
+				accessibilityState={{ expanded: open }}
+				accessibilityLabel={`検索したサイト ${sites.length} 件。${open ? '一覧を閉じる' : '一覧を見る'}`}
+				onPress={() => setOpen(v => !v)}
+				style={styles.line}
+			>
+				<Bullet color={colors.running} />
+				<Text style={styles.toolCall}>
+					<Text style={styles.toolName}>検索したサイト</Text>
+					<Text style={styles.toolArg}> ({sites.length} 件)</Text>
+				</Text>
+			</Pressable>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Text style={styles.elbow}>⎿</Text></View>
+				{open ? (
+					<View style={[styles.toolOutput, styles.siteList]}>
+						{sites.map((url, i) => (
+							<Pressable
+								key={url}
+								accessibilityRole='link'
+								accessibilityLabel={`${siteLabel(url)} を開く`}
+								onPress={() => { void Linking.openURL(url).catch(() => undefined); }}
+							>
+								<Text style={styles.siteLink} numberOfLines={2}>{i + 1}. {siteLabel(url)}</Text>
+							</Pressable>
+						))}
+					</View>
+				) : (
+					<Text style={[styles.monoText, styles.flex]} numberOfLines={1} onPress={() => setOpen(true)}>
+						{siteLabel(sites[0])}
+						{sites.length > 1 ? <Text style={styles.moreText}>{`  … +${sites.length - 1} 件`}</Text> : null}
+					</Text>
+				)}
+			</View>
+		</View>
+	);
+};
+
 // ---------------------------------------------------------------------------
 // Division Project の計画とタスク
 // ---------------------------------------------------------------------------
@@ -1416,14 +1467,16 @@ const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal,
 			return <UserBubble value={text(data.text)} />;
 		case 'assistant': {
 			const value = text(data.text).trim();
-			if (!value) return null;
+			const sites = searchedSitesOf(data);
+			if (!value && !sites.length) return null;
 			// 目標ループのレビュアーの発言には phase: 'review' が付く (Division Project ならロールも)
 			const review = data.phase === 'review';
 			const role = text(data.role) || (review ? 'reviewer' : '');
 			return (
 				<View style={styles.assistantBody}>
 					{role ? <RoleChip label={timeline.roleNames.get(role) ?? (review ? 'レビュー' : role)} /> : null}
-					<Markdown text={value} textStyle={styles.assistantText} />
+					{value ? <Markdown text={value} textStyle={styles.assistantText} /> : null}
+					<SearchedSitesRow sites={sites} />
 				</View>
 			);
 		}
@@ -2817,6 +2870,8 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bg,
 	},
 	monoText: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs, lineHeight: 20 },
+	siteList: { gap: spacing.xs },
+	siteLink: { color: colors.accentText, fontFamily: MONO, fontSize: fontSize.xs, lineHeight: 20 },
 	moreText: { color: colors.fgFaint, fontStyle: 'italic' },
 	note: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
