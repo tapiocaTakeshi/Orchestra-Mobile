@@ -995,6 +995,25 @@ export const toCloudReview = (data: Record<string, unknown>): CloudReview | null
 };
 
 /** レビューの結果の一文 (例: 「未達のため、ラウンド 2/5 に進みます」)。 */
+/**
+ * assistant イベントに付く、モデルが Web 検索したサイトの URL (Division の data.searchedSites)。
+ * http(s) の URL だけを、重複なしで順番どおりに返す。
+ */
+export const searchedSitesOf = (data: Record<string, unknown> | null | undefined): string[] => {
+	const raw = data?.searchedSites;
+	if (!Array.isArray(raw)) return [];
+	const urls = raw.filter((u): u is string => typeof u === 'string' && /^https?:\/\//i.test(u));
+	return [...new Set(urls)];
+};
+
+/** 一覧に出す短い表記 (例: "example.com/docs/page")。URL として読めなければそのまま。 */
+export const siteLabel = (url: string): string => {
+	const m = /^https?:\/\/(?:www\.)?([^/?#]+)([^?#]*)/i.exec(url);
+	if (!m) return url;
+	const path = m[2].replace(/\/+$/, '');
+	return path ? `${m[1]}${path}` : m[1];
+};
+
 export const reviewOutcomeLabel = (review: Extract<CloudReview, { status: 'done' }>): string => {
 	const max = review.maxRounds ?? '?';
 	switch (review.next) {
