@@ -1,0 +1,147 @@
+{
+  "activeProjectIds": [
+    "d9a0ad4e-dcda-40ac-b8aa-183d4f412674"
+  ],
+  "projects": [
+    {
+      "projectId": "d9a0ad4e-dcda-40ac-b8aa-183d4f412674",
+      "name": "main project",
+      "agents": [
+        {
+          "role": "leader",
+          "provider": "openAI",
+          "model": "gpt-6.1-sol",
+          "effort": "high"
+        },
+        {
+          "role": "planner",
+          "provider": "openAI",
+          "model": "gpt-6-luna"
+        },
+        {
+          "role": "design",
+          "provider": "moonshot",
+          "model": "kimi-k3.1-pro"
+        },
+        {
+          "role": "image",
+          "provider": "openAI",
+          "model": "gpt-image-2.5-flare"
+        },
+        {
+          "role": "search",
+          "provider": "perplexity",
+          "model": "sonar-pro"
+        },
+        {
+          "role": "research",
+          "provider": "perplexity",
+          "model": "sonar-deep-research"
+        },
+        {
+          "role": "review",
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5"
+        },
+        {
+          "role": "ideaman",
+          "provider": "openAI",
+          "model": "gpt-6-luna"
+        },
+        {
+          "role": "coder",
+          "provider": "anthropic",
+          "model": "claude-opus-5-5"
+        },
+        {
+          "role": "writing",
+          "provider": "openAI",
+          "model": "gpt-6-luna"
+        }
+      ]
+    },
+    {
+      "projectId": "27ad65fa-2c19-4b55-9c95-169332a3e900",
+      "name": "main  project2",
+      "agents": [
+        {
+          "role": "leader",
+          "provider": "openAI",
+          "model": "gpt-6.1-sol"
+        },
+        {
+          "role": "coder",
+          "provider": "anthropic",
+          "model": "claude-opus-5-5"
+        },
+        {
+          "role": "design",
+          "provider": "moonshot",
+          "model": "kimi-k3"
+        },
+        {
+          "role": "search",
+          "provider": "perplexity",
+          "model": "sonar-pro"
+        },
+        {
+          "role": "research",
+          "provider": "perplexity",
+          "model": "sonar-deep-research"
+        },
+        {
+          "role": "ideaman",
+          "provider": "openAI",
+          "model": "gpt-6-luna"
+        },
+        {
+          "role": "review",
+          "provider": "anthropic",
+          "model": "claude-sonnet-5-5"
+        }
+      ]
+    },
+    {
+      "projectId": "0e444262-3b35-46c6-919b-a5e57165715f",
+      "name": "Division Project のコピー",
+      "agents": [
+        {
+          "role": "planner",
+          "provider": "gemini",
+          "model": "gemini-3.5-flash-lite"
+        },
+        {
+          "role": "search",
+          "provider": "perplexity",
+          "model": "sonar-pro"
+        },
+        {
+          "role": "research",
+          "provider": "perplexity",
+          "model": "sonar-deep-research"
+        }
+      ]
+    },
+    {
+      "projectId": "f786c546-53cf-436f-be45-b9b6918481af",
+      "name": "03006506166 のコピー",
+      "agents": [
+        {
+          "role": "planner",
+          "provider": "gemini",
+          "model": "gemini-3.5-flash-lite"
+        },
+        {
+          "role": "search",
+          "provider": "perplexity",
+          "model": "sonar-pro"
+        },
+        {
+          "role": "research",
+          "provider": "perplexity",
+          "model": "sonar-deep-research"
+        }
+      ]
+    }
+  ]
+}

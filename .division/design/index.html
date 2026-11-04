@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Orchestra Mobile — UI モックアップ</title>
+<style>
+/* ===== Design tokens: .division/DESIGN.html の :root をそのまま使用 ===== */
+:root{
+  --color-bg:#faf9f5; --color-bg-sidebar:#f0eee6; --color-bg-elevated:#ffffff; --color-bg-input:#ffffff; --color-bg-hover:#ebe8de;
+  --color-border:#e6e2d6; --color-border-strong:#d6d1c3;
+  --color-fg:#3d3929; --color-fg-strong:#1f1e1b; --color-fg-muted:#5e5a4c; --color-fg-faint:#78735f;
+  --color-accent:#b95a3a; --color-accent-pressed:#a24f30; --color-on-accent:#ffffff; --color-accent-text:#b5532f;
+  --color-success:#2f7d4f; --color-warning:#9c610c; --color-danger:#b3261e; --color-running:#3b6db3;
+  --color-scrim:rgba(31,30,27,.32); --color-shadow:#3d3929;
+  --font-body:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+  --font-serif:Georgia,"Hiragino Mincho ProN",serif;
+  --font-mono:Menlo,Consolas,monospace;
+  --space-xs:4px; --space-sm:8px; --space-md:12px; --space-lg:16px; --space-xl:24px; --space-2xl:48px; --space-3xl:64px;
+  --radius-sm:8px; --radius-md:12px; --radius-lg:16px; --radius-xl:24px; --radius-pill:999px;
+  --shadow-1:0 1px 2px rgba(61,57,41,.05); --shadow-2:0 2px 10px rgba(61,57,41,.06); --shadow-3:0 8px 28px rgba(61,57,41,.12);
+}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--color-bg-sidebar);color:var(--color-fg);font-family:var(--font-body);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;font-size:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid var(--color-accent-text);outline-offset:2px}
+
+/* ===== Viewer toolbar (端末の外側) ===== */
+.viewer{display:flex;flex-direction:column;align-items:center;gap:var(--space-lg);padding:var(--space-xl) var(--space-md) var(--space-2xl)}
+.viewer-head{width:100%;max-width:1200px;display:flex;flex-direction:column;gap:var(--space-sm)}
+.viewer-head h1{font-family:var(--font-serif);font-weight:500;font-size:22px;line-height:1.3;color:var(--color-fg-strong);margin:0}
+.viewer-head p{margin:0;font-size:13px;color:var(--color-fg-muted)}
+.toolbar{display:flex;flex-wrap:wrap;gap:var(--space-sm);align-items:center}
+.tb-btn{height:32px;padding:0 var(--space-md);border-radius:var(--radius-pill);border:1px solid var(--color-border-strong);background:var(--color-bg-elevated);color:var(--color-fg-muted);font-size:13px;font-weight:600}
+.tb-btn[aria-pressed="true"]{background:var(--color-accent);border-color:var(--color-accent);color:var(--color-on-accent)}
+.tb-sep{width:1px;height:20px;background:var(--color-border-strong);margin:0 var(--space-xs)}
+
+/* ===== Device frame ===== */
+.device{position:relative;width:390px;height:844px;border:10px solid var(--color-fg-strong);border-radius:calc(var(--radius-xl) * 2);background:var(--color-bg);overflow:hidden;box-shadow:var(--shadow-3)}
+.screen{position:absolute;inset:0;display:none;flex-direction:column;background:var(--color-bg);overflow:hidden}
+.screen.active{display:flex}
+.screen-label{display:none}
+
+/* 一覧表示 */
+body.gallery .device{width:100%;max-width:1680px;height:auto;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible;display:flex;flex-wrap:wrap;justify-content:center;gap:var(--space-2xl) var(--space-xl)}
+body.gallery .screen{position:relative;inset:auto;display:flex;width:390px;height:844px;border:10px solid var(--color-fg-strong);border-radius:calc(var(--radius-xl) * 2);box-shadow:var(--shadow-3);overflow:visible}
+body.gallery .screen > .clip{border-radius:calc(var(--radius-xl) * 2 - 10px)}
+body.gallery .screen-label{display:block;position:absolute;top:-34px;left:0;right:0;text-align:center;font-family:var(--font-mono);font-size:12px;color:var(--color-fg-muted)}
+.clip{position:relative;flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+
+/* ===== Status bar / Header ===== */
+.statusbar{height:44px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:0 var(--space-xl);font-family:var(--font-mono);font-size:12px;font-weight:600;color:var(--color-fg-strong)}
+.header{height:56px;flex:none;display:flex;align-items:center;gap:var(--space-xs);padding:0 var(--space-xs);border-bottom:1px solid var(--color-border)}
+.icon-btn{width:44px;height:44px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius-md);font-size:20px;color:var(--color-fg-strong)}
+.icon-btn:active{background:var(--color-bg-hover)}
+.header-title{flex:1;min-width:0;display:flex;flex-direction:column}
+.header-title b{font-size:17px;font-weight:600;color:var(--color-fg-strong);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header-title span{font-size:12px;color:var(--color-fg-faint);display:flex;align-items:center;gap:6px;line-height:1.4}
+.page-title{flex:1;font-family:var(--font-serif);font-size:22px;font-weight:500;color:var(--color-fg-strong);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.content{flex:1;min-height:0;overflow-y:auto;padding:var(--space-lg) var(--space-md) var(--space-xl)}
+.content::-webkit-scrollbar{width:0}
+
+/* ===== Common components (DESIGN.html §4) ===== */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 var(--space-lg);border-radius:var(--radius-md);font-size:15px;font-weight:600;border:1px solid transparent;line-height:1}
+.btn-block{width:100%}
+.btn-primary{background:var(--color-accent);color:var(--color-on-accent)}
+.btn-primary:active{background:var(--color-accent-pressed)}
+.btn-primary:disabled{opacity:.4;cursor:default}
+.btn-secondary{background:var(--color-bg-elevated);color:var(--color-fg-strong);border-color:var(--color-border-strong)}
+.btn-secondary:active{background:var(--color-bg-hover)}
+.btn-ghost{background:transparent;color:var(--color-accent-text)}
+.btn-danger{background:var(--color-danger);color:#fff}
+.btn-sm{min-height:36px;padding:0 var(--space-md);font-size:13px;border-radius:var(--radius-sm)}
+
+.input{width:100%;min-height:44px;padding:0 var(--space-md);border:1px solid var(--color-border);border-radius:var(--radius-md);background:var(--color-bg-input);color:var(--color-fg);font-size:15px;font-family:var(--font-body)}
+.input::placeholder{color:var(--color-fg-faint)}
+.input:focus{border-color:var(--color-accent-text);outline:1px solid var(--color-accent-text)}
+
+.card{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-lg);padding:var(--space-lg);box-shadow:var(--shadow-1)}
+.stack{display:flex;flex-direction:column;gap:var(--space-md)}
+.section-h{font-size:17px;font-weight:600;color:var(--color-fg-strong);margin:var(--space-xl) 0 var(--space-sm);line-height:1.4}
+.section-h:first-child{margin-top:0}
+.row-h{font-size:15px;font-weight:600;color:var(--color-fg-strong);line-height:1.4}
+.muted{font-size:13px;color:var(--color-fg-muted);line-height:18px}
+.caption{font-size:12px;color:var(--color-fg-faint)}
+.mono{font-family:var(--font-mono);font-size:12px}
+
+.badge{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:var(--radius-pill);font-size:12px;font-weight:600;border:1px solid var(--color-border);color:var(--color-fg-muted);white-space:nowrap;background:var(--color-bg-elevated)}
+.dot{width:8px;height:8px;border-radius:4px;display:inline-block;flex:none}
+.dot.running{background:var(--color-running)}
+.dot.warning{background:var(--color-warning)}
+.dot.success{background:var(--color-success)}
+.dot.danger{background:var(--color-danger)}
+
+.chip{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border-radius:var(--radius-pill);border:1px solid var(--color-border);background:var(--color-bg);color:var(--color-fg-muted);font-family:var(--font-mono);font-size:12px;white-space:nowrap;flex:none}
+.chip:active{background:var(--color-bg-hover)}
+
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:var(--space-xs);margin-bottom:var(--space-md)}
+.tabs::-webkit-scrollbar{height:0}
+.tab{height:32px;padding:0 var(--space-md);border-radius:var(--radius-pill);border:1px solid var(--color-border);background:var(--color-bg-elevated);color:var(--color-fg-muted);font-size:13px;font-weight:600;flex:none}
+.tab[aria-selected="true"]{border-color:var(--color-accent-text);color:var(--color-accent-text)}
+
+.switch{position:relative;width:44px;height:26px;border-radius:var(--radius-pill);background:var(--color-border-strong);flex:none;transition:background .15s}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:10px;background:var(--color-bg-elevated);box-shadow:var(--shadow-1);transition:transform .15s}
+.switch[aria-checked="true"]{background:var(--color-accent)}
+.switch[aria-checked="true"]::after{transform:translateX(18px)}
+
+/* ===== Chat (HomeScreen) ===== */
+.chat{display:flex;flex-direction:column;gap:var(--space-lg)}
+.day{align-self:center;font-family:var(--font-mono);font-size:12px;color:var(--color-fg-faint)}
+.user-wrap{display:flex;justify-content:flex-end;padding-left:var(--space-2xl)}
+.user-bubble{background:var(--color-bg-hover);border-radius:20px;border-bottom-right-radius:6px;padding:10px 14px;color:var(--color-fg);font-size:15px;line-height:22px;max-width:100%;white-space:pre-wrap;word-break:break-word}
+.agent-turn{display:flex;flex-direction:column;gap:var(--space-sm)}
+.agent-head{display:flex;align-items:center;gap:var(--space-sm)}
+.avatar{width:26px;height:26px;border-radius:13px;background:rgba(185,90,58,.12);color:var(--color-accent);display:inline-flex;align-items:center;justify-content:center;font-size:14px;flex:none}
+.agent-name{color:var(--color-fg-muted);font-size:13px;font-weight:600}
+.agent-body{padding-left:34px;font-size:15px;line-height:23px;display:flex;flex-direction:column;gap:var(--space-sm)}
+.agent-body p{margin:0}
+.tool-line{font-family:var(--font-mono);font-size:12px;color:var(--color-fg-faint);line-height:18px}
+.code{font-family:var(--font-mono);font-size:12px;line-height:18px;background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-sm);padding:var(--space-sm) var(--space-md);color:var(--color-fg-strong);overflow-x:auto;white-space:pre}
+
+.approval{flex:none;display:flex;align-items:center;gap:var(--space-sm);padding:var(--space-sm) var(--space-md);background:var(--color-bg-sidebar);border-top:1px solid var(--color-border);font-size:13px;color:var(--color-fg)}
+.approval .txt{flex:1;min-width:0;line-height:18px}
+.approval .txt b{color:var(--color-fg-strong);font-weight:600}
+.approval[hidden]{display:none}
+
+.composer-wrap{flex:none;padding:var(--space-sm) var(--space-md) var(--space-md);background:var(--color-bg)}
+.composer{background:var(--color-bg-elevated);border:1px solid var(--color-border);border-radius:var(--radius-xl);padding:var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);box-shadow:var(--shadow-2)}
+.composer textarea{width:100%;min-height:44px;max-height:160px;resize:none;border:0;outline:0;background:transparent;color:var(--color-fg);font-family:var(--font-body);font-size:15px;line-height:21px;padding:var(--space-sm) 0}
+.composer textarea::placeholder{color:var(--color-fg-faint)}
+.composer .bar{display:flex;align-items:center;gap:var(--space-sm)}
+.chipset{display:flex;gap:6px;flex:1;overflow-x:auto;min-width:0}
+.chipset::-webkit-scrollbar{height:0}
+.send{width:34px;height:34px;flex:none;border-radius:var(--radius-sm);background:var(--color-accent);color:var(--color-on-accent);display:inline-flex;align-items:center;justify-content:center;font-size:17px;font-weight:700}
+.send:disabled{opacity:.4;cursor:default}
+.home-indicator{height:22px;flex:none;display:flex;align-items:center;justify-content:center;background:var(--color-bg)}
+.home-indicator::before{content:"";width:134px;height:5px;border-radius:var(--radius-pill);background:var(--color-fg-strong)}
+
+/* ===== Drawer / Sheet ===== */
+.layer{position:absolute;inset:0;z-index:20;display:none}
+.layer.open{display:block}
+.scrim{position:absolute;inset:0;background:var(--color-scrim)}
+.drawer{position:absolute;top:0;bottom:0;left:0;width:300px;background:var(--color-bg-sidebar);display:flex;flex-direction:column;padding:44px var(--space-md) var(--space-lg)}
+.drawer-brand{display:flex;align-items:center;gap:var(--space-sm);height:56px;padding:0 var(--space-sm)}
+.drawer-brand b{font-family:var(--font-serif);font-size:22px;font-weight:500;color:var(--color-fg-strong)}
+.nav{display:flex;flex-direction:column;gap:2px;margin-top:var(--space-sm)}
+.nav-item{display:flex;align-items:center;gap:var(--space-md);height:48px;padding:0 var(--space-md);border-radius:var(--radius-md);font-size:15px;font-weight:500;color:var(--color-fg);text-align:left;width:100%}
+.nav-item .ic{width:20px;text-align:center;font-size:18px;color:var(--color-fg-muted)}
+.nav-item:active{background:var(--color-bg-hover)}
+.nav-item[aria-current="page"]{background:var(--color-bg-hover);color:var(--color-fg-strong)}
+.nav-item[aria-current="page"] .ic{color:var(--color-accent-text)}
+.nav-label{font-size:12px;color:var(--color-fg-faint);padding:var(--space-lg) var(--space-md) var(--space-xs)}
+.recent{display:block;width:100%;text-align:left;padding:var(--space-sm) var(--space-md);border-radius:var(--radius-sm);font-size:13px;color:var(--color-fg-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent:active{background:var(--color-bg-hover)}
+.account{margin-top:auto;border-top:1px solid var(--color-border);padding-top:var(--space-md);display:flex;align-items:center;gap:var(--space-md)}
+.account .av{width:36px;height:36px;border-radius:18px;background:var(--color-bg-hover);display:inline-flex;align-items:center;justify-content:center;font-weight:600;color:var(--color-fg-strong);flex:none}
+.account .who{flex:1;min-width:0}
+.account .who b{display:block;font-size:15px;font-weight:600;color:var(--color-fg-strong)}
+
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--color-bg-elevated);border-radius:var(--radius-xl) var(--radius-xl) 0 0;box-shadow:var(--shadow-3);padding:var(--space-sm) var(--space-lg) var(--space-xl)}
+.grabber{width:36px;height:5px;border-radius:var(--radius-pill);background:var(--color-border-strong);margin:0 auto var(--space-md)}
+.sheet h2{font-family:var(--font-serif);font-size:22px;font-weight:500;color:var(--color-fg-strong);margin:0 0 var(--space-md);line-height:1.3}
+.option{display:flex;align-items:center;gap:var(--space-md);width:100%;min-height:56px;padding:var(--space-sm) var(--space-md);border:1px solid var(--color-border);border-radius:var(--radius-md);text-align:left;margin-bottom:var(--space-sm)}
+.option .grow{flex:1;min-width:0}
+.option .check{color:var(--color-accent-text);font-weight:700;visibility:hidden}
+.option[aria-checked="true"]{border-color:var(--color-accent-text)}
+.option[aria-checked="true"] .check{visibility:visible}
+
+/* ===== Login ===== */
+.login{flex:1;display:flex;flex-direction:column;padding:var(--space-2xl) var(--space-xl) var(--space-xl)}
+.logo{width:64px;height:64px;border-radius:var(--radius-lg);background:rgba(185,90,58,.12);color:var(--color-accent);display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:var(--space-xl)}
+.display{font-family:var(--font-serif);font-size:30px;font-weight:500;line-height:1.25;color:var(--color-fg-strong);margin:0 0 var(--space-md)}
+.lead{font-size:15px;line-height:23px;color:var(--color-fg-muted);margin:0}
+.login-actions{margin-top:auto;display:flex;flex-direction:column;gap:var(--space-md)}
+.divider{display:flex;align-items:center;gap:var(--space-md);font-size:12px;color:var(--color-fg-faint)}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--color-border)}
+.terms{text-align:center;font-size:12px;color:var(--color-fg-faint);line-height:18px}
+.terms button{color:var(--color-accent-text);font-size:12px}
+
+/* ===== Lists / Kanban / Projects ===== */
+.list-row{display:flex;align-items:center;gap:var(--space-md)}
+.list-row .grow{flex:1;min-width:0}
+.ellipsis{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.meta-line{display:flex;align-items:center;gap:var(--space-sm);flex-wrap:wrap;margin-top:var(--space-sm)}
+.col-h{display:flex;align-items:center;justify-content:space-between;margin:var(--space-xl) 0 var(--space-sm)}
+.col-h:first-child{margin-top:0}
+.col-h .count{font-family:var(--font-mono);font-size:12px;color:var(--color-fg-faint)}
+.kcard[hidden]{display:none}
+.col[hidden]{display:none}
+.progress{height:6px;border-radius:var(--radius-pill);background:var(--color-bg-hover);overflow:hidden;margin-top:var(--space-sm)}
+.progress span{display:block;height:100%;background:var(--color-running);border-radius:var(--radius-pill)}
+
+.qa-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md)}
+.qa{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-sm);text-align:left;min-height:120px}
+.qa:active{background:var(--color-bg-hover)}
+.qa .ic{width:36px;height:36px;border-radius:var(--radius-sm);background:var(--color-bg-sidebar);display:inline-flex;align-items:center;justify-content:center;font-size:18px}
+
+.pair-code{display:flex;gap:var(--space-sm);justify-content:center;margin:var(--space-lg) 0}
+.pair-code span{width:44px;height:56px;border-radius:var(--radius-md);border:1px solid var(--color-border-strong);background:var(--color-bg-elevated);display:inline-flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:22px;font-weight:600;color:var(--color-fg-strong)}
+
+/* ===== Toast ===== */
+.toast{position:fixed;left:50%;bottom:var(--space-2xl);transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;background:var(--color-fg-strong);color:var(--color-bg);padding:var(--space-sm) var(--space-lg);border-radius:var(--radius-pill);font-size:13px;font-weight:600;box-shadow:var(--shadow-3);transition:opacity .2s,transform .2s;z-index:100;white-space:nowrap}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ===== Responsive ===== */
+@media (max-width:430px){
+  body{background:var(--color-bg)}
+  body:not(.gallery) .viewer{padding:0;gap:0}
+  body:not(.gallery) .viewer-head{display:none}
+  body:not(.gallery) .device{width:100vw;height:100vh;height:100dvh;border:0;border-radius:0;box-shadow:none}
+  body.gallery .screen{width:calc(100vw - var(--space-xl))}
+}
+@media (max-width:360px){
+  .qa-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="viewer">
+  <div class="viewer-head">
+    <h1>Orchestra Mobile — UI モックアップ</h1>
+    <p>静的モックです。表示データはすべて架空のサンプルで、認証・通信は行いません。☰・チップ・送信・スイッチなどの操作は画面内だけで再現しています。</p>
+    <div class="toolbar" role="toolbar" aria-label="表示切替">
+      <button class="tb-btn" data-show="login">ログイン</button>
+      <button class="tb-btn" data-show="home" aria-pressed="true">会話ホーム</button>
+      <button class="tb-btn" data-show="projects">プロジェクト</button>
+      <button class="tb-btn" data-show="kanban">カンバン</button>
+      <button class="tb-btn" data-show="quick">クイックアクション</button>
+      <button class="tb-btn" data-show="mcp">MCP</button>
+      <button class="tb-btn" data-show="remote">リモート接続</button>
+      <span class="tb-sep"></span>
+      <button class="tb-btn" id="galleryToggle" aria-pressed="false">一覧表示</button>
+    </div>
+  </div>
+
+  <div class="device" id="device">
+
+    <!-- ================= 1. Login ================= -->
+    <section class="screen" data-screen="login" aria-label="ログイン">
+      <div class="screen-label">01 · LoginScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <div class="login">
+          <div class="logo">✻</div>
+          <h2 class="display">Orchestra で<br>エージェントと話す</h2>
+          <p class="lead">手元の Mac やクラウドで動くコーディングエージェントに、スマートフォンから指示・承認・確認ができます。</p>
+          <div class="login-actions">
+            <button class="btn btn-primary btn-block" data-go="home" data-toast="GitHub でサインインしました（モック）">GitHub でサインイン</button>
+            <button class="btn btn-secondary btn-block" data-go="home" data-toast="Division アカウントで続行（モック）">Division アカウントで続行</button>
+            <div class="divider">または</div>
+            <button class="btn btn-ghost btn-block" data-go="remote">ペアリングコードで接続</button>
+            <p class="terms">続行すると <button data-toast="利用規約シート（モック）">利用規約</button> と <button data-toast="プライバシーポリシー（モック）">プライバシーポリシー</button> に同意したものとみなされます。</p>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+    <!-- ================= 2. Home (Chat) ================= -->
+    <section class="screen active" data-screen="home" aria-label="会話ホーム">
+      <div class="screen-label">02 · HomeScreen（会話）</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-action="open-drawer" aria-label="メニューを開く">☰</button>
+          <div class="header-title">
+            <b>配色を Claude 風に整える</b>
+            <span><i class="dot success"></i>接続済み · MacBook Pro</span>
+          </div>
+          <button class="icon-btn" data-action="new-chat" aria-label="新しい会話">✎</button>
+        </header>
+
+        <div class="content" id="chatScroll">
+          <div class="chat" id="chatLog">
+            <div class="day">今日 9:12</div>
+            <div class="user-wrap"><div class="user-bubble">この画面の配色を Claude 風に整えてください。背景は暖かい色で、余白は広めに。</div></div>
+            <div class="agent-turn">
+              <div class="agent-head"><span class="avatar">✻</span><span class="agent-name">エージェント</span><span class="badge"><i class="dot success"></i>完了</span></div>
+              <div class="agent-body">
+                <p>了解しました。地は暖かいオフホワイトにして、主な操作だけテラコッタを使います。<code class="mono">src/theme.ts</code> のトークンを更新しました。</p>
+                <div class="tool-line">● ツールを 3 回実行　⎿ 読み取り・検索・置換</div>
+                <div class="code">colors.bg      = '#faf9f5'
+colors.accent  = '#b95a3a'
+radius.input   = 24</div>
+              </div>
+            </div>
+            <div class="user-wrap"><div class="user-bubble">型チェックとテストも回しておいて。</div></div>
+            <div class="agent-turn">
+              <div class="agent-head"><span class="avatar">✻</span><span class="agent-name">エージェント</span><span class="badge" id="runBadge"><i class="dot warning"></i>承認待ち</span></div>
+              <div class="agent-body">
+                <p>テストを実行する前に、スナップショットの更新（ファイルの書き込み）について承認をお願いします。</p>
+                <div class="tool-line">● Bash　⎿ npm run typecheck … 0 errors</div>
+                <div class="tool-line">○ Bash　⎿ npx jest --runInBand -u（承認待ち）</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="approval" id="approvalBar">
+          <span class="dot warning"></span>
+          <div class="txt"><b>承認待ち 1 件</b> · jest のスナップショットを更新</div>
+          <button class="btn btn-secondary btn-sm" data-action="deny">拒否</button>
+          <button class="btn btn-primary btn-sm" data-action="approve">許可</button>
+        </div>
+
+        <div class="composer-wrap">
+          <div class="composer">
+            <textarea id="composerInput" rows="1" placeholder="エージェントに頼みたいことを書く…" aria-label="メッセージ"></textarea>
+            <div class="bar">
+              <div class="chipset">
+                <button class="chip" data-action="toast" data-toast="実行先: クラウド / ローカルを切替（モック）">☁ クラウド ▾</button>
+                <button class="chip" data-action="toast" data-toast="リポジトリ選択（モック）">⑂ orchestra-mobile ▾</button>
+                <button class="chip" data-action="open-sheet" id="modelChip">⚙ Opus ▾</button>
+                <button class="chip" data-action="toast" data-toast="今日のコスト: $1.84">📊 $1.84</button>
+              </div>
+              <button class="send" id="sendBtn" disabled aria-label="送信">↑</button>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+
+        <!-- Drawer -->
+        <div class="layer" id="drawerLayer">
+          <div class="scrim" data-action="close-layers"></div>
+          <nav class="drawer" aria-label="ナビゲーション">
+            <div class="drawer-brand"><span class="avatar">✻</span><b>Orchestra</b></div>
+            <div class="nav">
+              <button class="nav-item" data-go="home" aria-current="page"><span class="ic">💬</span>会話</button>
+              <button class="nav-item" data-go="projects"><span class="ic">📁</span>プロジェクト</button>
+              <button class="nav-item" data-go="kanban"><span class="ic">▦</span>カンバン</button>
+              <button class="nav-item" data-go="quick"><span class="ic">⚡</span>クイックアクション</button>
+              <button class="nav-item" data-go="mcp"><span class="ic">⛓</span>MCP サーバー</button>
+              <button class="nav-item" data-go="remote"><span class="ic">📡</span>リモート接続</button>
+            </div>
+            <div class="nav-label">最近の会話</div>
+            <button class="recent" data-action="close-layers">配色を Claude 風に整える</button>
+            <button class="recent" data-action="close-layers">ログイン画面の文言修正</button>
+            <button class="recent" data-action="close-layers">EAS ビルドの失敗を調査</button>
+            <div class="account">
+              <span class="av">K</span>
+              <div class="who"><b>Kenta</b><span class="caption">kenta@example.com</span></div>
+              <button class="btn btn-ghost btn-sm" data-go="login" data-toast="ログアウトしました（モック）">ログアウト</button>
+            </div>
+          </nav>
+        </div>
+
+        <!-- Model sheet -->
+        <div class="layer" id="sheetLayer">
+          <div class="scrim" data-action="close-layers"></div>
+          <div class="sheet" role="dialog" aria-label="モデルを選ぶ">
+            <div class="grabber"></div>
+            <h2>モデルを選ぶ</h2>
+            <button class="option" role="radio" aria-checked="true" data-model="Opus"><span class="grow"><span class="row-h">Opus</span><br><span class="muted">難しい設計・長い作業に</span></span><span class="check">✓</span></button>
+            <button class="option" role="radio" aria-checked="false" data-model="Sonnet"><span class="grow"><span class="row-h">Sonnet</span><br><span class="muted">日常の実装と修正に（推奨）</span></span><span class="check">✓</span></button>
+            <button class="option" role="radio" aria-checked="false" data-model="Haiku"><span class="grow"><span class="row-h">Haiku</span><br><span class="muted">短い質問・素早い確認に</span></span><span class="check">✓</span></button>
+            <button class="btn btn-secondary btn-block" data-action="close-layers">閉じる</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= 3. Projects ================= -->
+    <section class="screen" data-screen="projects" aria-label="プロジェクト">
+      <div class="screen-label">03 · ProjectsScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-go="home" aria-label="戻る">←</button>
+          <div class="page-title">プロジェクト</div>
+        </header>
+        <div class="content">
+          <input class="input" placeholder="プロジェクトを検索" aria-label="検索" style="margin-bottom:var(--space-lg)">
+          <div class="stack">
+            <div class="card">
+              <div class="list-row">
+                <div class="grow"><div class="row-h ellipsis">orchestra-mobile</div><div class="muted ellipsis">github.com/division/orchestra-mobile</div></div>
+                <span class="badge"><i class="dot running"></i>作業中</span>
+              </div>
+              <div class="meta-line"><span class="caption mono">main · 3 セッション</span><span class="caption mono">更新 2 分前</span></div>
+              <div style="display:flex;gap:var(--space-sm);margin-top:var(--space-md)">
+                <button class="btn btn-primary btn-sm" data-go="home" data-toast="新しいセッションを起動しました">セッションを起動</button>
+                <button class="btn btn-secondary btn-sm" data-go="kanban">カンバン</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="list-row">
+                <div class="grow"><div class="row-h ellipsis">division-relay</div><div class="muted ellipsis">github.com/division/division-relay</div></div>
+                <span class="badge"><i class="dot warning"></i>承認待ち</span>
+              </div>
+              <div class="meta-line"><span class="caption mono">feat/codec · 1 セッション</span><span class="caption mono">更新 18 分前</span></div>
+            </div>
+            <div class="card">
+              <div class="list-row">
+                <div class="grow"><div class="row-h ellipsis">docs-site</div><div class="muted ellipsis">github.com/division/docs-site</div></div>
+                <span class="badge"><i class="dot success"></i>完了</span>
+              </div>
+              <div class="meta-line"><span class="caption mono">main · PR #128 マージ済み</span><span class="caption mono">昨日</span></div>
+            </div>
+            <div class="card">
+              <div class="list-row">
+                <div class="grow"><div class="row-h ellipsis">billing-worker</div><div class="muted ellipsis">github.com/division/billing-worker</div></div>
+                <span class="badge"><i class="dot danger"></i>エラー</span>
+              </div>
+              <div class="meta-line"><span class="caption mono">fix/retry · テスト 2 件失敗</span><span class="caption mono">3 日前</span></div>
+            </div>
+            <button class="btn btn-secondary btn-block" data-toast="GitHub リポジトリの選択（モック）">＋ リポジトリを追加</button>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+    <!-- ================= 4. Kanban ================= -->
+    <section class="screen" data-screen="kanban" aria-label="カンバン">
+      <div class="screen-label">04 · KanbanScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-go="home" aria-label="戻る">←</button>
+          <div class="page-title">カンバン</div>
+          <button class="icon-btn" data-toast="タスクを追加（モック）" aria-label="タスクを追加">＋</button>
+        </header>
+        <div class="content">
+          <div class="tabs" role="tablist" id="kanbanTabs">
+            <button class="tab" role="tab" aria-selected="true" data-filter="all">すべて 7</button>
+            <button class="tab" role="tab" aria-selected="false" data-filter="todo">未着手 2</button>
+            <button class="tab" role="tab" aria-selected="false" data-filter="doing">作業中 2</button>
+            <button class="tab" role="tab" aria-selected="false" data-filter="review">レビュー 1</button>
+            <button class="tab" role="tab" aria-selected="false" data-filter="done">完了 2</button>
+          </div>
+
+          <div class="col" data-col="todo">
+            <div class="col-h"><span class="section-h" style="margin:0">未着手</span><span class="count">2</span></div>
+            <div class="stack">
+              <div class="card kcard"><div class="row-h">ダークモードのトークン適用</div><div class="muted">DESIGN.html の dark 値を theme.ts に追加</div><div class="meta-line"><span class="chip">designer</span><span class="caption mono">#T-14</span></div></div>
+              <div class="card kcard"><div class="row-h">通知の許可フローを見直す</div><div class="muted">初回起動時に説明シートを出す</div><div class="meta-line"><span class="chip">planner</span><span class="caption mono">#T-15</span></div></div>
+            </div>
+          </div>
+
+          <div class="col" data-col="doing">
+            <div class="col-h"><span class="section-h" style="margin:0">作業中</span><span class="count">2</span></div>
+            <div class="stack">
+              <div class="card kcard"><div class="list-row"><div class="grow row-h">会話画面の配色を整理</div><span class="badge"><i class="dot running"></i>作業中</span></div><div class="progress"><span style="width:65%"></span></div><div class="meta-line"><span class="chip">coder</span><span class="caption mono">4/6 ステップ</span></div></div>
+              <div class="card kcard"><div class="list-row"><div class="grow row-h">jest スナップショット更新</div><span class="badge"><i class="dot warning"></i>承認待ち</span></div><div class="meta-line"><span class="chip">tester</span><span class="caption mono">#T-12</span></div></div>
+            </div>
+          </div>
+
+          <div class="col" data-col="review">
+            <div class="col-h"><span class="section-h" style="margin:0">レビュー</span><span class="count">1</span></div>
+            <div class="stack">
+              <div class="card kcard"><div class="row-h">Composer のチップを畳む</div><div class="muted">既定値のチップを非表示にし、変更時だけ表示</div><div class="meta-line"><span class="chip">reviewer</span><span class="caption mono">PR #212</span><button class="btn btn-ghost btn-sm" data-toast="PR を開く（モック）">PR を見る</button></div></div>
+            </div>
+          </div>
+
+          <div class="col" data-col="done">
+            <div class="col-h"><span class="section-h" style="margin:0">完了</span><span class="count">2</span></div>
+            <div class="stack">
+              <div class="card kcard"><div class="list-row"><div class="grow row-h">ドロワーを完全非表示に</div><span class="badge"><i class="dot success"></i>完了</span></div></div>
+              <div class="card kcard"><div class="list-row"><div class="grow row-h">ログイン文言の修正</div><span class="badge"><i class="dot success"></i>完了</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+    <!-- ================= 5. Quick Actions ================= -->
+    <section class="screen" data-screen="quick" aria-label="クイックアクション">
+      <div class="screen-label">05 · QuickActionsScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-go="home" aria-label="戻る">←</button>
+          <div class="page-title">クイックアクション</div>
+        </header>
+        <div class="content">
+          <p class="muted" style="margin:0 0 var(--space-lg)">よく使う指示をワンタップで会話に入れます。送信前に内容を編集できます。</p>
+          <div class="qa-grid">
+            <button class="card qa" data-prefill="型チェックとテストを実行して、失敗があれば修正してください。"><span class="ic">✓</span><span class="row-h">テストを回す</span><span class="muted">typecheck + jest</span></button>
+            <button class="card qa" data-prefill="直近の変更をレビューして、問題点を箇条書きで教えてください。"><span class="ic">🔍</span><span class="row-h">変更をレビュー</span><span class="muted">差分を要約して指摘</span></button>
+            <button class="card qa" data-prefill="現在のブランチで Pull Request を作成してください。"><span class="ic">⑂</span><span class="row-h">PR を作成</span><span class="muted">説明文も自動で</span></button>
+            <button class="card qa" data-prefill="EAS ビルドのログを確認して、失敗の原因を調べてください。"><span class="ic">🛠</span><span class="row-h">ビルドを調査</span><span class="muted">EAS のログを確認</span></button>
+            <button class="card qa" data-prefill="この 1 日の作業内容を短くまとめてください。"><span class="ic">📝</span><span class="row-h">今日のまとめ</span><span class="muted">日報の下書き</span></button>
+            <button class="card qa" data-toast="アクションの追加（モック）"><span class="ic">＋</span><span class="row-h">アクションを追加</span><span class="muted">自分の定型文を登録</span></button>
+          </div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+    <!-- ================= 6. MCP ================= -->
+    <section class="screen" data-screen="mcp" aria-label="MCP サーバー">
+      <div class="screen-label">06 · McpScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-go="home" aria-label="戻る">←</button>
+          <div class="page-title">MCP サーバー</div>
+        </header>
+        <div class="content">
+          <h3 class="section-h">接続中</h3>
+          <div class="stack">
+            <div class="card list-row"><div class="grow"><div class="row-h">github</div><div class="muted">Issue・PR・リポジトリの操作 · ツール 24</div></div><button class="switch" role="switch" aria-checked="true" aria-label="github" data-name="github"></button></div>
+            <div class="card list-row"><div class="grow"><div class="row-h">filesystem</div><div class="muted">ワークスペース内のファイル読み書き · ツール 8</div></div><button class="switch" role="switch" aria-checked="true" aria-label="filesystem" data-name="filesystem"></button></div>
+            <div class="card list-row"><div class="grow"><div class="row-h">playwright</div><div class="muted">ブラウザ操作と画面キャプチャ · ツール 12</div></div><button class="switch" role="switch" aria-checked="false" aria-label="playwright" data-name="playwright"></button></div>
+          </div>
+          <h3 class="section-h">エラー</h3>
+          <div class="card">
+            <div class="list-row"><div class="grow"><div class="row-h">sentry</div><div class="muted">認証トークンの期限が切れています</div></div><span class="badge"><i class="dot danger"></i>エラー</span></div>
+            <div style="margin-top:var(--space-md)"><button class="btn btn-secondary btn-sm" data-toast="再接続しました（モック）">再接続</button></div>
+          </div>
+          <div style="margin-top:var(--space-xl)"><button class="btn btn-primary btn-block" data-toast="サーバー追加（モック）">サーバーを追加</button></div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+    <!-- ================= 7. Remote ================= -->
+    <section class="screen" data-screen="remote" aria-label="リモート接続">
+      <div class="screen-label">07 · RemoteScreen</div>
+      <div class="clip">
+        <div class="statusbar"><span>9:41</span><span>●●● ▮</span></div>
+        <header class="header">
+          <button class="icon-btn" data-go="home" aria-label="戻る">←</button>
+          <div class="page-title">リモート接続</div>
+        </header>
+        <div class="content">
+          <div class="card">
+            <div class="list-row"><div class="grow"><div class="row-h">MacBook Pro</div><div class="muted">Orchestra Desktop 2.4.0 · リレー経由</div></div><span class="badge"><i class="dot success"></i>接続済み</span></div>
+            <div class="meta-line"><span class="caption mono">遅延 42ms</span><span class="caption mono">暗号化 有効</span></div>
+            <div style="margin-top:var(--space-md)"><button class="btn btn-secondary btn-sm" data-toast="切断しました（モック）">切断</button></div>
+          </div>
+
+          <h3 class="section-h">新しい端末とペアリング</h3>
+          <p class="muted" style="margin:0">デスクトップ版の「モバイルと接続」に表示された 6 桁のコードを入力してください。</p>
+          <div class="pair-code" aria-label="ペアリングコード"><span>4</span><span>8</span><span>2</span><span>9</span><span>1</span><span>7</span></div>
+          <button class="btn btn-primary btn-block" data-go="home" data-toast="ペアリングしました（モック）">接続する</button>
+          <button class="btn btn-ghost btn-block" style="margin-top:var(--space-sm)" data-toast="QR スキャナ（モック）">QR コードで読み取る</button>
+
+          <h3 class="section-h">以前の端末</h3>
+          <div class="card list-row"><div class="grow"><div class="row-h">Mac mini（自宅）</div><div class="muted">最終接続 3 日前</div></div><span class="badge">オフライン</span></div>
+        </div>
+        <div class="home-indicator"></div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+  var device = document.getElementById('device');
+  var toastEl = document.getElementById('toast');
+  var input = document.getElementById('composerInput');
+  var sendBtn = document.getElementById('sendBtn');
+  var chatLog = document.getElementById('chatLog');
+  var chatScroll = document.getElementById('chatScroll');
+  var toastTimer;
+
+  function toast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ toastEl.classList.remove('show'); }, 1800);
+  }
+
+  function closeLayers(){
+    document.querySelectorAll('.layer.open').forEach(function(l){ l.classList.remove('open'); });
+  }
+
+  function show(id){
+    closeLayers();
+    device.querySelectorAll('.screen').forEach(function(s){
+      s.classList.toggle('active', s.dataset.screen === id);
+    });
+    document.querySelectorAll('[data-show]').forEach(function(b){
+      b.setAttribute('aria-pressed', String(b.dataset.show === id));
+    });
+    document.querySelectorAll('.nav-item').forEach(function(n){
+      if (n.dataset.go === id) n.setAttribute('aria-current','page'); else n.removeAttribute('aria-current');
+    });
+    if (document.body.classList.contains('gallery')) {
+      var target = device.querySelector('[data-screen="' + id + '"]');
+      if (target) target.scrollIntoView({behavior:'smooth', block:'center'});
+    }
+  }
+
+  function esc(s){
+    return s.replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; });
+  }
+
+  function scrollChat(){ chatScroll.scrollTop = chatScroll.scrollHeight; }
+
+  function updateSend(){ sendBtn.disabled = input.value.trim().length === 0; }
+
+  function autoGrow(){
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+  }
+
+  function send(){
+    var text = input.value.trim();
+    if (!text) return;
+    var u = document.createElement('div');
+    u.className = 'user-wrap';
+    u.innerHTML = '<div class="user-bubble">' + esc(text) + '</div>';
+    chatLog.appendChild(u);
+    input.value = '';
+    autoGrow(); updateSend(); scrollChat();
+
+    var a = document.createElement('div');
+    a.className = 'agent-turn';
+    a.innerHTML = '<div class="agent-head"><span class="avatar">✻</span><span class="agent-name">エージェント</span>' +
+      '<span class="badge"><i class="dot running"></i>作業中</span></div>' +
+      '<div class="agent-body"><div class="tool-line">● 考えています…</div></div>';
+    setTimeout(function(){ chatLog.appendChild(a); scrollChat(); }, 400);
+    setTimeout(function(){
+      a.querySelector('.badge').innerHTML = '<i class="dot success"></i>完了';
+      a.querySelector('.agent-body').innerHTML =
+        '<p>承知しました。モックのため実際の処理は行っていませんが、ここにエージェントの返答が表示されます。</p>' +
+        '<div class="tool-line">● ツールを 2 回実行　⎿ 読み取り・検索</div>';
+      scrollChat();
+    }, 1600);
+  }
+
+  input.addEventListener('input', function(){ autoGrow(); updateSend(); });
+  sendBtn.addEventListener('click', send);
+
+  document.getElementById('galleryToggle').addEventListener('click', function(){
+    var on = document.body.classList.toggle('gallery');
+    this.setAttribute('aria-pressed', String(on));
+    closeLayers();
+  });
+
+  document.addEventListener('click', function(e){
+    var el;
+
+    if ((el = e.target.closest('[data-show]'))) { show(el.dataset.show); return; }
+
+    if ((el = e.target.closest('[data-filter]'))) {
+      var f = el.dataset.filter;
+      document.querySelectorAll('#kanbanTabs .tab').forEach(function(t){ t.setAttribute('aria-selected', String(t === el)); });
+      document.querySelectorAll('[data-col]').forEach(function(c){ c.hidden = !(f === 'all' || c.dataset.col === f); });
+      return;
+    }
+
+    if ((el = e.target.closest('.switch'))) {
+      var on = el.getAttribute('aria-checked') !== 'true';
+      el.setAttribute('aria-checked', String(on));
+      toast(el.dataset.name + ' を' + (on ? '有効' : '無効') + 'にしました');
+      return;
+    }
+
+    if ((el = e.target.closest('[data-model]'))) {
+      document.querySelectorAll('[data-model]').forEach(function(o){ o.setAttribute('aria-checked', String(o === el)); });
+      document.getElementById('modelChip').textContent = '⚙ ' + el.dataset.model + ' ▾';
+      closeLayers();
+      toast('モデルを ' + el.dataset.model + ' に変更しました');
+      return;
+    }
+
+    if ((el = e.target.closest('[data-prefill]'))) {
+      show('home');
+      input.value = el.dataset.prefill;
+      autoGrow(); updateSend();
+      input.focus();
+      return;
+    }
+
+    el = e.target.closest('[data-action],[data-go],[data-toast]');
+    if (!el) return;
+    var action = el.dataset.action;
+
+    if (action === 'open-drawer') {
+      if (document.body.classList.contains('gallery')) { toast('単体表示でドロワーを確認できます'); return; }
+      document.getElementById('drawerLayer').classList.add('open');
+    } else if (action === 'open-sheet') {
+      if (document.body.classList.contains('gallery')) { toast('単体表示でシートを確認できます'); return; }
+      document.getElementById('sheetLayer').classList.add('open');
+    } else if (action === 'close-layers') {
+      closeLayers();
+    } else if (action === 'approve' || action === 'deny') {
+      document.getElementById('approvalBar').hidden = true;
+      var badge = document.getElementById('runBadge');
+      badge.innerHTML = action === 'approve' ? '<i class="dot success"></i>完了' : '<i class="dot danger"></i>拒否';
+      toast(action === 'approve' ? '許可しました。テストを実行します' : '拒否しました');
+    } else if (action === 'new-chat') {
+      toast('新しい会話を開始（モック）');
+    }
+
+    if (el.dataset.go) show(el.dataset.go);
+    if (el.dataset.toast) toast(el.dataset.toast);
+  });
+
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeLayers(); });
+})();
+</script>
+</body>
+</html>

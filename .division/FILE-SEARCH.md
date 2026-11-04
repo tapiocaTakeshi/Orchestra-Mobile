@@ -1,0 +1,255 @@
+# プロジェクト共有コンテキスト（file-searcher が生成）
+
+> これはワークスペースの現状を要約した共有コンテキストです。すべてのロールが同じものを参照しています。
+> ここに本文が載っていないファイルは、必要になった時点であなたのツール（read_file / search_files 等）で読み取ってください。
+
+## サマリ
+
+## ワークスペース: `/home/box/projects/Orchestra-Mobile`
+
+### 反復ファイルサーチ サマリ（3 回 / 最大 3）
+
+- 反復 1: 17 / 116 件 (15%) のファイルを本文込みで読み込みました（キーワード: 続けて, coder, ロールでモックアップ通り作って, 計画の続きから, ---, 自動添付, 直前ターンの, reviewer, 指摘, division, オーケストレーションが直前で生成した最終レビュー結果です, ユーザーの新規メッセージに沿って改善を進める際の参考にしてください, 判定, 合格, 所見, 達成条件の充足, 条件, .division/design/, index.html, orchestra-mobile-mockup.html, readme.md, check-mockup.cjs, ファイルがあります, つ目の検証コマンドでは, の存在と, data-screen, 個あることが確認できました, つの, html, は外部依存のない静的な, css, 390, 844, の端末フレームに画面を描いています, ブラウザで開けば画面が見える構成です, ただし, 実ブラウザでの描画確認は未実施です, の実行では, playwright, がなく, ブラウザチェックが, warn, でスキップされています, 判定はコードの内容に基づく推定です, の抜粋から, ヘッダ, 承認待ちの帯, ユーザー吹き出し, エージェント発話, 入力欄, チップ, 送信ボタンが確認できます, 表示テキストは, でログイン, エージェントに頼みたいことを書く, 承認待ち, 承認する, カンバン, タスクを追加, などです, の必須要素, 12, 件もすべて通っています, にはドロワーやシートの開閉, 承認・拒否, トースト, 画面遷移が実装されています, デザイン整合, の結果では, ライトのトークン, 39, 個とダークのトークン, 21, 個が, design.html, と一致しています, root, 以外に, hex, 色の直書きはなく, 文字サイズも, 11px, 以上です, 変数も未定義のものはありません, 問題点, 合否には影響しないが直すべきもの, 1., major, が実態とずれています, 成果物表に, 画面, としています, 実際の主役は, 画面の, 検証コマンドも, を前提にしています, 初めて開く人は, 機能の少ない, に誘導されます, 2., しか検査しません, mockpath, 固定, には, トークン一致, 直書き色, 文字サイズ, 必須要素のチェックが一切かかっていません, .statusbar, font-family, などを独自に定義しており, と乖離している可能性があります, 3., minor, 回の実行結果は同一で, 新しい情報がありません, 実ブラウザ検証, 環境がなく実施できていません, 4., の役割が不明です, 画面数が違い, .device, .screen, 方式, もう一方は, .phone, figure, 方式です, 同じ, を二重管理しているので, 片方だけ直すとずれていきます, 5., をそのまま使用, はコメントだけで, 機械的な裏付けがありません, 6., nit, 入力内容の抜粋が中略されているため, 画面すべての中身は確認できていません, 判定は, 見えている範囲と実行結果に基づいています, 改善指示, 次
+
+## 関連ファイル
+
+- `docs/app-store-review.md`
+- `.github/workflows/deploy-pages.yml`
+- `src/design/screenMap.ts` _(FollowUpTask, MockAction, ScreenSpec, SCREEN_MAP, NON_MOCK_SCREENS, DRAWER_ORDER)_
+- `src/lib/divisionAuth.ts` _(getDivisionSupabase, DivisionSession, getDivisionAccessToken, signInWithDivision, restoreDivisionSession, signOutDivision)_
+- `src/lib/divisionAuthConfig.ts` _(DIVISION_SUPABASE_URL, DIVISION_SUPABASE_ANON_KEY, DIVISION_REMOTE_SESSION_TABLE, DIVISION_PROFILES_TABLE, DIVISION_CREDIT_TRANSACTION_TABLE, DIVISION_ASSIGNMENT_POST_TABLE)_
+- `src/lib/divisionBilling.ts` _(DIVISION_DASHBOARD_PLAN_URL, DIVISION_DASHBOARD_CREDITS_URL, allowsPurchases, DivisionPlanId, isPaidDivisionPlan, DivisionProfile)_
+- `src/lib/divisionCloud.ts` _(CloudSessionStatus, CloudWorkspaceInfo, CloudSession, CloudGoalLoopMode, DEFAULT_GOAL_LOOP, isGoalLoopMode)_
+- `src/lib/divisionDecisions.ts` _(DecisionKind, DecisionStatus, DecisionPriority, DecisionOptionId, DecisionOption, DecisionEvidence)_
+- `src/lib/divisionGitHub.ts` _(GitHubStatus, GitHubRepo, GitHubRepoPage, GitHubBranches, GITHUB_UNAVAILABLE, toGitHubStatus)_
+- `src/lib/divisionMcp.ts` _(McpAuthType, McpCatalogEntry, McpServer, McpTool, McpTestResult, toMcpCatalogEntry)_
+- `src/lib/divisionProjects.ts` _(CloudProjectOption, CloudProjectSource, toProjectOption, listServerProjects, mergeProjectOptions, projectOptionsFromPc)_
+- `src/lib/divisionRouting.ts` _(RoutingPolicy, DEFAULT_ROUTING_POLICY, QUOTE_ROLES, RoutingBenchmark, RoutingQuote, RoutingPlan)_
+- `src/lib/divisionSession.ts` _(loadDivisionSession, saveDivisionSession, clearDivisionSession)_
+- `src/lib/divisionSocial.ts` _(DIVISION_USER_BLOCK_TABLE, DIVISION_CONTENT_REPORT_TABLE, DIVISION_MODERATION_FUNCTION, describeError, DEFAULT_FEED_LIMIT, listAssignmentPosts)_
+- `src/screens/DiscoverScreen.tsx` _(DiscoverScreen)_
+- `src/screens/HomeScreen.tsx` _(HomeScreen)_
+- `src/screens/KanbanScreen.tsx`
+- `docs/design-claude-style.md`
+- `src/lib/__tests__/divisionGitHub.test.ts`
+- `src/components/GitHubRepoPicker.tsx` _(GitHubConnection, useGitHubConnection, GitHubAccountRow, GitHubConnectPanel, GitHubRepoPicker, GitHubRepoSelection)_
+- `src/state/DivisionAuthContext.tsx` _(useDivisionAuth, DivisionAuthProvider)_
+- `src/lib/__tests__/divisionAuth.test.ts`
+- `src/lib/__tests__/divisionBilling.test.ts`
+- `src/lib/__tests__/divisionCloud.test.ts`
+
+## その他の発見ファイル
+
+- `index.html`
+- `orchestra-mobile-mockup.html`
+- `readme.md`
+- `check-mockup.cjs`
+- `design.html`
+- `.division/design/readme.md`
+- `.division/design/check-mockup.cjs`
+- `.division/design/index.html`
+- `.orchestra/kanban.json`
+- `App.tsx`
+- `README.md`
+- `app.config.ts`
+- `app.json`
+- `babel.config.js`
+- `eas.json`
+- `index.ts`
+- `ios/ci_scripts/ci_post_clone.sh`
+- `package-lock.json`
+- `package.json`
+- `scripts/eas-preflight.js`
+- `scripts/generate-ios-icon.cjs`
+- `src/__mocks__/expo-notifications.ts`
+- `src/__mocks__/feather.tsx`
+- `src/__mocks__/imageAsset.ts`
+- `src/__mocks__/safeArea.tsx`
+- `src/api/__tests__/client.test.ts`
+- `src/api/__tests__/integration.test.ts`
+- `src/api/__tests__/relay.test.ts`
+- `src/api/client.ts`
+- `src/api/relay.ts`
+- `src/api/relayCodec.ts`
+- `src/api/types.ts`
+- `src/components/CloudModelPicker.tsx`
+- `src/components/CloudProjectPicker.tsx`
+- `src/components/CloudPullRequest.tsx`
+- `src/components/DecisionInbox.tsx`
+- `src/components/Markdown.tsx`
+- `src/components/TermsSheet.tsx`
+- `src/components/kit.tsx`
+- `src/components/overlays.tsx`
+- `src/components/ui.tsx`
+- `src/design/__tests__/designTokens.test.ts`
+- `src/design/tokens.ts`
+- `src/lib/__tests__/connect.test.ts`
+- `src/lib/__tests__/divisionCloudGoal.test.ts`
+- `src/lib/__tests__/divisionCloudProject.test.ts`
+- `src/lib/__tests__/divisionCloudPullRequest.test.ts`
+- `src/lib/__tests__/divisionDecisions.test.ts`
+- `src/lib/__tests__/divisionMcp.test.ts`
+- `src/lib/__tests__/divisionProjects.test.ts`
+- `src/lib/__tests__/divisionSocialModeration.test.ts`
+- `src/lib/__tests__/format.test.ts`
+- `src/lib/__tests__/homeSessions.test.ts`
+- `src/lib/__tests__/kanban.test.ts`
+- `src/lib/__tests__/markdown.test.ts`
+- `src/lib/__tests__/moderation.test.ts`
+- `src/lib/__tests__/navigation.test.ts`
+- `src/lib/__tests__/remoteSession.test.ts`
+- `src/lib/__tests__/searchedSites.test.ts`
+- `src/lib/__tests__/social.test.ts`
+- `src/lib/__tests__/terms.test.ts`
+- `src/lib/__tests__/tuning.test.ts`
+- `src/lib/connect.ts`
+- `src/lib/format.ts`
+- `src/lib/homeSessions.ts`
+- `src/lib/kanban.ts`
+- `src/lib/legal.ts`
+- `src/lib/markdown.ts`
+- `src/lib/moderation.ts`
+- `src/lib/remoteNotifications.ts`
+- `src/lib/remoteSession.ts`
+- `src/lib/social.ts`
+- `src/lib/terms.ts`
+- `src/lib/tuning.ts`
+- `src/navigation.ts`
+- `src/screens/CloudAgentsScreen.tsx`
+- `src/screens/LoginScreen.tsx`
+- `src/screens/McpScreen.tsx`
+- `src/screens/ProjectsScreen.tsx`
+- `src/screens/QuickActionsScreen.tsx`
+- `src/screens/RemoteScreen.tsx`
+- `src/screens/SettingsScreen.tsx`
+- `src/screens/SocialScreen.tsx`
+- `src/screens/TuningScreen.tsx`
+- `src/screens/__tests__/DiscoverScreen.test.tsx`
+- `src/screens/__tests__/HomeScreen.test.tsx`
+- `src/screens/__tests__/ProjectsScreen.test.tsx`
+- `src/screens/__tests__/ProjectsScreenAssignments.test.tsx`
+- `src/screens/__tests__/RemoteScreen.test.tsx`
+- `src/state/AppContext.tsx`
+- `src/state/__tests__/cloudStorage.test.ts`
+- `src/state/cloudStorage.ts`
+- `src/state/storage.ts`
+- `src/state/termsStorage.ts`
+- `src/state/tuningStorage.ts`
+- `src/state/useRemoteDevices.ts`
+- `src/theme.ts`
+- `src/theme/__tests__/tokens.test.ts`
+- `src/theme/tokens.ts`
+- `tsconfig.json`
+- `src/components/AppStorePurchaseCard.tsx`
+- `src/lib/appStorePurchases.ts`
+- `TuningScreen.tsx`
+- `_shared/appstore.ts`
+- `LoginScreen.tsx`
+- `TermsSheet.tsx`
+- `SocialScreen.tsx`
+- `supabase/migrations/20261026_app_review_moderation_iap.sql`
+- `supabase/functions/_shared/appstore.ts`
+- `Node.js`
+- `dist/index.html`
+- `dist/404.html`
+- `divisionAuthConfig.ts`
+- `divisionGitHub.ts`
+- `browser/react/src/void-login-tsx/divisionAuth.ts`
+- `divisionSession.ts`
+- `...filter`
+- `void-login-tsx/divisionBilling.ts`
+- `.division/REVIEW.md`
+- `REVIEW.md`
+- `...current`
+- `...incoming`
+- `src/a.ts`
+- `...base`
+- `...new`
+- `...task`
+- `...input`
+- `...division`
+- `...acc`
+- `divisionCloud.ts`
+- `.division/projects.json`
+- `...pc`
+- `AutoRouting.tsx`
+- `...args`
+- `state/storage.ts`
+- `lib/moderation.ts`
+- `spacing.md`
+- `radius.md`
+- `../../assets/logo.png`
+- `fontSize.md`
+- `kanban-tsx/shared.tsx`
+- `CloudAgentsScreen.tsx`
+- `...over`
+- `octo/my.app`
+- `...ids`
+- `a.ts`
+
+## 依存関係
+
+- src/lib/divisionAuth.ts -> src/lib/divisionAuthConfig.ts
+- src/lib/divisionBilling.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionBilling.ts -> src/lib/divisionAuthConfig.ts
+- src/lib/divisionCloud.ts -> src/lib/divisionAuthConfig.ts
+- src/lib/divisionCloud.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionCloud.ts -> src/lib/format.ts
+- src/lib/divisionCloud.ts -> src/theme.ts
+- src/lib/divisionDecisions.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionDecisions.ts -> src/lib/divisionCloud.ts
+- src/lib/divisionDecisions.ts -> src/theme.ts
+- src/lib/divisionGitHub.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionGitHub.ts -> src/lib/divisionCloud.ts
+- src/lib/divisionMcp.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionMcp.ts -> src/lib/divisionCloud.ts
+- src/lib/divisionProjects.ts -> src/api/types.ts
+- src/lib/divisionProjects.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionProjects.ts -> src/lib/divisionCloud.ts
+- src/lib/divisionRouting.ts -> src/lib/divisionAuthConfig.ts
+- src/lib/divisionRouting.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionSession.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionSocial.ts -> src/lib/divisionAuth.ts
+- src/lib/divisionSocial.ts -> src/lib/divisionAuthConfig.ts
+- src/lib/divisionSocial.ts -> src/lib/moderation.ts
+- src/lib/divisionSocial.ts -> src/lib/social.ts
+- src/screens/DiscoverScreen.tsx -> src/components/ui.tsx
+- src/screens/DiscoverScreen.tsx -> src/lib/divisionAuth.ts
+- src/screens/DiscoverScreen.tsx -> src/lib/connect.ts
+- src/screens/DiscoverScreen.tsx -> src/lib/format.ts
+- src/screens/DiscoverScreen.tsx -> src/lib/remoteSession.ts
+- src/screens/DiscoverScreen.tsx -> src/navigation.ts
+- src/screens/DiscoverScreen.tsx -> src/state/AppContext.tsx
+- src/screens/DiscoverScreen.tsx -> src/state/DivisionAuthContext.tsx
+- src/screens/DiscoverScreen.tsx -> src/theme.ts
+- src/screens/HomeScreen.tsx -> src/screens/CloudAgentsScreen.tsx
+- src/screens/HomeScreen.tsx -> src/screens/RemoteScreen.tsx
+- src/screens/HomeScreen.tsx -> src/lib/remoteSession.ts
+- src/screens/HomeScreen.tsx -> src/components/ui.tsx
+- src/screens/HomeScreen.tsx -> src/navigation.ts
+- src/screens/HomeScreen.tsx -> src/state/AppContext.tsx
+- src/screens/HomeScreen.tsx -> src/state/DivisionAuthContext.tsx
+- src/screens/HomeScreen.tsx -> src/theme.ts
+- src/screens/KanbanScreen.tsx -> src/api/client.ts
+- src/screens/KanbanScreen.tsx -> src/api/types.ts
+- src/screens/KanbanScreen.tsx -> src/components/ui.tsx
+- src/screens/KanbanScreen.tsx -> src/components/CloudProjectPicker.tsx
+- src/screens/KanbanScreen.tsx -> src/components/GitHubRepoPicker.tsx
+- src/screens/KanbanScreen.tsx -> src/lib/divisionAuth.ts
+- src/screens/KanbanScreen.tsx -> src/lib/divisionCloud.ts
+- src/screens/KanbanScreen.tsx -> src/lib/divisionGitHub.ts
+- src/screens/KanbanScreen.tsx -> src/lib/divisionProjects.ts
+- src/screens/KanbanScreen.tsx -> src/lib/format.ts
+- src/screens/KanbanScreen.tsx -> src/lib/kanban.ts
+- src/screens/KanbanScreen.tsx -> src/navigation.ts
+- src/screens/KanbanScreen.tsx -> src/state/AppContext.tsx
+- src/screens/KanbanScreen.tsx -> src/state/DivisionAuthContext.tsx
+- src/screens/KanbanScreen.tsx -> src/state/cloudStorage.ts
+- src/screens/KanbanScreen.tsx -> src/theme.ts
+- src/lib/__tests__/divisionGitHub.test.ts -> src/lib/divisionCloud.ts
+- src/lib/__tests__/divisionGitHub.test.ts -> src/lib/divisionGitHub.ts
+- src/components/GitHubRepoPicker.tsx -> src/lib/divisionAuth.ts
+
+## 主要シンボル
+
+`FollowUpTask`, `MockAction`, `ScreenSpec`, `SCREEN_MAP`, `NON_MOCK_SCREENS`, `DRAWER_ORDER`, `TASK_ASSIGNMENT`, `getDivisionSupabase`, `DivisionSession`, `getDivisionAccessToken`, `signInWithDivision`, `restoreDivisionSession`, `signOutDivision`, `RemoteSessionRow`, `listRemoteSessions`, `RemoteSessionChangeCallback`, `subscribeToRemoteSessions`, `DIVISION_SUPABASE_URL`, `DIVISION_SUPABASE_ANON_KEY`, `DIVISION_REMOTE_SESSION_TABLE`, `DIVISION_PROFILES_TABLE`, `DIVISION_CREDIT_TRANSACTION_TABLE`, `DIVISION_ASSIGNMENT_POST_TABLE`, `DIVISION_ASSIGNMENT_POST_LIKE_TABLE`, `DIVISION_IMPORT_POST_FUNCTION`, `DIVISION_FUNCTIONS_BASE_URL`, `DIVISION_API_BASE_URL`, `DIVISION_DASHBOARD_PLAN_URL`, `DIVISION_DASHBOARD_CREDITS_URL`, `allowsPurchases`, `DivisionPlanId`, `isPaidDivisionPlan`, `DivisionProfile`, `CreditTransaction`, `fetchDivisionProfile`, `listCreditTransactions`, `CloudSessionStatus`, `CloudWorkspaceInfo`, `CloudSession`, `CloudGoalLoopMode`, `DEFAULT_GOAL_LOOP`, `isGoalLoopMode`, `GOAL_LOOP_LABELS`, `GOAL_LOOP_HINTS`, `CloudPullRequest`, `CloudSessionEventType`, `CloudSessionEvent`, `CloudChange`, `DecisionKind`, `DecisionStatus`, `DecisionPriority`, `DecisionOptionId`, `DecisionOption`, `DecisionEvidence`, `DecisionInvestigation`, `Decision`, `DecisionInbox`, `toDecision`, `DECISION_KIND_LABELS`, `decisionColor`, `GitHubStatus`, `GitHubRepo`, `GitHubRepoPage`, `GitHubBranches`, `GITHUB_UNAVAILABLE`, `toGitHubStatus`, `toGitHubRepo`, `getGitHubStatus`, `startGitHubConnect`, `disconnectGitHub`, `repoListQuery`, `listGitHubRepos`, `McpAuthType`, `McpCatalogEntry`, `McpServer`, `McpTool`, `McpTestResult`, `toMcpCatalogEntry`, `toMcpServer`, `needsToken`
