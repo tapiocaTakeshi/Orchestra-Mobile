@@ -28,6 +28,13 @@ export interface ScreenSpec {
   mockLabel: string;
   /** 実装ファイル（リポジトリルート相対） */
   file: string;
+  /** 文言が複数ファイルに分かれる画面 (会話ホームは HomeScreen が CloudAgentsScreen / RemoteScreen を埋め込む) */
+  extraFiles?: string[];
+  /**
+   * モックにはあるがアプリに機能が無いため、STRICT_MOCKUP の文言チェックから外すもの。
+   * 見た目だけのダミーは置かない方針 (機能を作ったらここから消す)。
+   */
+  notImplemented?: string[];
   /** ドロワー（.nav-item）での表示名。無ければ null */
   drawerLabel: string | null;
   headerType: 'none' | 'chat' | 'page-back';
@@ -47,6 +54,8 @@ export const SCREEN_MAP: ScreenSpec[] = [
     id: 'login',
     mockLabel: '01 · LoginScreen',
     file: 'src/screens/LoginScreen.tsx',
+    // 規約・プライバシーポリシーのリンクは LoginScreen が描く LegalLinks / TermsCheckbox にある
+    extraFiles: ['src/components/TermsSheet.tsx'],
     drawerLabel: null,
     headerType: 'none',
     elements: ['statusbar', 'logo(✻ 64x64 radius-lg)', 'display(serif 30)', 'lead', 'btn-primary', 'btn-secondary', 'divider', 'btn-ghost', 'terms'],
@@ -59,6 +68,8 @@ export const SCREEN_MAP: ScreenSpec[] = [
       '利用規約',
       'プライバシーポリシー',
     ],
+    // GitHub OAuth / Division の別アカウント導線 / ペアリングコードはアプリに無い (認証はメール+パスワードのみ)
+    notImplemented: ['GitHub でサインイン', 'Division アカウントで続行', 'または', 'ペアリングコードで接続'],
     actions: [
       { kind: 'navigate', label: 'GitHub でサインイン', to: 'home', toast: 'GitHub でサインインしました' },
       { kind: 'navigate', label: 'Division アカウントで続行', to: 'home', toast: 'Division アカウントで続行' },
@@ -74,6 +85,7 @@ export const SCREEN_MAP: ScreenSpec[] = [
     id: 'home',
     mockLabel: '02 · HomeScreen（会話）',
     file: 'src/screens/HomeScreen.tsx',
+    extraFiles: ['src/screens/CloudAgentsScreen.tsx', 'src/screens/RemoteScreen.tsx', 'src/components/ui.tsx'],
     drawerLabel: '会話',
     headerType: 'chat',
     elements: [
@@ -180,7 +192,8 @@ export const SCREEN_MAP: ScreenSpec[] = [
   {
     id: 'remote',
     mockLabel: 'RemoteScreen',
-    file: 'src/screens/RemoteScreen.tsx',
+    // モックの「リモート接続」(端末の接続・切断) はアプリでは SettingsScreen。RemoteScreen は会話ホームの PC チャット
+    file: 'src/screens/SettingsScreen.tsx',
     drawerLabel: 'リモート接続',
     headerType: 'page-back',
     elements: ['header(← / page-title)', 'pair-code(44x56 mono 22 ×桁数)', 'card'],

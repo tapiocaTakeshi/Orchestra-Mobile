@@ -200,7 +200,7 @@ export const McpScreen = () => {
 	const { session } = useDivisionAuth();
 	const toast = useToast();
 
-	const [tab, setTab] = useState<Tab>('store');
+	const [tab, setTab] = useState<Tab>('installed');
 	const [catalog, setCatalog] = useState<McpCatalogEntry[] | null>(null);
 	const [servers, setServers] = useState<McpServer[] | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -343,12 +343,18 @@ export const McpScreen = () => {
 
 	const installedCount = servers?.length ?? 0;
 
+	/** 接続テストに失敗したサーバー (エラーに並べる) */
+	const failed = (server: McpServer) => {
+		const t = tests[server.id];
+		return !!t && t !== 'running' && !t.ok;
+	};
+
 	return (
 		<Screen>
 			<ScreenHeader title='MCP サーバー' />
 			<View style={styles.tabs}>
 				<SegmentedControl
-					options={[{ value: 'store', label: 'ストア' }, { value: 'installed', label: `インストール済み${installedCount ? ` (${installedCount})` : ''}` }]}
+					options={[{ value: 'installed', label: `接続中${installedCount ? ` (${installedCount})` : ''}` }, { value: 'store', label: 'ストア' }]}
 					value={tab}
 					onChange={setTab}
 				/>
@@ -402,22 +408,35 @@ export const McpScreen = () => {
 							</View>
 						</>
 					) : servers.length ? (
-						servers.map(server => {
-							const entry = server.catalogId ? entryById.get(server.catalogId) : undefined;
-							return (
-								<ServerCard
-									key={server.id}
-									server={server}
-									entry={entry}
-									busy={busyId === server.id}
-									test={tests[server.id]}
-									onToggle={enabled => void toggle(server, enabled)}
-									onTest={() => void runTest(server)}
-									onUpdateToken={entry && entry.auth.type !== 'none' ? () => setTokenSheet({ entry, server }) : undefined}
-									onDelete={() => void remove(server)}
-								/>
-							);
-						})
+						<>
+							{/* モックアップの並び: 接続中 / 無効 / エラー (接続テストに失敗したもの) */}
+							{([
+								['接続中', servers.filter(sv => sv.enabled && !failed(sv))],
+								['無効', servers.filter(sv => !sv.enabled && !failed(sv))],
+								['エラー', servers.filter(failed)],
+							] as const).filter(([, list]) => list.length > 0).map(([title, list]) => (
+								<View key={title} style={styles.group}>
+									<SectionTitle right={<Badge label={`${list.length}`} color={title === 'エラー' ? colors.danger : colors.fgFaint} />}>{title}</SectionTitle>
+									{list.map(server => {
+										const entry = server.catalogId ? entryById.get(server.catalogId) : undefined;
+										return (
+											<ServerCard
+												key={server.id}
+												server={server}
+												entry={entry}
+												busy={busyId === server.id}
+												test={tests[server.id]}
+												onToggle={enabled => void toggle(server, enabled)}
+												onTest={() => void runTest(server)}
+												onUpdateToken={entry && entry.auth.type !== 'none' ? () => setTokenSheet({ entry, server }) : undefined}
+												onDelete={() => void remove(server)}
+											/>
+										);
+									})}
+								</View>
+							))}
+							<Button title='サーバーを追加' variant='secondary' icon='plus' onPress={() => setTab('store')} />
+						</>
 					) : (
 						<EmptyState
 							icon='package'

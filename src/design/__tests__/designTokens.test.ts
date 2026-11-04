@@ -89,8 +89,9 @@ describe('screen map', () => {
   (process.env.STRICT_MOCKUP === '1' ? it : it.skip)('各画面ファイルにモックの必須文言がある', () => {
     const lacks: Record<string, string[]> = {};
     SCREEN_MAP.forEach((s) => {
-      const src = read(path.join(ROOT, s.file)) || '';
-      const miss = s.requiredTexts.filter((t) => !src.includes(t));
+      const src = [s.file, ...(s.extraFiles ?? [])].map((f) => read(path.join(ROOT, f)) || '').join('\n');
+      const skip = new Set(s.notImplemented ?? []);
+      const miss = s.requiredTexts.filter((t) => !skip.has(t) && !src.includes(t));
       if (miss.length) lacks[s.id] = miss;
     });
     expect(lacks).toEqual({});

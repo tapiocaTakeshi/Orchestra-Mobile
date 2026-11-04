@@ -44,6 +44,11 @@ jest.mock('../../state/DivisionAuthContext', () => ({
 	}),
 }));
 
+// ドロワーの「最近の会話」はネットワークに出さない
+jest.mock('../../lib/divisionCloud', () => ({
+	listCloudSessions: jest.fn(async () => [{ id: 's1', title: 'README を直す', prompt: '' }]),
+}));
+
 const mockToastShow = jest.fn();
 jest.mock('../../components/ui', () => {
 	const actual = jest.requireActual('../../components/ui');

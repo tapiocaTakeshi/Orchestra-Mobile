@@ -638,7 +638,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 				</View>
 
 				<View style={styles.field}>
-					<SectionTitle>モデル</SectionTitle>
+					<SectionTitle>モデルを選ぶ</SectionTitle>
 					<CloudModelPicker
 						projects={projects}
 						value={modelSelectionOf(draft)}

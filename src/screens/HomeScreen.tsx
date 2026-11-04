@@ -14,12 +14,13 @@
  *   - コスト                   … 入力欄の「コスト」から、書いている指示の見積もりと方針を開く
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BackHandler, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CloudAgentsScreen } from './CloudAgentsScreen';
 import { RemoteScreen } from './RemoteScreen';
 import { REMOTE_CONNECTION_LABELS } from '../lib/remoteSession';
+import { CloudSession, listCloudSessions } from '../lib/divisionCloud';
 import { Drawer, Icon, IconButton, IconName, Muted, Sheet, confirmAction, useToast } from '../components/ui';
 import { PageKey, DRAWER_PAGES, canOpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
@@ -63,6 +64,19 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 	onLogout: () => void;
 }) => {
 	const toast = useToast();
+	const { session } = useDivisionAuth();
+	// 「最近の会話」: Division のクラウドセッションを新しい順に数件。開いたときだけ読む (失敗したら出さない)
+	const [recent, setRecent] = useState<CloudSession[] | null>(null);
+	const sessionRef = useRef(session);
+	sessionRef.current = session;
+	const token = session?.accessToken;
+	useEffect(() => {
+		const current = sessionRef.current;
+		if (!open || !current) return;
+		let alive = true;
+		listCloudSessions(current, 5).then(list => { if (alive) setRecent(list); }, () => { if (alive) setRecent([]); });
+		return () => { alive = false; };
+	}, [open, token]);
 	return (
 		<Drawer open={open} onClose={onClose}>
 			<ScrollView style={styles.flex} contentContainerStyle={styles.drawerBody} showsVerticalScrollIndicator={false}>
@@ -83,6 +97,17 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 						/>
 					);
 				})}
+				<Text style={styles.drawerSection}>最近の会話</Text>
+				{recent && recent.length > 0 ? recent.map(item => (
+					<Pressable
+						key={item.id}
+						accessibilityRole='button'
+						onPress={() => onOpenPage('cloud')}
+						style={({ pressed }) => [styles.drawerRecent, pressed && styles.sheetRowPressed]}
+					>
+						<Text style={styles.drawerRecentText} numberOfLines={1}>{item.title || item.prompt}</Text>
+					</Pressable>
+				)) : <Text style={styles.drawerRecentEmpty}>{recent ? 'まだ会話はありません' : '読み込み中…'}</Text>}
 			</ScrollView>
 			<Pressable
 				accessibilityRole='button'
@@ -269,6 +294,10 @@ const styles = StyleSheet.create({
 	drawerItemLabel: { flex: 1, color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
 	drawerItemLabelLocked: { color: colors.fgFaint },
 	drawerItemCurrent: { backgroundColor: colors.bgHover },
+	drawerSection: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '600', paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xs },
+	drawerRecent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm },
+	drawerRecentText: { color: colors.fgMuted, fontSize: fontSize.sm },
+	drawerRecentEmpty: { color: colors.fgFaint, fontSize: fontSize.xs, paddingHorizontal: spacing.md },
 	drawerLogout: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.sm },
 	drawerLogoutText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600' },
 	drawerAccount: {

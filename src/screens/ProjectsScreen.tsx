@@ -37,6 +37,7 @@ import {
 	ScreenHeader,
 	SectionTitle,
 	Sheet,
+	StatusBadge,
 	confirmAction,
 	useToast,
 } from '../components/ui';
@@ -44,6 +45,7 @@ import { useCloudProjects } from '../components/CloudProjectPicker';
 import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
 import { publishAssignmentPost } from '../lib/divisionSocial';
 import { defaultPostTitle, toPostAssignments } from '../lib/social';
+import type { OpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
@@ -353,7 +355,37 @@ const ShareSheet = ({
 	);
 };
 
-export const ProjectsScreen = () => {
+/** 検索欄の文字で名前・ID を絞り込む (大文字小文字は区別しない)。 */
+const matchesQuery = (query: string, ...fields: (string | undefined)[]) => {
+	const q = query.trim().toLowerCase();
+	return !q || fields.some(f => (f ?? '').toLowerCase().includes(q));
+};
+
+/** モックアップの検索欄 (一覧の上)。 */
+const ProjectSearch = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
+	<Input
+		accessibilityLabel='検索'
+		value={value}
+		onChangeText={onChange}
+		placeholder='プロジェクトを検索'
+		autoCapitalize='none'
+		autoCorrect={false}
+		style={styles.search}
+	/>
+);
+
+/** カード下の操作 (モックアップ: 「セッションを起動」「カンバン」)。 */
+const ProjectCardActions = ({ onOpenPage, connected }: { onOpenPage?: OpenPage; connected: boolean }) => (
+	onOpenPage ? (
+		<Row style={styles.cardActions}>
+			<Button title='セッションを起動' size='sm' onPress={() => onOpenPage('cloud')} />
+			{connected ? <Button title='カンバン' size='sm' variant='secondary' onPress={() => onOpenPage('kanban')} /> : null}
+		</Row>
+	) : null
+);
+
+export const ProjectsScreen = ({ onOpenPage }: { onOpenPage?: OpenPage } = {}) => {
+	const [query, setQuery] = useState('');
 	const { snapshot, error, refresh, isRefreshing, invalidate, client } = useApp();
 	const { session } = useDivisionAuth();
 
@@ -416,6 +448,7 @@ export const ProjectsScreen = () => {
 					contentContainerStyle={styles.content}
 					refreshControl={<RefreshControl refreshing={cloudProjects.loading} onRefresh={cloudProjects.reload} tintColor={colors.fgMuted} />}
 				>
+					<ProjectSearch value={query} onChange={setQuery} />
 					<Card>
 						<Row>
 							<Icon name='cloud' size={16} color={colors.accentText} />
@@ -432,19 +465,19 @@ export const ProjectsScreen = () => {
 						<EmptyState icon='layers' title='プロジェクトがありません' detail='PC の Orchestra か Web で作って保存すると、ここに表示されます。' />
 					) : null}
 
-					{cloudProjects.projects.map(project => (
+					{cloudProjects.projects.filter(p => matchesQuery(query, p.name, p.id)).map(project => (
 						<Card key={project.id}>
 							<Row style={styles.spread}>
 								<View style={styles.flex}>
-									<Row>
-										<Body numberOfLines={1}>{project.name}</Body>
-										{project.active ? <Badge label='PC で有効' icon='check-circle' color={colors.success} /> : null}
-									</Row>
+									<Body numberOfLines={1}>{project.name}</Body>
 									<Muted numberOfLines={1}>{project.id}</Muted>
 								</View>
+								<StatusBadge label={project.active ? 'PC で有効' : '待機中'} color={project.active ? colors.success : colors.fgFaint} />
 							</Row>
+							<ProjectCardActions onOpenPage={onOpenPage} connected={false} />
 						</Card>
 					))}
+					{onOpenPage ? <Button title='＋ リポジトリを追加' variant='secondary' onPress={() => onOpenPage('cloud')} /> : null}
 				</ScrollView>
 			</Screen>
 		);
@@ -462,7 +495,7 @@ export const ProjectsScreen = () => {
 	return (
 		<Screen>
 			<ScreenHeader
-				title='Division'
+				title='プロジェクト'
 				right={(
 					<>
 						<IconButton
@@ -492,20 +525,19 @@ export const ProjectsScreen = () => {
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
+				<ProjectSearch value={query} onChange={setQuery} />
 				{division.projects.length === 0 ? (
 					<EmptyState icon='layers' title='プロジェクトがありません' />
 				) : null}
 
-				{division.projects.map(project => (
+				{division.projects.filter(p => matchesQuery(query, p.name, p.projectId)).map(project => (
 					<Card key={project.projectId || project.name}>
 						<Row style={styles.spread}>
 							<View style={styles.flex}>
-								<Row>
-									<Body numberOfLines={1}>{project.name}</Body>
-									{project.isActive ? <Badge label='有効' icon='check-circle' color={colors.success} /> : null}
-								</Row>
-								<Muted numberOfLines={1}>{project.projectId || 'ID 未設定'} · {project.agents.length} 役割</Muted>
+								<Body numberOfLines={1}>{project.name}</Body>
+								<Muted numberOfLines={1}>{project.projectId || 'ID 未設定'}</Muted>
 							</View>
+							<StatusBadge label={project.isActive ? '有効' : '無効'} color={project.isActive ? colors.success : colors.fgFaint} />
 							<IconButton
 								icon='share-2'
 								accessibilityLabel={`${project.name} の割り当てを共有`}
@@ -523,6 +555,7 @@ export const ProjectsScreen = () => {
 							))}
 							{project.agents.length > 4 ? <Muted>他 {project.agents.length - 4} 件</Muted> : null}
 						</View>
+						<Text style={styles.metaLine} numberOfLines={1}>{project.agents.length} 役割</Text>
 
 						<Row>
 							<Button
@@ -538,6 +571,7 @@ export const ProjectsScreen = () => {
 								onPress={() => void act(() => client.activateProject(project.projectId, false))}
 							/>
 						</Row>
+						<ProjectCardActions onOpenPage={onOpenPage} connected />
 					</Card>
 				))}
 
@@ -568,7 +602,10 @@ export const ProjectsScreen = () => {
 						</Row>
 					</Card>
 				) : (
-					<Button title='プロジェクトを追加' icon='plus' variant='secondary' onPress={() => setAdding(true)} />
+					<>
+						<Button title='プロジェクトを追加' icon='plus' variant='secondary' onPress={() => setAdding(true)} />
+						{onOpenPage ? <Button title='＋ リポジトリを追加' variant='secondary' onPress={() => onOpenPage('cloud')} /> : null}
+					</>
 				)}
 			</ScrollView>
 
@@ -600,6 +637,9 @@ export const ProjectsScreen = () => {
 const styles = StyleSheet.create({
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
+	search: { marginBottom: spacing.sm },
+	cardActions: { marginTop: spacing.sm },
+	metaLine: { color: colors.fgFaint, fontSize: fontSize.xs, fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }) },
 	centered: { alignSelf: 'center' },
 	bannerFlush: { margin: 0 },
 	roleChips: {
@@ -625,7 +665,7 @@ const styles = StyleSheet.create({
 	content: {
 		paddingHorizontal: spacing.lg,
 		paddingBottom: spacing.xl,
-		gap: spacing.xs,
+		gap: spacing.md,
 	},
 	agentRow: {
 		borderWidth: 1,

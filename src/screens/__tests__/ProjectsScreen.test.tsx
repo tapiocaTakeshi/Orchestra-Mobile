@@ -18,6 +18,13 @@ import { act, create, ReactTestInstance, ReactTestRenderer } from 'react-test-re
 
 // --- 外部依存のモック --------------------------------------------------------
 
+// TextInput (react-native-web) は node 環境で document を参照するので、検索欄は軽量スタブにする
+jest.mock('react-native', () => {
+	const actual = jest.requireActual('react-native');
+	const ReactActual = jest.requireActual('react');
+	return { ...actual, TextInput: (props: object) => ReactActual.createElement('input-stub', props) };
+});
+
 jest.mock('../../state/AppContext', () => ({
 	useApp: () => ({
 		connection: null,

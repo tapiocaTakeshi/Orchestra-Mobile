@@ -123,7 +123,7 @@ const GOAL_LOOP_HINTS: Record<GoalLoopMode, string> = {
 
 /** 承認の確認の文言。ツールの承認と、フローのレビュー (目標ループの「毎回確認」など) で変える。 */
 const approvalCopy = (review: PendingReview | null | undefined) => {
-	if (!review) return { title: 'ツールの実行を承認しますか？', note: '承認するまでエージェントは止まったままです。', approve: '承認して続行', reject: '取り消す', approved: '承認しました', rejected: '取り消しました' };
+	if (!review) return { title: 'ツールの実行を承認しますか？', note: '承認するまでエージェントは止まったままです。', approve: '許可', reject: '拒否', approved: '許可しました', rejected: '拒否しました' };
 	if (review.flowRole === 'goal-loop') {
 		return {
 			title: `🎯 ${review.title}（ラウンド ${review.completed} / ${review.total} 完了）`,
@@ -134,7 +134,7 @@ const approvalCopy = (review: PendingReview | null | undefined) => {
 			rejected: 'ここで止めました',
 		};
 	}
-	return { title: `${review.title} を確認してください`, note: '承認するまでエージェントは止まったままです。', approve: '承認して続行', reject: '却下', approved: '承認しました', rejected: '却下しました' };
+	return { title: `${review.title} を確認してください`, note: '承認するまでエージェントは止まったままです。', approve: '許可', reject: '拒否', approved: '許可しました', rejected: '拒否しました' };
 };
 
 const BADGE_COLORS: Record<ChatConnectionBadge['tone'], string> = {
@@ -399,6 +399,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				{/* 承認の確認は入力欄のすぐ上 (指が届く場所) に出す */}
 				{isAwaiting ? (
 					<View accessibilityRole='alert' style={styles.approval}>
+						<Text style={styles.approvalKicker}>承認待ち 1 件</Text>
 						<Text style={styles.approvalTitle}>{approval.title}</Text>
 						{chat?.pendingReview?.content ? (
 							<ScrollView style={styles.approvalBody} nestedScrollEnabled>
@@ -407,8 +408,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						) : null}
 						<Muted>{approval.note}</Muted>
 						<View style={styles.approvalButtons}>
-							<Button title={approval.approve} disabled={lost} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
 							<Button title={approval.reject} variant='secondary' disabled={lost} onPress={() => void act(() => client.rejectTool(), approval.rejected)} style={styles.flex} />
+							<Button title={approval.approve} disabled={lost} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
 						</View>
 					</View>
 				) : null}
@@ -643,6 +644,7 @@ const styles = StyleSheet.create({
 		borderColor: withAlpha(colors.warning, '66'),
 		backgroundColor: colors.bgElevated,
 	},
+	approvalKicker: { color: colors.warning, fontSize: fontSize.xs, fontWeight: '700' },
 	approvalTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
 	approvalBody: { maxHeight: 180 },
 	approvalText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20 },

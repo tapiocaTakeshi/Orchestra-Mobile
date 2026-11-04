@@ -821,6 +821,12 @@ const BoardSettings = ({ onClose }: { onClose: () => void }) => {
 	);
 };
 
+const ALL_COLUMNS = '__all__';
+
+/** 列の役割ごとの名前 (モックアップ: 未着手 / 作業中 / 完了 / 失敗)。役割のない列は付けた名前のまま。 */
+const ROLE_LABELS: Partial<Record<KanbanColumnRole, string>> = { todo: '未着手', 'in-progress': '作業中', done: '完了', error: '失敗' };
+const columnLabel = (column: KanbanColumn): string => ROLE_LABELS[column.role] ?? column.title;
+
 export const KanbanScreen = ({ onOpenPage }: {
 	/** 「クラウドで開く」でクラウドのページに移る */
 	onOpenPage?: OpenPage;
@@ -830,12 +836,12 @@ export const KanbanScreen = ({ onOpenPage }: {
 	const toast = useToast();
 	const act = useAction();
 	const { width } = useWindowDimensions();
-	const boardRef = useRef<ScrollView | null>(null);
 
 	const [filterText, setFilterText] = useState('');
 	const [openTaskId, setOpenTaskId] = useState<string | null>(null);
 	const [newTaskTitle, setNewTaskTitle] = useState('');
-	const [activeColumn, setActiveColumn] = useState(0);
+	/** タブで選んだ列 (ALL_COLUMNS ならすべて) */
+	const [columnFilter, setColumnFilter] = useState<string>(ALL_COLUMNS);
 	const [showFilters, setShowFilters] = useState(false);
 	const [showSettings, setShowSettings] = useState(false);
 	const [priorityFilter, setPriorityFilter] = useState<KanbanPriority[]>([]);
@@ -868,18 +874,7 @@ export const KanbanScreen = ({ onOpenPage }: {
 		list.includes(value) ? list.filter(v => v !== value) : [...list, value];
 
 	// 画面幅に対して少し狭くして、隣のカラムの端が見えるようにする (横に続くと分かる)。
-	const columnWidth = Math.min(320, Math.max(240, width * 0.82));
-	const columnStride = columnWidth + spacing.md;
 
-	const onBoardScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-		const index = Math.round(e.nativeEvent.contentOffset.x / columnStride);
-		setActiveColumn(prev => (prev === index ? prev : index));
-	}, [columnStride]);
-
-	const jumpToColumn = useCallback((index: number) => {
-		setActiveColumn(index);
-		boardRef.current?.scrollTo({ x: index * columnStride, animated: true });
-	}, [columnStride]);
 
 	/**
 	 * タスクをクラウドエージェントで動かす。作成できた時点でトーストに「クラウドで開く」を出し、
@@ -1043,52 +1038,39 @@ export const KanbanScreen = ({ onOpenPage }: {
 				) : null}
 			</View>
 
-			{views.length > 1 ? (
-				<ScrollView
-					horizontal
-					showsHorizontalScrollIndicator={false}
-					contentContainerStyle={styles.columnTabs}
-					style={styles.columnTabsBar}
-				>
-					{views.map((view, index) => {
-						const selected = index === activeColumn;
-						return (
-							<Pressable
-								key={view.column.id}
-								accessibilityRole='tab'
-								accessibilityState={{ selected }}
-								accessibilityLabel={`${view.column.title}、${view.tasks.length} 件`}
-								onPress={() => jumpToColumn(index)}
-								style={[styles.columnTab, selected && styles.columnTabActive]}
-							>
-								<View style={[styles.columnDot, { backgroundColor: view.column.color || colors.fgFaint }]} />
-								<Text style={[styles.columnTabText, selected && styles.columnTabTextActive]} numberOfLines={1}>{view.column.title}</Text>
-								<Text style={[styles.columnTabCount, view.overWipLimit && { color: colors.warning }]}>{view.tasks.length}</Text>
-							</Pressable>
-						);
-					})}
-				</ScrollView>
-			) : null}
+			{/* モックアップのタブ: 「すべて N」と列ごとの件数。選んだ列だけを縦に並べる (すべてなら全列) */}
+			<ScrollView
+				horizontal
+				showsHorizontalScrollIndicator={false}
+				contentContainerStyle={styles.columnTabs}
+				style={styles.columnTabsBar}
+			>
+				{[{ key: ALL_COLUMNS, label: 'すべて', count: views.reduce((n, v) => n + v.tasks.length, 0) },
+					...views.map(v => ({ key: v.column.id, label: columnLabel(v.column), count: v.tasks.length }))].map(tab => {
+					const selected = tab.key === columnFilter;
+					return (
+						<Pressable
+							key={tab.key}
+							accessibilityRole='tab'
+							accessibilityState={{ selected }}
+							accessibilityLabel={`${tab.label}、${tab.count} 件`}
+							onPress={() => setColumnFilter(tab.key)}
+							style={[styles.columnTab, selected && styles.columnTabActive]}
+						>
+							<Text style={[styles.columnTabText, selected && styles.columnTabTextActive]} numberOfLines={1}>{tab.label} {tab.count}</Text>
+						</Pressable>
+					);
+				})}
+			</ScrollView>
 
 			<ScrollView
-				ref={boardRef}
-				horizontal
-				pagingEnabled={false}
-				snapToInterval={columnStride}
-				snapToAlignment='start'
-				decelerationRate='fast'
-				disableIntervalMomentum
-				showsHorizontalScrollIndicator={false}
-				scrollEventThrottle={32}
-				onScroll={onBoardScroll}
 				contentContainerStyle={styles.boardScroll}
 				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
-				{views.map(view => (
-					<View key={view.column.id} style={[styles.column, { width: columnWidth }]}>
+				{views.filter(v => columnFilter === ALL_COLUMNS || v.column.id === columnFilter).map(view => (
+					<View key={view.column.id} style={styles.column}>
 						<View style={styles.columnHeader}>
-							<View style={[styles.columnDot, { backgroundColor: view.column.color || colors.fgFaint }]} />
-							<Text style={styles.columnTitle} numberOfLines={1}>{view.column.title}</Text>
+							<Text style={styles.columnTitle} numberOfLines={1}>{columnLabel(view.column)}</Text>
 							<Text
 								style={[styles.columnCount, view.overWipLimit && styles.columnCountOver]}
 								accessibilityLabel={view.overWipLimit ? `${view.totalCount} 件、WIP 上限を超えています` : `${view.totalCount} 件`}
@@ -1097,10 +1079,9 @@ export const KanbanScreen = ({ onOpenPage }: {
 								{view.column.wipLimit > 0 ? `/${view.column.wipLimit}` : ''}
 							</Text>
 						</View>
-
-						<ScrollView nestedScrollEnabled contentContainerStyle={styles.columnScroll} showsVerticalScrollIndicator={false}>
+						<View style={styles.columnScroll}>
 							{view.tasks.length === 0
-								? <EmptyState icon={view.totalCount > 0 ? 'filter' : 'inbox'} title={view.totalCount > 0 ? '条件に合うタスクなし' : 'タスクなし'} />
+								? <Muted style={styles.columnEmpty}>{view.totalCount > 0 ? '条件に合うタスクなし' : 'タスクなし'}</Muted>
 								: view.tasks.map(task => (
 									<TaskCard
 										key={task.id}
@@ -1109,7 +1090,7 @@ export const KanbanScreen = ({ onOpenPage }: {
 										onPress={() => setOpenTaskId(task.id)}
 									/>
 								))}
-						</ScrollView>
+						</View>
 					</View>
 				))}
 			</ScrollView>
@@ -1174,28 +1155,30 @@ const styles = StyleSheet.create({
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.border,
 	},
-	columnTabs: { paddingHorizontal: spacing.lg, gap: spacing.lg, alignItems: 'center' },
+	columnTabs: { paddingHorizontal: spacing.lg, paddingVertical: spacing.sm, gap: spacing.sm, alignItems: 'center' },
 	columnTab: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.xs + 2,
-		minHeight: 40,
+		minHeight: 32,
 		maxWidth: 200,
-		borderBottomWidth: 2,
-		borderBottomColor: 'transparent',
+		paddingHorizontal: spacing.md,
+		borderRadius: 999,
+		borderWidth: 1,
+		borderColor: colors.border,
+		backgroundColor: colors.bgElevated,
 	},
-	columnTabActive: { borderBottomColor: colors.fg },
-	columnTabText: { color: colors.fgFaint, fontSize: fontSize.xs + 1, fontWeight: '600', flexShrink: 1 },
-	columnTabTextActive: { color: colors.fgStrong },
+	columnTabActive: { borderColor: colors.accentText },
+	columnTabText: { color: colors.fgMuted, fontSize: 13, fontWeight: '600', flexShrink: 1 },
+	columnTabTextActive: { color: colors.accentText },
 	columnTabCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
 	boardScroll: {
 		paddingHorizontal: spacing.lg,
 		paddingTop: spacing.md,
 		gap: spacing.md,
 	},
-	column: {
-		maxHeight: '100%',
-	},
+	column: { gap: spacing.sm },
+	columnEmpty: { paddingVertical: spacing.sm },
 	columnScroll: {
 		gap: spacing.sm,
 		paddingBottom: spacing.md,

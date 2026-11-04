@@ -23,6 +23,7 @@ import {
 	Row,
 	Screen,
 	ScreenHeader,
+	StatusBadge,
 	SectionTitle,
 	confirmAction,
 	useToast,
@@ -125,15 +126,21 @@ export const SettingsScreen = () => {
 				refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
 				<Card>
-					<SectionTitle right={<Badge label='接続中' color={colors.success} />}>接続先</SectionTitle>
-					<Body>{connection.label}</Body>
+					<SectionTitle>接続中の端末</SectionTitle>
+					<Row style={styles.deviceRow}>
+						<View style={styles.deviceIcon}><Icon name='monitor' size={18} color={colors.accentText} /></View>
+						<View style={styles.flex}>
+							<Body numberOfLines={1}>{connection.label}</Body>
+							<StatusBadge label='接続中' color={colors.success} />
+						</View>
+						<Button title='切断' variant='secondary' size='sm' onPress={() => void onDisconnect()} />
+					</Row>
 					<Muted numberOfLines={1}>{connection.url} · {snapshot.ide.appName} {snapshot.ide.version}</Muted>
 					{snapshot.ide.protocolVersion !== PROTOCOL_VERSION ? (
 						<Text style={styles.warnText}>
 							プロトコルが違います (IDE v{snapshot.ide.protocolVersion} / アプリ v{PROTOCOL_VERSION})。どちらかを更新してください。
 						</Text>
 					) : null}
-					<Button title='接続を解除' variant='secondary' size='sm' onPress={() => void onDisconnect()} style={styles.start} />
 				</Card>
 
 				<Card>
@@ -177,7 +184,7 @@ export const SettingsScreen = () => {
 
 				{connections.length > 1 ? (
 					<Card>
-						<SectionTitle>他の接続先</SectionTitle>
+						<SectionTitle>以前の端末</SectionTitle>
 						{connections.filter(c => c.url !== connection.url).map(c => (
 							<View key={c.url} style={styles.savedRow}>
 								<View style={styles.flex}>
@@ -185,7 +192,7 @@ export const SettingsScreen = () => {
 									<Muted numberOfLines={1}>{c.url}</Muted>
 								</View>
 								<Row>
-									<Button title='切替' size='sm' variant='secondary' onPress={() => void connect(c)} />
+									<Button title='接続する' size='sm' variant='secondary' onPress={() => void connect(c)} />
 									<IconButton icon='trash-2' accessibilityLabel={`${c.label} を削除`} onPress={() => void onForget(c)} />
 								</Row>
 							</View>
@@ -211,6 +218,8 @@ export const SettingsScreen = () => {
 };
 
 const styles = StyleSheet.create({
+	deviceRow: { alignItems: 'center', gap: spacing.md },
+	deviceIcon: { width: 40, height: 40, borderRadius: radius.md, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bgSidebar },
 	flex: { flex: 1 },
 	start: { alignSelf: 'flex-start' },
 	content: {

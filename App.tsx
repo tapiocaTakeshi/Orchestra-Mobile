@@ -37,7 +37,7 @@ import { colors, fontSize, spacing } from './src/theme';
 const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOpenPage: OpenPage; cloudSessionId: string | null }) => {
 	switch (page) {
 		case 'kanban': return <KanbanScreen onOpenPage={onOpenPage} />;
-		case 'projects': return <ProjectsScreen />;
+		case 'projects': return <ProjectsScreen onOpenPage={onOpenPage} />;
 		case 'cloud': return <CloudAgentsScreen onOpenPage={onOpenPage} initialSessionId={cloudSessionId} />;
 		case 'mcp': return <McpScreen />;
 		case 'social': return <SocialScreen />;

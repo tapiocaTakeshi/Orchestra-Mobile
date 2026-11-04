@@ -203,6 +203,14 @@ export const Badge = ({ label, color = colors.fgFaint, icon }: { label: string; 
 	</View>
 );
 
+/** モックアップの .badge と同じ「色付きのドット + 文字」の状態表示。 */
+export const StatusBadge = ({ label, color }: { label: string; color?: string }) => (
+	<View style={styles.badge}>
+		{color ? <View style={[styles.dot, { backgroundColor: color }]} /> : null}
+		<Text style={[styles.badgeText, { color: colors.fgMuted }]}>{label}</Text>
+	</View>
+);
+
 export const Dot = ({ color }: { color: string }) => (
 	<View style={[styles.dot, { backgroundColor: color }]} />
 );
