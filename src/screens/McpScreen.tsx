@@ -335,7 +335,7 @@ export const McpScreen = () => {
 	if (!session) {
 		return (
 			<Screen>
-				<ScreenHeader title='MCP' />
+				<ScreenHeader title='MCP サーバー' />
 				<EmptyState icon='package' title='Division にログインしてください' detail='MCP サーバーの設定は Division のアカウントに保存されます。' />
 			</Screen>
 		);
@@ -345,7 +345,7 @@ export const McpScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='MCP' />
+			<ScreenHeader title='MCP サーバー' />
 			<View style={styles.tabs}>
 				<SegmentedControl
 					options={[{ value: 'store', label: 'ストア' }, { value: 'installed', label: `インストール済み${installedCount ? ` (${installedCount})` : ''}` }]}

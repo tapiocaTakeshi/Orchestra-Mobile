@@ -27,19 +27,21 @@ import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 /** ドロワーの 1 項目。アイコンと名前を横に並べた 1 行 (ChatGPT のアプリのドロワーと同じ形)。 */
-const DrawerItem = ({ icon, label, title, locked, onPress }: {
+const DrawerItem = ({ icon, label, title, locked, current, onPress }: {
 	icon: IconName;
 	label: string;
 	title: string;
 	locked?: boolean;
+	/** いま開いている画面 (モックアップの aria-current="page" と同じく地を塗る) */
+	current?: boolean;
 	onPress: () => void;
 }) => (
 	<Pressable
 		accessibilityRole='button'
 		accessibilityLabel={locked ? `${title}。PC に接続すると使えます` : `${title}を開く`}
-		accessibilityState={{ disabled: !!locked }}
+		accessibilityState={{ disabled: !!locked, selected: !!current }}
 		onPress={onPress}
-		style={({ pressed }) => [styles.drawerItem, pressed && styles.sheetRowPressed]}
+		style={({ pressed }) => [styles.drawerItem, current && styles.drawerItemCurrent, pressed && styles.sheetRowPressed]}
 	>
 		<Icon name={icon} size={20} color={locked ? colors.fgFaint : colors.fg} />
 		<Text style={[styles.drawerItemLabel, locked && styles.drawerItemLabelLocked]} numberOfLines={1}>{label}</Text>
@@ -51,13 +53,14 @@ const DrawerItem = ({ icon, label, title, locked, onPress }: {
  * 開閉できるナビゲーションドロワー。open=false のとき Drawer ごと描かないので、
  * 閉じている画面にはアイコン・ラベル・幅・余白・不可視の操作領域が一切残らない。
  */
-const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccount }: {
+const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccount, onLogout }: {
 	open: boolean;
 	connected: boolean;
 	email: string;
 	onClose: () => void;
 	onOpenPage: (page: PageKey) => void;
 	onAccount: () => void;
+	onLogout: () => void;
 }) => {
 	const toast = useToast();
 	return (
@@ -66,6 +69,7 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 				<View style={styles.drawerLogo}>
 					<Image source={require('../../assets/logo.png')} style={styles.drawerLogoImage} resizeMode='contain' accessibilityIgnoresInvertColors />
 				</View>
+				<DrawerItem icon='message-circle' label='会話' title='会話' current onPress={onClose} />
 				{DRAWER_PAGES.map(page => {
 					const enabled = canOpenPage(page.key, connected);
 					return (
@@ -90,6 +94,15 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 					<Text style={styles.avatarText}>{(email.trim()[0] ?? '?').toUpperCase()}</Text>
 				</View>
 				<Text style={styles.drawerAccountEmail} numberOfLines={1}>{email}</Text>
+				<Pressable
+					accessibilityRole='button'
+					accessibilityLabel='ログアウト'
+					onPress={onLogout}
+					hitSlop={8}
+					style={({ pressed }) => [styles.drawerLogout, pressed && styles.sheetRowPressed]}
+				>
+					<Text style={styles.drawerLogoutText}>ログアウト</Text>
+				</Pressable>
 			</Pressable>
 		</Drawer>
 	);
@@ -214,6 +227,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 				onClose={() => setDrawerOpen(false)}
 				onOpenPage={openFromDrawer}
 				onAccount={() => { setDrawerOpen(false); setSheet('account'); }}
+				onLogout={() => { setDrawerOpen(false); void onLogout(); }}
 			/>
 
 			{sheet === 'account' ? (
@@ -254,6 +268,9 @@ const styles = StyleSheet.create({
 	},
 	drawerItemLabel: { flex: 1, color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
 	drawerItemLabelLocked: { color: colors.fgFaint },
+	drawerItemCurrent: { backgroundColor: colors.bgHover },
+	drawerLogout: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.sm },
+	drawerLogoutText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600' },
 	drawerAccount: {
 		flexDirection: 'row',
 		alignItems: 'center',

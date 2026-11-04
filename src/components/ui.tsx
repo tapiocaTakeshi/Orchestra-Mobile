@@ -41,7 +41,7 @@ export const ScreenHeader = ({ title, right }: { title: React.ReactNode; right?:
 	const back = useBack();
 	return (
 		<View style={[styles.screenHeader, back && styles.screenHeaderWithBack]}>
-			{back ? <IconButton icon='chevron-left' accessibilityLabel='戻る' onPress={back} /> : null}
+			{back ? <IconButton icon='arrow-left' accessibilityLabel='戻る' onPress={back} /> : null}
 			{typeof title === 'string'
 				? <Text accessibilityRole='header' style={[styles.title, styles.screenHeaderTitle]} numberOfLines={1}>{title}</Text>
 				: <View style={styles.screenHeaderTitle}>{title}</View>}

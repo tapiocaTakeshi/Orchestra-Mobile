@@ -411,7 +411,7 @@ export const ProjectsScreen = () => {
 	if (!connected) {
 		return (
 			<Screen>
-				<ScreenHeader title='Division' />
+				<ScreenHeader title='プロジェクト' />
 				<ScrollView
 					contentContainerStyle={styles.content}
 					refreshControl={<RefreshControl refreshing={cloudProjects.loading} onRefresh={cloudProjects.reload} tintColor={colors.fgMuted} />}

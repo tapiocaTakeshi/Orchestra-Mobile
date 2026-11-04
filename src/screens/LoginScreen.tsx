@@ -10,12 +10,15 @@
  */
 
 import React, { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { LegalLinks, TermsCheckbox, TermsSheet } from '../components/TermsSheet';
 import { ErrorBanner, IconButton, Input } from '../components/ui';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
-import { colors, fontSize, radius, spacing } from '../theme';
+import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
+
+/** モックアップの見出しと同じ明朝寄りのセリフ体 */
+const SERIF = Platform.select({ ios: 'Georgia', android: 'serif', default: 'Georgia, "Hiragino Mincho ProN", serif' });
 
 export const LoginScreen = () => {
 	const { login, termsAccepted, acceptTerms } = useDivisionAuth();
@@ -60,9 +63,11 @@ export const LoginScreen = () => {
 				<ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps='handled'>
 					<View style={styles.panel}>
 						<View style={styles.hero}>
-							<Image source={require('../../assets/logo.png')} style={styles.heroMark} resizeMode='contain' />
-							<Text accessibilityRole='header' style={styles.headline}>Orchestra にログイン</Text>
-							<Text style={styles.heroDetail}>デスクトップと同じ Division アカウントを使います。</Text>
+							<View style={styles.heroMark} accessibilityLabel='Orchestra'>
+								<Text style={styles.heroMarkText}>✻</Text>
+							</View>
+							<Text accessibilityRole='header' style={styles.headline}>Orchestra で{'\n'}エージェントと話す</Text>
+							<Text style={styles.heroDetail}>手元の Mac やクラウドで動くコーディングエージェントに、スマートフォンから指示・承認・確認ができます。デスクトップと同じ Division アカウントでログインします。</Text>
 						</View>
 
 						<View style={styles.form}>
@@ -150,8 +155,17 @@ const styles = StyleSheet.create({
 	},
 	panel: { gap: spacing.xl },
 	hero: { alignItems: 'flex-start', gap: spacing.sm },
-	heroMark: { width: 44, height: 44, marginBottom: spacing.sm },
-	headline: { color: colors.fgStrong, fontSize: 24, fontWeight: '600' },
+	heroMark: {
+		width: 56,
+		height: 56,
+		borderRadius: radius.lg,
+		backgroundColor: withAlpha(colors.accent, '1f'),
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: spacing.lg,
+	},
+	heroMarkText: { color: colors.accent, fontSize: 28, lineHeight: 32 },
+	headline: { color: colors.fgStrong, fontSize: fontSize.xl, lineHeight: 40, fontWeight: '400', fontFamily: SERIF },
 	heroDetail: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21 },
 	form: { gap: spacing.sm },
 	label: { color: colors.fgMuted, fontSize: fontSize.xs, marginTop: spacing.xs },

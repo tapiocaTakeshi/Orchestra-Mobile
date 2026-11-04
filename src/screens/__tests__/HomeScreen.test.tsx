@@ -122,7 +122,7 @@ const render = async (): Promise<ReactTestRenderer> => {
 };
 
 /** ドロワー内にしか出ないテキストで、開閉の判定に使う。 */
-const DRAWER_ONLY_TEXT = 'Division のプロジェクト管理';
+const DRAWER_ONLY_TEXT = 'ソーシャル (共有)';
 
 /** ボタン (ホスト要素) でも行 (onPress を持つコンポーネント) でも押せるようにする。 */
 const press = async (node: ReactTestInstance) => {
@@ -180,8 +180,9 @@ describe('HomeScreen のナビゲーションドロワー', () => {
 		// DRAWER_PAGES の全項目 (ソーシャルは未接続でも開ける)
 		expect(findTextNode(r.root, DRAWER_ONLY_TEXT)).toBeTruthy();
 		expect(findTextNode(r.root, 'カンバン')).toBeTruthy();
-		expect(findTextNode(r.root, 'エディタの UI 操作')).toBeTruthy();
-		expect(findTextNode(r.root, 'ソーシャル (共有)')).toBeTruthy();
+		for (const label of ['会話', 'プロジェクト', 'クイックアクション', 'MCP サーバー', 'リモート接続', 'ソーシャル (共有)', 'ログアウト']) {
+			expect(findTextNode(r.root, label)).toBeTruthy();
+		}
 		expect(findTextNode(r.root, 'me@example.com')).toBeTruthy();
 		// ドロワーの中からも閉じられる (パネル右上のボタンと、背景のスクリム)
 		expect(findButtonsByLabel(r.root, 'メニューを閉じる').length).toBeGreaterThanOrEqual(1);

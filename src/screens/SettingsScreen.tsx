@@ -117,7 +117,7 @@ export const SettingsScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='接続' />
+			<ScreenHeader title='リモート接続' />
 			{error ? <ErrorBanner message={error} onRetry={() => void refresh()} /> : null}
 
 			<ScrollView

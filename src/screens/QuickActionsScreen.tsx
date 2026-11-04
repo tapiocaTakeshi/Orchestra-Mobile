@@ -36,7 +36,7 @@ export const QuickActionsScreen = () => {
 
 	return (
 		<Screen>
-			<ScreenHeader title='クイック操作' />
+			<ScreenHeader title='クイックアクション' />
 			<ScrollView contentContainerStyle={styles.content}>
 				{QUICK_COMMANDS.map(cmd => (
 					<Pressable

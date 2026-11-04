@@ -22,13 +22,13 @@ export type PageEntry = {
 /** メニューに並べる順番。 */
 export const PAGES: PageEntry[] = [
 	{ key: 'kanban', label: 'カンバン', icon: 'columns', needsConnection: true },
-	{ key: 'projects', label: 'Division', icon: 'layers', needsConnection: false },
+	{ key: 'projects', label: 'プロジェクト', icon: 'folder', needsConnection: false },
 	{ key: 'cloud', label: 'クラウド', icon: 'cloud', needsConnection: false },
 	{ key: 'mcp', label: 'MCP', icon: 'package', needsConnection: false },
 	{ key: 'social', label: '共有', icon: 'share-2', needsConnection: false },
 	{ key: 'tuning', label: 'コスト', icon: 'bar-chart-2', needsConnection: false },
-	{ key: 'actions', label: 'クイック操作', icon: 'zap', needsConnection: true },
-	{ key: 'settings', label: '接続', icon: 'link', needsConnection: true },
+	{ key: 'actions', label: 'クイックアクション', icon: 'zap', needsConnection: true },
+	{ key: 'settings', label: 'リモート接続', icon: 'link', needsConnection: true },
 ];
 
 /**
@@ -36,10 +36,11 @@ export const PAGES: PageEntry[] = [
  * title はドロワーの行に出す名前 (読み上げにも使う)。label は短い名前で、ドロワーでは行に title を出す。
  */
 export const DRAWER_PAGES: (PageEntry & { title: string })[] = [
-	{ key: 'projects', label: 'Division', title: 'Division のプロジェクト管理', icon: 'layers', needsConnection: false },
-	{ key: 'mcp', label: 'MCP', title: 'MCP (ストア・サーバー設定)', icon: 'package', needsConnection: false },
+	{ key: 'projects', label: 'プロジェクト', title: 'プロジェクト', icon: 'folder', needsConnection: false },
 	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
-	{ key: 'actions', label: 'UI', title: 'エディタの UI 操作', icon: 'sliders', needsConnection: true },
+	{ key: 'actions', label: 'クイックアクション', title: 'クイックアクション', icon: 'zap', needsConnection: true },
+	{ key: 'mcp', label: 'MCP', title: 'MCP サーバー', icon: 'link-2', needsConnection: false },
+	{ key: 'settings', label: 'リモート接続', title: 'リモート接続', icon: 'radio', needsConnection: true },
 	{ key: 'social', label: 'ソーシャル', title: 'ソーシャル (共有)', icon: 'share-2', needsConnection: false },
 ];
 
