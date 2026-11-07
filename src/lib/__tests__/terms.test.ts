@@ -3,10 +3,10 @@
  */
 
 const rpc = jest.fn();
-const setSession = jest.fn(async () => ({ data: {}, error: null }));
+const ensureDivisionSupabase = jest.fn(async () => ({ rpc }));
 
 jest.mock('../divisionAuth', () => ({
-	getDivisionSupabase: () => ({ auth: { setSession }, rpc }),
+	ensureDivisionSupabase: (...args: unknown[]) => ensureDivisionSupabase(...(args as [])),
 }));
 
 import { TERMS_VERSION } from '../legal';
@@ -14,7 +14,7 @@ import { needsTermsAgreement, recordTermsAcceptance } from '../terms';
 
 const session = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
-beforeEach(() => { rpc.mockReset(); setSession.mockClear(); });
+beforeEach(() => { rpc.mockReset(); ensureDivisionSupabase.mockClear(); });
 
 describe('needsTermsAgreement', () => {
 	it('asks when nothing was accepted', () => {
@@ -38,7 +38,7 @@ describe('recordTermsAcceptance', () => {
 	it('calls accept_terms with the current version as the signed-in user', async () => {
 		rpc.mockResolvedValue({ data: null, error: null });
 		await expect(recordTermsAcceptance(session)).resolves.toBe(true);
-		expect(setSession).toHaveBeenCalledWith({ access_token: 'at', refresh_token: 'rt' });
+		expect(ensureDivisionSupabase).toHaveBeenCalledWith(session);
 		expect(rpc).toHaveBeenCalledWith('accept_terms', { p_version: TERMS_VERSION });
 	});
 

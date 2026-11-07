@@ -477,7 +477,9 @@ const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUr
 
 const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): RepoMode => {
 	const status = github.status;
-	if (draft.manualUrl || (status && !status.configured) || (!status && github.error)) return 'manual';
+	// 状態を確認できなかっただけでは URL 入力に切り替えない (「連携が切れた」ように見えるため)。
+	// 取り直しは自動で続け、URL を直接入れたいときは「URL を入力」を選べる
+	if (draft.manualUrl || (status && !status.configured)) return 'manual';
 	return status ? 'picker' : 'loading';
 };
 
@@ -546,7 +548,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 				<View style={styles.field}>
 					<SectionTitle>始める場所</SectionTitle>
 					<SegmentedControl options={SOURCE_OPTIONS} value={draft.source} onChange={value => set('source', value)} />
-					{draft.source === 'repo' && mode === 'loading' ? (
+					{draft.source === 'repo' && mode === 'loading' && !github.error ? (
 						<View style={styles.githubChecking}>
 							<ActivityIndicator size='small' color={colors.fgMuted} />
 							<Muted>GitHub の連携を確認しています…</Muted>
@@ -626,7 +628,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 							<Text style={styles.linkText}>URL を直接入力</Text>
 						</Pressable>
 					) : null}
-					{draft.source === 'repo' && mode === 'manual' && draft.manualUrl && configured ? (
+					{draft.source === 'repo' && mode === 'manual' && draft.manualUrl && (configured || !status) ? (
 						<Pressable accessibilityRole='button' onPress={() => set('manualUrl', false)} style={styles.linkButton}>
 							<Icon name='github' size={14} color={colors.accentText} />
 							<Text style={styles.linkText}>GitHub のリポジトリから選ぶ</Text>

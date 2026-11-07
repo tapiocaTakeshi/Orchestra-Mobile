@@ -30,6 +30,7 @@ const fakeClient = {
 
 jest.mock('../divisionAuth', () => ({
 	getDivisionSupabase: () => fakeClient,
+	ensureDivisionSupabase: async () => fakeClient,
 	getDivisionAccessToken: jest.fn(async () => 'fresh-jwt'),
 }));
 

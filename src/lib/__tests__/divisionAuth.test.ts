@@ -10,19 +10,29 @@ jest.mock('@supabase/supabase-js', () => {
 		eq: () => builder,
 		order: async () => ({ data: state.rows, error: null }),
 	};
+	const auth: { current: unknown } = { current: null };
 	const client = {
-		auth: { setSession: jest.fn(async () => ({ data: {}, error: null })) },
+		auth: {
+			setSession: jest.fn(async (s: { access_token: string }) => { auth.current = { access_token: s.access_token, user: { id: 'u1' } }; return { data: {}, error: null }; }),
+			getSession: jest.fn(async () => ({ data: { session: auth.current }, error: null })),
+		},
 		from: () => builder,
 	};
 	return {
 		createClient: jest.fn(() => client),
 		__setRows: (rows: unknown[]) => { state.rows = rows; },
+		__setAuth: (s: unknown) => { auth.current = s; },
+		__client: client,
 	};
 });
 
-import { listRemoteSessions } from '../divisionAuth';
+import { ensureDivisionSupabase, getDivisionAccessToken, listRemoteSessions } from '../divisionAuth';
 
-const { __setRows } = jest.requireMock('@supabase/supabase-js') as { __setRows: (rows: unknown[]) => void };
+const { __setRows, __setAuth, __client } = jest.requireMock('@supabase/supabase-js') as {
+	__setRows: (rows: unknown[]) => void;
+	__setAuth: (s: unknown) => void;
+	__client: { auth: { setSession: jest.Mock } };
+};
 
 const session = { userId: 'u1', email: 'a@example.com', accessToken: 'at', refreshToken: 'rt' };
 
@@ -49,5 +59,27 @@ describe('listRemoteSessions', () => {
 			{ id: 'bad', deviceLabel: 'PC-C', lanUrl: 'http://10.0.0.4:39231', token: 't3', protocolVersion: 1, lastSeenAt: 'not-a-date' },
 		]);
 		await expect(listRemoteSessions(session)).resolves.toEqual([]);
+	});
+});
+
+describe('ensureDivisionSupabase', () => {
+	beforeEach(() => { __client.auth.setSession.mockClear(); });
+
+	it('keeps the session the client already holds (its refresh token is the newest one)', async () => {
+		__setAuth({ access_token: 'refreshed-by-supabase', user: { id: 'u1' } });
+		await ensureDivisionSupabase(session);
+		expect(__client.auth.setSession).not.toHaveBeenCalled();
+		await expect(getDivisionAccessToken(session)).resolves.toBe('refreshed-by-supabase');
+		expect(__client.auth.setSession).not.toHaveBeenCalled();
+	});
+
+	it('puts the stored tokens in only when the client has no session for this user', async () => {
+		__setAuth(null);
+		await ensureDivisionSupabase(session);
+		expect(__client.auth.setSession).toHaveBeenCalledWith({ access_token: 'at', refresh_token: 'rt' });
+		__client.auth.setSession.mockClear();
+		__setAuth({ access_token: 'x', user: { id: 'someone-else' } });
+		await ensureDivisionSupabase(session);
+		expect(__client.auth.setSession).toHaveBeenCalledTimes(1);
 	});
 });

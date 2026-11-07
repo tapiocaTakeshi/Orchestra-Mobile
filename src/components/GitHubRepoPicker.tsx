@@ -61,6 +61,9 @@ export type GitHubConnection = {
 	markDisconnected: () => void;
 };
 
+/** 連携の状態を確認できなかったときに取り直すまでの間 (だんだん空ける) */
+const GITHUB_STATUS_RETRY_MS = [3_000, 10_000, 30_000, 60_000];
+
 export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => {
 	const toast = useToast();
 	const [status, setStatus] = useState<GitHubStatus | null>(null);
@@ -79,20 +82,43 @@ export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => 
 		};
 	}, []);
 
+	// Division のトークンは 1 時間ごとに更新され、そのたびに auth (セッション) は新しいオブジェクトになる。
+	// それで状態を消して取り直すと、そのあいだ「未連携」に見えてしまうので、最新の auth は ref から読み、
+	// 取り直すのはユーザーが変わったときだけにする。
+	const authRef = useRef(auth);
+	authRef.current = auth;
+	const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const failures = useRef(0);
+
 	const refresh = useCallback(async () => {
+		if (retryTimer.current) { clearTimeout(retryTimer.current); retryTimer.current = null; }
 		try {
-			const next = await getGitHubStatus(auth);
+			const next = await getGitHubStatus(authRef.current);
 			if (!mounted.current) return;
+			failures.current = 0;
 			setStatus(next);
 			setError(null);
 		} catch (e) {
-			if (mounted.current) setError(githubErrorText(e));
+			if (!mounted.current) return;
+			// 確認できなかっただけ (通信・Division のログインの更新中など)。前に分かった状態は消さず、少しずつ間を空けて取り直す
+			setError(githubErrorText(e));
+			const delay = GITHUB_STATUS_RETRY_MS[Math.min(failures.current, GITHUB_STATUS_RETRY_MS.length - 1)];
+			failures.current += 1;
+			retryTimer.current = setTimeout(() => { void refresh(); }, delay);
 		}
-	}, [auth]);
+	}, []);
 
 	useEffect(() => {
 		setStatus(null);
+		failures.current = 0;
 		void refresh();
+		return () => { if (retryTimer.current) clearTimeout(retryTimer.current); };
+	}, [auth.userId, refresh]);
+
+	// アプリが前面に戻ったら確かめ直す (裏にいるあいだに解除・再連携されたかもしれない)
+	useEffect(() => {
+		const sub = AppState.addEventListener('change', next => { if (next === 'active') void refresh(); });
+		return () => sub.remove();
 	}, [refresh]);
 
 	// 許可を待っているあいだは、ブラウザからアプリに戻ってきた時点ですぐ確かめる。
@@ -110,9 +136,9 @@ export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => 
 		setError(null);
 		let w: GitHubConnectWatcher;
 		try {
-			const url = await startGitHubConnect(auth);
+			const url = await startGitHubConnect(authRef.current);
 			await Linking.openURL(url);
-			w = watchGitHubConnection(() => getGitHubStatus(auth));
+			w = watchGitHubConnection(() => getGitHubStatus(authRef.current));
 			watcher.current = w;
 		} catch (e) {
 			if (mounted.current) setError(githubErrorText(e));
@@ -132,7 +158,7 @@ export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => 
 		} else if (outcome.kind === 'timeout') {
 			setError('5 分待ちましたが連携を確認できませんでした。もう一度「GitHub と連携」からお試しください。');
 		}
-	}, [auth, starting, toast]);
+	}, [starting, toast]);
 
 	const cancelConnect = useCallback(() => {
 		watcher.current?.cancel();
@@ -148,7 +174,7 @@ export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => 
 		if (!ok) return false;
 		setDisconnecting(true);
 		try {
-			await disconnectGitHub(auth);
+			await disconnectGitHub(authRef.current);
 			if (mounted.current) {
 				setStatus(s => ({ configured: s?.configured ?? true, connected: false }));
 				toast.show('GitHub の連携を解除しました', 'success');
@@ -160,11 +186,13 @@ export const useGitHubConnection = (auth: DivisionSession): GitHubConnection => 
 		} finally {
 			if (mounted.current) setDisconnecting(false);
 		}
-	}, [auth, toast]);
+	}, [toast]);
 
+	// サーバーが「未連携」(409 github_not_connected) と答えたとき。サーバーの状態と食い違わないよう、すぐ確かめ直す
 	const markDisconnected = useCallback(() => {
 		setStatus(s => (s ? { configured: s.configured, connected: false } : s));
-	}, []);
+		void refresh();
+	}, [refresh]);
 
 	return { status, error, starting, waiting, disconnecting, refresh, connect, cancelConnect, disconnect, markDisconnected };
 };

@@ -17,7 +17,7 @@
 
 import { PostgrestError } from '@supabase/supabase-js';
 
-import { DivisionSession, getDivisionAccessToken, getDivisionSupabase } from './divisionAuth';
+import { DivisionSession, ensureDivisionSupabase, getDivisionAccessToken } from './divisionAuth';
 import {
 	DIVISION_ASSIGNMENT_POST_LIKE_TABLE,
 	DIVISION_ASSIGNMENT_POST_TABLE,
@@ -50,11 +50,8 @@ export const describeError = (error: Pick<PostgrestError, 'code' | 'message'>, f
 	return `${fallback}: ${error.message}`;
 };
 
-const withSession = async (session: DivisionSession) => {
-	const sb = getDivisionSupabase();
-	await sb.auth.setSession({ access_token: session.accessToken, refresh_token: session.refreshToken });
-	return sb;
-};
+// 手元のトークンで毎回入れ直さない (使用済みの refresh token でセッションごと失効させないため)
+const withSession = (session: DivisionSession) => ensureDivisionSupabase(session);
 
 type PostRow = {
 	id: string;
