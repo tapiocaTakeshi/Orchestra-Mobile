@@ -10,7 +10,7 @@
 
 import { Platform } from 'react-native';
 
-import { DivisionSession, getDivisionSupabase } from './divisionAuth';
+import { DivisionSession, ensureDivisionSupabase } from './divisionAuth';
 import {
 	DIVISION_CREDIT_TRANSACTION_TABLE,
 	DIVISION_PROFILES_TABLE,
@@ -78,11 +78,8 @@ const num = (value: unknown, fallback = 0): number => {
 	return Number.isFinite(n) ? n : fallback;
 };
 
-const withSession = async (session: DivisionSession) => {
-	const sb = getDivisionSupabase();
-	await sb.auth.setSession({ access_token: session.accessToken, refresh_token: session.refreshToken });
-	return sb;
-};
+// 手元のトークンで毎回入れ直さない (使用済みの refresh token でセッションごと失効させないため)
+const withSession = (session: DivisionSession) => ensureDivisionSupabase(session);
 
 export const fetchDivisionProfile = async (session: DivisionSession): Promise<DivisionProfile> => {
 	const sb = await withSession(session);

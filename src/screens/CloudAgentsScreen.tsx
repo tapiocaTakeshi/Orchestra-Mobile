@@ -86,6 +86,7 @@ import {
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { DocumentView } from '../components/DocumentView';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
 	CloudApproval,
@@ -476,7 +477,9 @@ const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUr
 
 const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): RepoMode => {
 	const status = github.status;
-	if (draft.manualUrl || (status && !status.configured) || (!status && github.error)) return 'manual';
+	// 状態を確認できなかっただけでは URL 入力に切り替えない (「連携が切れた」ように見えるため)。
+	// 取り直しは自動で続け、URL を直接入れたいときは「URL を入力」を選べる
+	if (draft.manualUrl || (status && !status.configured)) return 'manual';
 	return status ? 'picker' : 'loading';
 };
 
@@ -545,7 +548,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 				<View style={styles.field}>
 					<SectionTitle>始める場所</SectionTitle>
 					<SegmentedControl options={SOURCE_OPTIONS} value={draft.source} onChange={value => set('source', value)} />
-					{draft.source === 'repo' && mode === 'loading' ? (
+					{draft.source === 'repo' && mode === 'loading' && !github.error ? (
 						<View style={styles.githubChecking}>
 							<ActivityIndicator size='small' color={colors.fgMuted} />
 							<Muted>GitHub の連携を確認しています…</Muted>
@@ -625,7 +628,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 							<Text style={styles.linkText}>URL を直接入力</Text>
 						</Pressable>
 					) : null}
-					{draft.source === 'repo' && mode === 'manual' && draft.manualUrl && configured ? (
+					{draft.source === 'repo' && mode === 'manual' && draft.manualUrl && (configured || !status) ? (
 						<Pressable accessibilityRole='button' onPress={() => set('manualUrl', false)} style={styles.linkButton}>
 							<Icon name='github' size={14} color={colors.accentText} />
 							<Text style={styles.linkText}>GitHub のリポジトリから選ぶ</Text>
@@ -1411,18 +1414,14 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						</Muted>
 					) : (
 						<>
-							<Input
+							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直す */}
+							<DocumentView
+								name={approval.file}
 								value={content}
-								onChangeText={setContent}
-								multiline
-								scrollEnabled
-								autoCapitalize='none'
-								autoCorrect={false}
-								editable={!busy}
-								accessibilityLabel={`${approval.file} の内容`}
-								style={styles.approvalEditor}
+								onChangeText={busy ? undefined : setContent}
+								height={360}
 							/>
-							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら中身を直してから承認できます。'}</Muted>
+							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直してから承認できます。'}</Muted>
 						</>
 					)}
 					<Input
@@ -2092,7 +2091,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	 */
 	onOpenPcChat?: () => void;
 } = {}) => {
-	const { session } = useDivisionAuth();
+	const { session, refreshSession } = useDivisionAuth();
 	const { connection, connectionStatus, snapshot, client, connect, invalidate } = useApp();
 	const unified = !!onOpenPcChat;
 	const toast = useToast();
@@ -2351,7 +2350,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		const result = await verifyAndConnect(
 			{ url: item.device.lanUrl, token: item.device.token, label: item.device.deviceLabel },
 			connect,
-			{ accessToken: session.accessToken, sessions: devices },
+			{ accessToken: session.accessToken, sessions: devices, refreshAccessToken: async () => (await refreshSession?.())?.accessToken ?? null },
 		);
 		setConnectingDeviceId(null);
 		if (!result.ok) {
@@ -2360,7 +2359,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		}
 		if (result.warning) toast.show(result.warning, 'info');
 		onOpenPcChat();
-	}, [session, onOpenPcChat, connect, devices, toast]);
+	}, [session, onOpenPcChat, connect, devices, toast, refreshSession]);
 
 	/** 送り先が PC のとき: PC で新しいチャットを開いて指示を送り、そのチャットを開く */
 	const sendToPc = useCallback(async (prompt: string) => {
@@ -2918,7 +2917,6 @@ const styles = StyleSheet.create({
 	doneActions: { flexWrap: 'wrap' },
 	approval: { borderColor: withAlpha(colors.warning, '66') },
 	approvalFile: { color: colors.fgMuted, fontFamily: MONO, fontSize: fontSize.xs },
-	approvalEditor: { minHeight: 180, maxHeight: 360, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 19, textAlignVertical: 'top' },
 	approvalFeedback: { minHeight: 64, textAlignVertical: 'top' },
 	approvalEventText: { fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
 	approvalEventFile: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },

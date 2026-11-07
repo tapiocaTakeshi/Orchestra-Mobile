@@ -42,13 +42,32 @@ const restoreSupabaseSession = async (accessToken: string, refreshToken: string)
 	await sb.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
 };
 
+/**
+ * Supabase のクライアントにこのユーザーのセッションを持たせて返す。
+ *
+ * 持っていれば何もしない (クライアントのセッションは自動更新で一番新しいトークンを持っている)。
+ * 毎回 setSession(手元のトークン) で入れ直すと、期限切れのたびに使用済みの refresh token で更新しようとし、
+ * Supabase がそれを「使い回し」とみなしてセッションごと失効させる。そうなると Division API も
+ * GitHub 連携の確認も PC の一覧もすべて 401 になり、連携が切れたように見えていた。
+ */
+export const ensureDivisionSupabase = async (session: DivisionSession): Promise<SupabaseClient> => {
+	const sb = getDivisionSupabase();
+	try {
+		const { data } = await sb.auth.getSession();
+		if (data.session?.access_token && data.session.user?.id === session.userId) return sb;
+	} catch {
+		// 取れなければ下で入れ直す
+	}
+	await restoreSupabaseSession(session.accessToken, session.refreshToken);
+	return sb;
+};
+
 /** Division APIへ送る最新のSupabase JWTを取得する。 */
 export const getDivisionAccessToken = async (session: DivisionSession): Promise<string> => {
 	if (!session.accessToken || !session.refreshToken) {
 		throw new Error('Divisionのログインセッションがありません。');
 	}
-	await restoreSupabaseSession(session.accessToken, session.refreshToken);
-	const { data, error } = await getDivisionSupabase().auth.getSession();
+	const { data, error } = await (await ensureDivisionSupabase(session)).auth.getSession();
 	if (error || !data.session?.access_token) {
 		throw new Error('DivisionのJWTを更新できませんでした。もう一度ログインしてください。');
 	}
@@ -70,6 +89,37 @@ export const signInWithDivision = async (email: string, password: string): Promi
 		accessToken: session.access_token,
 		refreshToken: session.refresh_token ?? '',
 	};
+};
+
+/**
+ * アクセストークン (約 1 時間で切れる) を今すぐ更新する。Supabase のクライアントが別のユーザーや
+ * 空のセッションを持っていれば、手元のトークンを入れ直してから更新する。更新できなければ null。
+ */
+export const refreshDivisionSession = async (current: DivisionSession): Promise<DivisionSession | null> => {
+	try {
+		const sb = getDivisionSupabase();
+		const { data } = await sb.auth.getSession();
+		if (!data.session || data.session.user?.id !== current.userId) await restoreSupabaseSession(current.accessToken, current.refreshToken);
+		const { data: refreshed, error } = await sb.auth.refreshSession();
+		if (error || !refreshed.session || refreshed.session.user?.id !== current.userId) return null;
+		return { ...current, accessToken: refreshed.session.access_token, refreshToken: refreshed.session.refresh_token ?? current.refreshToken };
+	} catch {
+		return null;
+	}
+};
+
+/** アクセストークンの有効期限 (ミリ秒)。読めなければ null */
+export const accessTokenExpiresAt = (accessToken: string): number | null => {
+	try {
+		const part = accessToken.split('.')[1] ?? '';
+		const json = typeof atob === 'function'
+			? atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '='))
+			: '';
+		const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+		return typeof exp === 'number' ? exp * 1000 : null;
+	} catch {
+		return null;
+	}
 };
 
 /** 保存済みの accessToken/refreshToken からセッションを復元する。無人での自動再ログイン用。 */
@@ -120,8 +170,7 @@ export const listRemoteSessions = async (
 	session: DivisionSession,
 	staleAfterMs: number = DEFAULT_STALE_AFTER_MS,
 ): Promise<RemoteSessionRow[]> => {
-	await restoreSupabaseSession(session.accessToken, session.refreshToken);
-	const sb = getDivisionSupabase();
+	const sb = await ensureDivisionSupabase(session);
 
 	const { data, error } = await sb
 		.from(DIVISION_REMOTE_SESSION_TABLE)

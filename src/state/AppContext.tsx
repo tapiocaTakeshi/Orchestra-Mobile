@@ -25,7 +25,7 @@ import { AppState, AppStateStatus } from 'react-native';
 import { ConnectionRoute, OrchestraApiError, OrchestraClient } from '../api/client';
 import { Connection, Snapshot } from '../api/types';
 import { useToast } from '../components/ui';
-import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch } from '../lib/connect';
+import { NOT_ACCOUNT_SESSION_MESSAGE, connectionsForAccount, isAccountMismatch, isDivisionTokenInvalid } from '../lib/connect';
 import { notifyRemoteEvent } from '../lib/remoteNotifications';
 import { RemoteConnectionStatus, claimRemoteSyncNotice, remoteConnectionStatus, remoteSessionNotice } from '../lib/remoteSession';
 import { useDivisionAuth } from './DivisionAuthContext';
@@ -44,6 +44,8 @@ const POLL_INTERVAL_MS = 3_000;
 const POLL_INTERVAL_BUSY_MS = 1_200;
 /** 連続で失敗している間は間隔を空ける (電池とログを無駄にしないため)。 */
 const POLL_INTERVAL_ERROR_MS = 8_000;
+/** Division のトークンを更新したあと、送り直すまでの間 */
+const TOKEN_RETRY_DELAY_MS = 300;
 /** 外出先から中継で繋いでいる間は、通信量を抑えるために少し間隔を空ける。 */
 const RELAY_POLL_INTERVAL_MS = 5_000;
 const RELAY_POLL_INTERVAL_BUSY_MS = 2_000;
@@ -93,7 +95,11 @@ export const useClient = (): OrchestraClient => {
 };
 
 export const AppProvider = ({ children }: { children: React.ReactNode }) => {
-	const { session, isRestoring: isRestoringAuth } = useDivisionAuth();
+	const { session, isRestoring: isRestoringAuth, refreshSession } = useDivisionAuth();
+	const refreshSessionRef = useRef(refreshSession);
+	refreshSessionRef.current = refreshSession;
+	/** Division のトークンを更新して送り直した直後か (もう一度断られたら、トークンのせいではない) */
+	const tokenRetriedRef = useRef(false);
 	const toast = useToast();
 	// 端末に保存された全アカウント分の接続。画面に渡すのはログイン中のアカウントの分だけ。
 	const [connections, setConnections] = useState<Connection[]>([]);
@@ -181,6 +187,7 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 		try {
 			const next = await current.getSnapshot(controller.signal);
 			failuresRef.current = 0;
+			tokenRetriedRef.current = false;
 			setError(null);
 			setLastSuccessAt(Date.now());
 			setConnectionRoute(current.route);
@@ -210,9 +217,20 @@ export const AppProvider = ({ children }: { children: React.ReactNode }) => {
 			return busy ? POLL_INTERVAL_BUSY_MS : POLL_INTERVAL_MS;
 		} catch (e) {
 			if (controller.signal.aborted) return POLL_INTERVAL_MS;
+			// PC は送ったトークンで毎回アカウントを確かめる。断られたら、まずトークンの期限切れを疑って
+			// 更新して送り直す (古い Orchestra は期限切れも account_mismatch で返す)。
+			if ((isAccountMismatch(e) || isDivisionTokenInvalid(e)) && !tokenRetriedRef.current) {
+				tokenRetriedRef.current = true;
+				const fresh = await refreshSessionRef.current?.().catch(() => null);
+				if (fresh) {
+					current.setDivisionAccessToken(fresh.accessToken);
+					return TOKEN_RETRY_DELAY_MS;
+				}
+			}
 			if (isAccountMismatch(e)) {
-				// PC 側が別のアカウントに切り替わった。繋ぎっぱなしにせず、接続先を選び直してもらう。
+				// 新しいトークンでも断られた: PC 側が本当に別のアカウント。繋ぎっぱなしにせず、接続先を選び直してもらう。
 				clientRef.current = null;
+				tokenRetriedRef.current = false;
 				void dropActiveConnection();
 				toast.show(NOT_ACCOUNT_SESSION_MESSAGE, 'error');
 				return POLL_INTERVAL_MS;

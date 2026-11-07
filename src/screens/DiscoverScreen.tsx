@@ -91,7 +91,7 @@ export const DiscoverScreen = ({
 	headerTitle?: React.ReactNode;
 }) => {
 	const { connect } = useApp();
-	const { session, logout, newSessionIds, dismissNewSession } = useDivisionAuth();
+	const { session, logout, newSessionIds, dismissNewSession, refreshSession } = useDivisionAuth();
 
 	const [sessions, setSessions] = useState<RemoteSessionRow[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -147,12 +147,12 @@ export const DiscoverScreen = ({
 		const result = await verifyAndConnect(
 			{ url: row.lanUrl, token: row.token, label: row.deviceLabel },
 			connect,
-			{ accessToken: session.accessToken, sessions },
+			{ accessToken: session.accessToken, sessions, refreshAccessToken: async () => (await refreshSession?.())?.accessToken ?? null },
 		);
 		if (!result.ok) setStatus(result.message);
 		else dismissNewSession(row.id);
 		setConnectingId(null);
-	}, [connect, dismissNewSession, session, sessions]);
+	}, [connect, dismissNewSession, session, sessions, refreshSession]);
 
 	if (!session) return null;
 

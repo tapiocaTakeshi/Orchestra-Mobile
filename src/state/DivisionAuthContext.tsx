@@ -11,11 +11,15 @@
  */
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import * as Notifications from 'expo-notifications';
 
 import {
 	DivisionSession,
 	RemoteSessionRow,
+	accessTokenExpiresAt,
+	getDivisionSupabase,
+	refreshDivisionSession,
 	restoreDivisionSession,
 	signInWithDivision,
 	signOutDivision,
@@ -40,6 +44,11 @@ type DivisionAuthContextValue = {
 	termsAccepted: boolean;
 	/** 最新の利用規約に同意する。端末に保存し、ログイン中ならサーバーにも記録する。 */
 	acceptTerms: () => Promise<void>;
+	/**
+	 * アクセストークンを今すぐ更新する (PC が「期限切れ」と答えたとき)。更新できなければ null。
+	 * 古いテストのモックには無いことがあるので省略可。
+	 */
+	refreshSession?: () => Promise<DivisionSession | null>;
 };
 
 const DivisionAuthContext = createContext<DivisionAuthContextValue | null>(null);
@@ -142,6 +151,59 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 		return () => { unsubscribeRef.current?.(); unsubscribeRef.current = null; };
 	}, [session]);
 
+	// --- アクセストークンを新しく保つ ---
+	// Supabase のアクセストークンは約 1 時間で切れる。PC はスマホが送るトークンで毎回アカウントを確かめるので、
+	// 古いトークンのままだと PC に断られて接続が切れる。Supabase が更新したトークンを state と保存先に反映し、
+	// アプリが前面にいる間だけ自動更新を回す (React Native ではバックグラウンドでタイマーが止まるため)。
+	const sessionRef = useRef<DivisionSession | null>(null);
+	sessionRef.current = session;
+	const adoptSession = useCallback((next: DivisionSession) => {
+		const current = sessionRef.current;
+		if (!current || current.userId !== next.userId) return;
+		if (current.accessToken === next.accessToken && current.refreshToken === next.refreshToken) return;
+		sessionRef.current = next;
+		setSession(next);
+		void saveDivisionSession(next);
+	}, []);
+
+	useEffect(() => {
+		if (!session?.userId) return;
+		const sb = getDivisionSupabase();
+		const { data } = sb.auth.onAuthStateChange((event, s) => {
+			if ((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && s?.access_token && s.user?.id) {
+				const current = sessionRef.current;
+				if (current) adoptSession({ ...current, accessToken: s.access_token, refreshToken: s.refresh_token ?? current.refreshToken });
+			}
+		});
+		const onActive = () => {
+			void sb.auth.startAutoRefresh();
+			// 前面に戻ったとき、切れている (切れかけの) トークンはすぐ更新する
+			const current = sessionRef.current;
+			const exp = current ? accessTokenExpiresAt(current.accessToken) : null;
+			if (current && exp !== null && exp - Date.now() < 5 * 60_000) {
+				void refreshDivisionSession(current).then(next => { if (next) adoptSession(next); });
+			}
+		};
+		if (AppState.currentState === 'active') onActive();
+		const sub = AppState.addEventListener('change', state => {
+			if (state === 'active') onActive();
+			else void sb.auth.stopAutoRefresh();
+		});
+		return () => {
+			data.subscription.unsubscribe();
+			sub.remove();
+			void sb.auth.stopAutoRefresh();
+		};
+	}, [session?.userId, adoptSession]);
+
+	const refreshSession = useCallback(async (): Promise<DivisionSession | null> => {
+		const current = sessionRef.current;
+		if (!current) return null;
+		const next = await refreshDivisionSession(current);
+		if (next) adoptSession(next);
+		return next;
+	}, [adoptSession]);
+
 	const login = useCallback(async (email: string, password: string) => {
 		const next = await signInWithDivision(email, password);
 		setSession(next);
@@ -172,6 +234,7 @@ export const DivisionAuthProvider = ({ children }: { children: React.ReactNode }
 		session, isRestoring, login, logout, newSessionIds, dismissNewSession,
 		termsAccepted: !needsTermsAgreement(acceptedTermsVersion),
 		acceptTerms,
+		refreshSession,
 	};
 
 	return <DivisionAuthContext.Provider value={value}>{children}</DivisionAuthContext.Provider>;

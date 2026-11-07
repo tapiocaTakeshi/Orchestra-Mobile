@@ -35,6 +35,8 @@ import { OrchestraApiError } from '../api/client';
 import { ChatMessage, PendingReview, ThreadSummary, WorkflowAnswer } from '../api/types';
 import { Markdown } from '../components/Markdown';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
+import { DocumentList } from '../components/DocumentList';
+import { ReviewOutputsSheet } from '../components/ReviewOutputsSheet';
 import {
 	Badge,
 	Button,
@@ -206,7 +208,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 
 	const toast = useToast();
 	const [draft, setDraft] = useState('');
-	const [sheet, setSheet] = useState<'menu' | 'cost' | null>(null);
+	const [sheet, setSheet] = useState<'menu' | 'cost' | 'documents' | 'review' | null>(null);
 	const [sending, setSending] = useState(false);
 	const [showJump, setShowJump] = useState(false);
 	const insets = useSafeAreaInsets();
@@ -346,6 +348,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						</View>
 					) : null}
 					{headerTitle !== undefined ? <IconButton icon='clock' accessibilityLabel='最近のチャット' onPress={() => setSheet('menu')} /> : null}
+					<IconButton icon='file-text' accessibilityLabel='論文・仕様書・デザイン' disabled={lost} onPress={() => setSheet('documents')} />
 					<IconButton icon='edit' accessibilityLabel='新しいチャット' disabled={lost} onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
 				</View>
 
@@ -431,6 +434,17 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 							</ScrollView>
 						) : null}
 						<Muted>{approval.note}</Muted>
+						{chat?.pendingReview?.outputs?.length ? (
+							<Button
+								title={chat.pendingReview.contentTruncated ? '全文を開いて編集' : '開いて編集'}
+								icon='edit-3'
+								variant='secondary'
+								size='sm'
+								disabled={lost}
+								accessibilityLabel='成果物を開いて編集'
+								onPress={() => setSheet('review')}
+							/>
+						) : null}
 						<View style={styles.approvalButtons}>
 							<Button title={approval.reject} variant='secondary' disabled={lost} onPress={() => void act(() => client.rejectTool(), approval.rejected)} style={styles.flex} />
 							<Button title={approval.approve} disabled={lost} onPress={() => void act(() => client.approveTool(), approval.approved)} style={styles.flex} />
@@ -520,6 +534,16 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						</ScrollView>
 					</Sheet>
 				) : null}
+
+				{sheet === 'documents' ? (
+					<Sheet title='論文・仕様書・デザイン' eyebrow={ide?.workspaceName ? `${ide.workspaceName} の .division` : '.division'} onClose={() => setSheet(null)}>
+						<ScrollView contentContainerStyle={styles.sheetContent}>
+							<DocumentList />
+						</ScrollView>
+					</Sheet>
+				) : null}
+
+				{sheet === 'review' ? <ReviewOutputsSheet threadId={chat?.threadId} onClose={() => setSheet(null)} /> : null}
 
 				{sheet === 'cost' ? (
 					<Sheet title='コスト調整' eyebrow='入力中の指示' onClose={() => setSheet(null)}>

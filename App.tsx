@@ -21,6 +21,7 @@ import { TermsAgreementGate } from './src/components/TermsSheet';
 import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
+import { DocumentsScreen } from './src/screens/DocumentsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { KanbanScreen } from './src/screens/KanbanScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
@@ -44,6 +45,7 @@ const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOp
 		case 'tuning': return <TuningScreen onOpenPage={onOpenPage} />;
 		case 'actions': return <QuickActionsScreen />;
 		case 'settings': return <SettingsScreen />;
+		case 'documents': return <DocumentsScreen />;
 	}
 };
 
