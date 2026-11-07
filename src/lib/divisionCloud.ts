@@ -39,7 +39,7 @@
  * ラウンドごとにレビュアーが確かめて (review イベント)、目標を達成するまで作業を繰り返す。
  * 'confirm' は未達のラウンドごとに止まり、continueGoal で次のラウンドへ進む。
  *
- * 承認モード (作成時の approvalMode。Division Project だけ): coder 以外の役割のタスクが成果物 (.division/REVIEW.md など) を
+ * 承認モード (作成時の approvalMode。Division Project だけ、既定オン): coder 以外の役割のタスクが成果物 (.division/REVIEW.md など) を
  * 書き終えるたびに awaiting_approval で止まる。GET .../approval で中身を読み、POST .../approval で
  * 承認 (次のタスクへ) か差し戻し (同じ役割がフィードバックに沿ってやり直す) をすると再開する (approval イベント)。
  *
@@ -530,7 +530,8 @@ export const createSessionBody = (input: CreateCloudSessionInput): Record<string
 	if (input.projectId?.trim()) body.projectId = input.projectId.trim();
 	if (input.workspaceName?.trim()) body.workspaceName = input.workspaceName.trim();
 	if (isGoalLoopMode(input.goalLoop)) body.goalLoop = input.goalLoop;
-	if (input.approvalMode === true && isDivisionProjectModel(input.model)) body.approvalMode = true;
+	// 承認モードはサーバーの既定がオン (文書を確かめるタイミングを作る) なので、オフも明示して送る
+	if (typeof input.approvalMode === 'boolean' && isDivisionProjectModel(input.model)) body.approvalMode = input.approvalMode;
 	return body;
 };
 

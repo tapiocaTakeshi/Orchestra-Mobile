@@ -461,7 +461,7 @@ const EMPTY_DRAFT: Draft = {
 	title: '',
 	projectId: '',
 	goalLoop: DEFAULT_GOAL_LOOP,
-	approvalMode: false,
+	approvalMode: true,
 	showAdvanced: false,
 };
 
@@ -877,8 +877,13 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 							accessibilityLabel={`モデル: ${draftModelLabel(draft, projects.projects)}。変更する`}
 							onPress={() => onOptionsOpen(true)}
 						/>
-						{draft.modelMode === 'division' && draft.approvalMode ? (
-							<ComposerChip icon='check-square' label='承認モード' accessibilityLabel='承認モード: オン。変更する' onPress={() => onOptionsOpen(true)} />
+						{draft.modelMode === 'division' ? (
+							<ComposerChip
+								icon='check-square'
+								label={draft.approvalMode ? '承認モード' : '承認なし'}
+								accessibilityLabel={`承認モード: ${draft.approvalMode ? 'オン' : 'オフ'}。変更する`}
+								onPress={() => onOptionsOpen(true)}
+							/>
 						) : null}
 						{count > 1 ? (
 							<ComposerChip icon='copy' label={`×${count}`} accessibilityLabel={`並列数 ${count}。変更する`} onPress={() => onOptionsOpen(true)} />
@@ -2333,7 +2338,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repos: [], addingRepo: false, projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
+		setDraft(d => ({ ...d, repos: [], addingRepo: false, projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: true }));
 	}, [session?.userId]);
 
 	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
