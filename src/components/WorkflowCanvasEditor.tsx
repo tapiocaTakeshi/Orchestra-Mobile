@@ -16,7 +16,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
 	GestureResponderEvent, KeyboardAvoidingView, LayoutChangeEvent, Modal, PanResponder, PanResponderGestureState, Platform, Pressable, ScrollView, StyleSheet, Text, View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, ErrorBanner, Icon, IconButton, Input, Muted, confirmAction } from './ui';
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 import {
@@ -162,6 +162,9 @@ export const WorkflowCanvasEditor = ({ workflow: initial, roleOptions, onSave, o
 	const [view, setView] = useState<CanvasView>({ x: 24, y: 24, zoom: 1 });
 	const [moving, setMoving] = useState<{ id: string; x: number; y: number } | null>(null);
 	const [wire, setWire] = useState<{ from: string; x: number; y: number; over: string | null } | null>(null);
+	// Modal は別の画面として出るので、中の SafeAreaView は余白を取れず (0 になり) ステータスバーやホームバーに重なることがある。
+	// 全画面のモーダルはアプリと同じ画面全体を覆うので、アプリが受け取っている余白をそのまま付ける。
+	const insets = useSafeAreaInsets();
 	const dirty = history.length > 0;
 
 	const options = useMemo(() => workflowRoleOptions(workflow, roleOptions), [workflow, roleOptions]);
@@ -368,8 +371,15 @@ export const WorkflowCanvasEditor = ({ workflow: initial, roleOptions, onSave, o
 	};
 
 	return (
-		<Modal animationType='slide' presentationStyle='fullScreen' onRequestClose={() => void close()}>
-			<SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+		<Modal
+			animationType='slide'
+			presentationStyle='fullScreen'
+			// Android: アプリ本体と同じく端まで描き、上下の余白は insets で空ける (付けないと余白が二重・ずれる)
+			statusBarTranslucent
+			navigationBarTranslucent
+			onRequestClose={() => void close()}
+		>
+			<View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }]}>
 				<View style={styles.header}>
 					<IconButton icon='x' accessibilityLabel='閉じる' onPress={() => void close()} />
 					<View style={styles.flex}>
@@ -545,7 +555,7 @@ export const WorkflowCanvasEditor = ({ workflow: initial, roleOptions, onSave, o
 				</KeyboardAvoidingView>
 
 				{picker ? <BlockPicker picker={picker} roles={options} onPick={pick} onClose={() => setPicker(null)} /> : null}
-			</SafeAreaView>
+			</View>
 		</Modal>
 	);
 };
