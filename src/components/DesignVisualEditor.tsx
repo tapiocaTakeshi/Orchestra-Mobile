@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, ChipGroup, ErrorBanner, Input, Muted, Row, SegmentedControl } from './ui';
 import { HtmlPreview } from './HtmlPreview';
+import { AiEdit, AiEditPanel } from './AiEditPanel';
 import { colors, fontSize, radius, spacing } from '../theme';
 import {
 	HtmlPatchError,
@@ -53,13 +54,16 @@ export const toHex = (v: string): string => {
 
 type Tab = 'element' | 'tokens';
 
-export const DesignVisualEditor = ({ name, value, onChangeText, css, height = 420 }: {
+export const DesignVisualEditor = ({ name, value, onChangeText, css, height = 420, aiEdit, aiEditErrorText }: {
 	name: string;
 	value: string;
 	onChangeText: (text: string) => void;
 	/** HTML が読む CSS (href → 中身) */
 	css?: Record<string, string>;
 	height?: number;
+	/** 選んだ要素を、デザインのロール (designer) の AI に直してもらう */
+	aiEdit?: AiEdit;
+	aiEditErrorText?: (e: unknown) => string;
 }) => {
 	const doc = useMemo<ParsedHtml>(() => parseHtml(value), [value]);
 	const [selected, setSelected] = useState<number | null>(null);
@@ -139,6 +143,22 @@ export const DesignVisualEditor = ({ name, value, onChangeText, css, height = 42
 			{tab === 'tokens' ? (
 				<TokensPanel tokens={tokens} onChange={(n, v) => apply(d => setDesignToken(d, n, v))} />
 			) : info ? (
+				<>
+				{aiEdit && doc.nodes[info.id] ? (
+					<AiEditPanel
+						key={`ai-${info.id}`}
+						value={value}
+						selection={{ start: doc.nodes[info.id].start, end: doc.nodes[info.id].end }}
+						what={`選んだ <${info.tag}> 要素`}
+						aiEdit={aiEdit}
+						errorText={aiEditErrorText}
+						onApply={next => {
+							undo.current = [...undo.current, value].slice(-MAX_UNDO);
+							setUndoCount(undo.current.length);
+							onChangeText(next);
+						}}
+					/>
+				) : null}
 				<ElementPanel
 					key={info.id}
 					info={info}
@@ -151,6 +171,7 @@ export const DesignVisualEditor = ({ name, value, onChangeText, css, height = 42
 					onDuplicate={() => apply(d => duplicateElement(d, info.id))}
 					onDelete={() => { apply(d => deleteElement(d, info.id)); setSelected(null); }}
 				/>
+				</>
 			) : (
 				<Muted>プレビューの文字・ボタン・枠などをタップすると、ここで見た目を直せます。リンクやボタンは押しても動かず、選ぶだけです。</Muted>
 			)}

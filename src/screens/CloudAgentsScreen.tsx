@@ -127,6 +127,8 @@ import {
 	fetchCloudChanges,
 	getCloudApproval,
 	getCloudCommandApproval,
+	aiEditCloudDocument,
+	aiEditErrorText,
 	CloudCommandApproval,
 	resolveCloudCommandApproval,
 	toCloudCommandApprovalEvent,
@@ -1546,14 +1548,16 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						</Muted>
 					) : (
 						<>
-							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直す */}
+							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直し、選んだ部分はロールの AI にも頼める */}
 							<DocumentView
 								name={approval.file}
 								value={content}
 								onChangeText={busy ? undefined : setContent}
 								height={360}
+								aiEdit={req => aiEditCloudDocument(auth, sessionId, { ...req, path: approval.file })}
+								aiEditErrorText={aiEditErrorText}
 							/>
-							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直してから承認できます。'}</Muted>
+							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直すか、選んだ部分をロールの AI に直してもらってから承認できます。'}</Muted>
 						</>
 					)}
 					<Input

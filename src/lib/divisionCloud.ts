@@ -2009,3 +2009,66 @@ export const saveCloudDocument = async (session: DivisionSession, id: string, pa
 		body: baseMtime === undefined ? { path, content } : { path, content, baseMtime },
 		timeoutMs: CLOUD_TIMEOUTS.changes,
 	}), path);
+
+// ---------------------------------------------------------------------------
+// 文書の一部を、その文書を書くロールの AI で直す (POST .../documents/ai-edit)。
+// サーバーは書き込まず提案だけ返す。ユーザーが差分を見て「適用」したら、編集中の文書に入る (保存・承認はいつもどおり)。
+// ---------------------------------------------------------------------------
+
+export type DocumentAiEditRequest = {
+	path: string;
+	start: number;
+	end: number;
+	selected: string;
+	instruction: string;
+	/** 今の (保存前かもしれない) 文書。選択はこの文書の位置 */
+	content: string;
+};
+
+export type DocumentAiEditProposal = {
+	path: string;
+	start: number;
+	end: number;
+	original: string;
+	replacement: string;
+	/** 直したロール (普通のセッションでは '') と、その表示名・モデル */
+	role: string;
+	roleName: string;
+	model: string;
+};
+
+export const toDocumentAiEditProposal = (raw: unknown): DocumentAiEditProposal | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const p = raw as Record<string, unknown>;
+	if (typeof p.replacement !== 'string' || typeof p.original !== 'string') return null;
+	const start = num(p.start, Number.NaN);
+	const end = num(p.end, Number.NaN);
+	if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return null;
+	return { path: str(p.path), start, end, original: p.original, replacement: p.replacement, role: str(p.role), roleName: str(p.roleName) || 'AI', model: str(p.model) };
+};
+
+/** 選んだ部分の書き直しを、その文書のロールの AI に頼む (書き込まない)。 */
+export const aiEditCloudDocument = async (session: DivisionSession, id: string, req: DocumentAiEditRequest): Promise<DocumentAiEditProposal> => {
+	const data = await request<{ proposal?: unknown }>(session, `${idPath(id)}/documents/ai-edit`, {
+		method: 'POST',
+		body: req,
+		// The model rewrites the part: give it as long as a model call may take.
+		timeoutMs: 200_000,
+	});
+	const proposal = toDocumentAiEditProposal(data.proposal);
+	if (!proposal) throw new Error('AI の提案を読み取れませんでした。');
+	return proposal;
+};
+
+/** 提案を文書に入れる。提案のあとで選んだ部分が変わっていれば null (入れない)。 */
+export const applyAiEditProposal = (text: string, p: Pick<DocumentAiEditProposal, 'start' | 'end' | 'original' | 'replacement'>): string | null =>
+	text.slice(p.start, p.end) === p.original ? text.slice(0, p.start) + p.replacement + text.slice(p.end) : null;
+
+const AI_EDIT_CODES = new Set(['ai_edit_unsupported', 'bad_selection', 'document_changed', 'model_failed', 'unusable_reply', 'no_model', 'not_a_document', 'file_not_found', 'document_too_large']);
+
+/** AI の編集のエラー: サーバーの説明 (日本語) を優先する。 */
+export const aiEditErrorText = (e: unknown): string => {
+	if (e instanceof DivisionCloudError && e.code && AI_EDIT_CODES.has(e.code) && e.message) return e.message;
+	if (e instanceof DivisionCloudError && e.status === 404 && !e.code) return 'この Division サーバーは AI での部分編集に未対応です。';
+	return cloudErrorText(e);
+};

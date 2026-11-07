@@ -86,3 +86,28 @@ describe('DesignVisualEditor', () => {
 		expect(changes.at(-1)).toContain('<h1>ようこそ</h1>');
 	});
 });
+
+describe('DesignVisualEditor with aiEdit', () => {
+	it('asks the designer\'s AI to rewrite the tapped element', async () => {
+		const p = parseHtml(PAGE).nodes.find(n => n.tag === 'p')!;
+		const aiEdit = jest.fn(async (req: { start: number; end: number; selected: string }) => ({
+			path: 'design/index.html', start: req.start, end: req.end, original: req.selected, replacement: '<p class="lead">新しい説明</p>', role: 'designer', roleName: 'デザイン', model: '',
+		}));
+		const changes: string[] = [];
+		const Wrapped = () => {
+			const [value, setValue] = React.useState(PAGE);
+			return <DesignVisualEditor name='design/index.html' value={value} onChangeText={v => { setValue(v); changes.push(v); }} aiEdit={aiEdit} />;
+		};
+		let r!: ReactTestRenderer;
+		await act(async () => { r = create(<Wrapped />); });
+		await act(async () => { preview.onMessage!({ __od: true, type: 'select', id: p.id }); });
+		await act(async () => { r.root.findAll(n => n.props.accessibilityLabel === 'AI への指示' && typeof n.props.onChangeText === 'function')[0].props.onChangeText('リード文に'); });
+		await act(async () => { r.root.findAll(n => n.props.title === 'AI に頼む' && typeof n.props.onPress === 'function')[0].props.onPress(); });
+		expect(aiEdit.mock.calls[0][0]).toMatchObject({ start: p.start, end: p.end, selected: '<p>説明</p>' });
+		await act(async () => { r.root.findAll(n => n.props.title === '適用' && typeof n.props.onPress === 'function')[0].props.onPress(); });
+		expect(changes.at(-1)).toContain('<p class="lead">新しい説明</p>');
+		// Undo brings the element back.
+		await act(async () => { r.root.findAll(n => n.props.accessibilityLabel === '元に戻す' && typeof n.props.onPress === 'function')[0].props.onPress(); });
+		expect(changes.at(-1)).toContain('<p>説明</p>');
+	});
+});
