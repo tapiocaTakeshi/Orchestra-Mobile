@@ -82,6 +82,7 @@ import {
 	PullRequestBar,
 	PullRequestEventCard,
 	PullRequestSheet,
+	RepoPullRequests,
 	currentPullRequest,
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
@@ -102,6 +103,7 @@ import {
 	CloudSessionStatus,
 	DivisionTimeline,
 	MAX_PARALLEL_SESSIONS,
+	MAX_SESSION_REPOS,
 	PatchSection,
 	PlanProgress,
 	PlanTaskState,
@@ -129,6 +131,7 @@ import {
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	multiRepos,
 	CLOUD_SESSION_FILTERS,
 	CloudSessionFilter,
 	isDivisionProjectModel,
@@ -402,10 +405,13 @@ type Draft = {
 	prompt: string;
 	count: string;
 	source: 'repo' | 'empty';
-	/** GitHub 連携で選んだリポジトリ (未選択なら null) */
-	repo: GitHubRepo | null;
-	/** 選んだリポジトリのブランチ (空なら既定のブランチ) */
-	repoBranch: string;
+	/**
+	 * GitHub 連携で選んだリポジトリとブランチ (空のブランチは既定のブランチ)。Claude Code のように複数選べて、
+	 * 2 個以上ならサンドボックスの workspace 直下にそれぞれのディレクトリで clone される
+	 */
+	repos: DraftRepo[];
+	/** 選んだリポジトリがあっても一覧を開いている (「リポジトリを追加」) */
+	addingRepo: boolean;
 	/** 「URL を直接入力」を開いているか (GitHub 連携が使えないときは常に直接入力) */
 	manualUrl: boolean;
 	repoUrl: string;
@@ -427,6 +433,8 @@ type Draft = {
 	showAdvanced: boolean;
 };
 
+type DraftRepo = { repo: GitHubRepo; branch: string };
+
 const modelSelectionOf = (draft: Pick<Draft, 'modelMode' | 'model' | 'projectId'>): CloudModelSelection =>
 	({ mode: draft.modelMode, model: draft.model, projectId: draft.projectId });
 
@@ -434,8 +442,8 @@ const EMPTY_DRAFT: Draft = {
 	prompt: '',
 	count: '1',
 	source: 'repo',
-	repo: null,
-	repoBranch: '',
+	repos: [],
+	addingRepo: false,
 	manualUrl: false,
 	repoUrl: '',
 	branch: '',
@@ -473,8 +481,8 @@ const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUr
 		const branch = validateBranch(draft.branch);
 		return { repoUrl, branch, settings: model && !repoUrl && !branch };
 	}
-	const branch = validateBranch(draft.repoBranch);
-	return { repoUrl: null, branch, settings: model && mode === 'picker' && connected && !!draft.repo && !branch };
+	const branch = draft.repos.map(r => validateBranch(r.branch)).find(Boolean) ?? null;
+	return { repoUrl: null, branch, settings: model && mode === 'picker' && connected && draft.repos.length > 0 && !branch };
 };
 
 const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): RepoMode => {
@@ -489,7 +497,11 @@ const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): 
 const draftSourceLabel = (draft: Draft, mode: RepoMode): string => {
 	if (draft.source === 'empty') return '空のフォルダ';
 	if (mode === 'manual') return draft.repoUrl.trim() ? repoLabel(draft.repoUrl) : 'リポジトリの URL';
-	if (draft.repo) return draft.repoBranch.trim() ? `${draft.repo.fullName} @ ${draft.repoBranch.trim()}` : draft.repo.fullName;
+	const [first, ...rest] = draft.repos;
+	if (first) {
+		const one = first.branch.trim() ? `${first.repo.fullName} @ ${first.branch.trim()}` : first.repo.fullName;
+		return rest.length ? `${first.repo.name} ほか ${rest.length} 件` : one;
+	}
 	return mode === 'loading' ? 'GitHub を確認中…' : 'リポジトリを選ぶ';
 };
 
@@ -500,11 +512,11 @@ const draftModelLabel = (draft: Draft, projects: CloudProjectOption[]): string =
 	return '既定のモデル';
 };
 
-/** 起動に使うリポジトリ。一覧から選んでいれば { fullName }、直接入力なら { url }。 */
-const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
-	if (draft.source !== 'repo') return undefined;
-	if (mode === 'picker' && draft.repo) return { fullName: draft.repo.fullName, branch: draft.repoBranch.trim() || undefined };
-	return { url: draft.repoUrl, branch: draft.branch.trim() || undefined };
+/** 起動に使うリポジトリ。一覧から選んでいれば { fullName } (複数可)、直接入力なら { url }。 */
+const draftRepos = (draft: Draft, mode: RepoMode): CloudRepo[] => {
+	if (draft.source !== 'repo') return [];
+	if (mode === 'picker' && draft.repos.length) return draft.repos.map(r => ({ fullName: r.repo.fullName, branch: r.branch.trim() || undefined }));
+	return [{ url: draft.repoUrl, branch: draft.branch.trim() || undefined }];
 };
 
 /** 起動の設定 (始める場所・モデル・プロジェクト・並列数・題名)。指示は画面下の入力欄で書く。 */
@@ -529,20 +541,34 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 	const markDisconnected = github.markDisconnected;
 	const onNotConnected = useCallback(() => {
 		markDisconnected();
-		onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+		onChange(d => ({ ...d, repos: [], addingRepo: false }));
 	}, [markDisconnected, onChange]);
 
 	const disconnect = async () => {
 		if (await github.disconnect()) {
-			onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+			onChange(d => ({ ...d, repos: [], addingRepo: false }));
 			void clearLastCloudRepo();
 		}
 	};
 
+	// 一覧で押したリポジトリを足す (選んである物を押したら外す)
 	const selectRepo = useCallback((repo: GitHubRepo) => {
-		onChange(d => ({ ...d, repo, repoBranch: d.repo?.fullName === repo.fullName ? d.repoBranch : '' }));
+		onChange(d => {
+			if (d.repos.some(r => r.repo.fullName === repo.fullName)) {
+				return { ...d, repos: d.repos.filter(r => r.repo.fullName !== repo.fullName) };
+			}
+			if (d.repos.length >= MAX_SESSION_REPOS) return d;
+			return { ...d, repos: [...d.repos, { repo, branch: '' }], addingRepo: false };
+		});
 	}, [onChange]);
-	const setRepoBranch = useCallback((value: string) => onChange(d => ({ ...d, repoBranch: value })), [onChange]);
+	const setRepoBranch = useCallback((fullName: string, value: string) => onChange(d => ({
+		...d,
+		repos: d.repos.map(r => (r.repo.fullName === fullName ? { ...r, branch: value } : r)),
+	})), [onChange]);
+	const removeRepo = useCallback((fullName: string) => onChange(d => ({
+		...d,
+		repos: d.repos.filter(r => r.repo.fullName !== fullName),
+	})), [onChange]);
 
 	return (
 		<Sheet title='起動の設定' eyebrow='クラウドエージェント' onClose={onClose}>
@@ -568,19 +594,41 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 						connected ? (
 							<>
 								<GitHubAccountRow status={status} disconnecting={github.disconnecting} onDisconnect={() => void disconnect()} />
-								{draft.repo ? (
+								{draft.repos.map(r => (
 									<GitHubRepoSelection
+										key={r.repo.fullName}
 										auth={auth}
-										repo={draft.repo}
-										branch={draft.repoBranch}
-										onBranch={setRepoBranch}
-										onChange={() => onChange(d => ({ ...d, repo: null, repoBranch: '' }))}
+										repo={r.repo}
+										branch={r.branch}
+										onBranch={value => setRepoBranch(r.repo.fullName, value)}
+										onChange={() => removeRepo(r.repo.fullName)}
+										changeLabel='外す'
 										onNotConnected={onNotConnected}
 									/>
-								) : (
-									<GitHubRepoPicker auth={auth} onSelect={selectRepo} onNotConnected={onNotConnected} />
-								)}
-								<Muted>非公開のリポジトリも、連携したアカウントの権限でサーバーが clone します。</Muted>
+								))}
+								{draft.repos.length === 0 || draft.addingRepo ? (
+									<>
+										<GitHubRepoPicker
+											auth={auth}
+											onSelect={selectRepo}
+											selected={draft.repos.map(r => r.repo.fullName)}
+											onNotConnected={onNotConnected}
+										/>
+										{draft.addingRepo && draft.repos.length > 0 ? (
+											<Button title='閉じる' variant='ghost' size='sm' onPress={() => set('addingRepo', false)} style={styles.alignStart} />
+										) : null}
+									</>
+								) : draft.repos.length < MAX_SESSION_REPOS ? (
+									<Pressable accessibilityRole='button' onPress={() => set('addingRepo', true)} style={styles.linkButton}>
+										<Icon name='plus' size={14} color={colors.accentText} />
+										<Text style={styles.linkText}>リポジトリを追加</Text>
+									</Pressable>
+								) : null}
+								<Muted>
+									{draft.repos.length > 1
+										? `${draft.repos.length} 個のリポジトリを、サンドボックスの workspace 直下にそれぞれのフォルダ (${draft.repos.map(r => r.repo.name).join(', ')}) として clone します。PR はリポジトリごとに作れます。`
+										: 'リポジトリは複数選べます (最大 ' + MAX_SESSION_REPOS + ' 個)。非公開のリポジトリも、連携したアカウントの権限でサーバーが clone します。'}
+								</Muted>
 							</>
 						) : (
 							<GitHubConnectPanel
@@ -731,7 +779,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
 	onGoalLoopTouched: () => void;
-	onLaunch: (repo: CloudRepo | undefined) => void;
+	onLaunch: (repos: CloudRepo[]) => void;
 	optionsOpen: boolean;
 	onOptionsOpen: (open: boolean) => void;
 	/** 「コスト」チップに添える金額 (一覧の料金の合計)。分からなければ出さない */
@@ -757,14 +805,14 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	// 連携済みなら、前回選んだリポジトリとブランチを選んだ状態にする (1 回だけ)。
 	const preselectTried = useRef(false);
 	useEffect(() => {
-		if (!connected || draft.repo || preselectTried.current) return;
+		if (!connected || draft.repos.length || preselectTried.current) return;
 		preselectTried.current = true;
 		void loadLastCloudRepo(auth.userId).then(last => {
-			if (last) onChange(d => (d.repo ? d : { ...d, repo: last.repo, repoBranch: last.branch }));
+			if (last) onChange(d => (d.repos.length ? d : { ...d, repos: [{ repo: last.repo, branch: last.branch }] }));
 		});
-	}, [connected, draft.repo, auth.userId, onChange]);
+	}, [connected, draft.repos.length, auth.userId, onChange]);
 
-	const sourceMissing = draft.source === 'repo' && (mode === 'picker' ? !draft.repo : mode === 'manual' ? !!issues.repoUrl || !!issues.branch : false);
+	const sourceMissing = draft.source === 'repo' && (mode === 'picker' ? draft.repos.length === 0 : mode === 'manual' ? !!issues.repoUrl || !!issues.branch : false);
 
 	const toPc = target === 'pc' && !!pcLabel && !!onSendToPc;
 
@@ -779,7 +827,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 			if (mode !== 'loading') onOptionsOpen(true);
 			return;
 		}
-		onLaunch(draftRepo(draft, mode));
+		onLaunch(draftRepos(draft, mode));
 	};
 
 	return (
@@ -1927,6 +1975,11 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		// Picks up the session's pullRequest and the new pull_request event
 		void loadEvents();
 	}, [applyPrResult, loadEvents]);
+	// Multi-repo sessions: each repository's bar keeps its own state; only the log is followed here
+	const onRepoPrSubmitted = useCallback(() => {
+		follow.current = true;
+		void loadEvents();
+	}, [loadEvents]);
 	const pausedSeq = useMemo(() => (active ? null : pausedReviewSeq(events)), [events, active]);
 	const lastDoneSeq = useMemo(() => {
 		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'done') return events[i].seq;
@@ -1970,6 +2023,11 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 			{current.workspaceInfo?.repoFullName && (prState.available || pullRequest) ? (
 				<View style={styles.prBar}>
 					<PullRequestBar auth={auth} session={current} state={prState} onCompose={() => setComposingPr(true)} />
+				</View>
+			) : null}
+			{multiRepos(current.workspaceInfo).some(r => r.fullName) ? (
+				<View style={styles.prBar}>
+					<RepoPullRequests auth={auth} session={current} onSubmitted={onRepoPrSubmitted} />
 				</View>
 			) : null}
 
@@ -2153,7 +2211,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
+		setDraft(d => ({ ...d, repos: [], addingRepo: false, projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
 	}, [session?.userId]);
 
 	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
@@ -2247,15 +2305,20 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		}
 	}, [session, patchSession, toast]);
 
-	const launch = useCallback(async (repo: CloudRepo | undefined) => {
+	const launch = useCallback(async (repos: CloudRepo[]) => {
 		if (!session) return;
 		const count = Number(draft.count);
 		setOptionsOpen(false);
 		setLaunchError(null);
 		setLaunching(n => n + count);
 		// 次に開いたとき同じリポジトリを選んだ状態にする
-		if (repo && isFullNameRepo(repo) && draft.repo) {
-			void saveLastCloudRepo(session.userId, { repo: draft.repo, branch: repo.branch ?? '' });
+		// (後ろから保存して、最初に選んだ物を履歴の先頭にする)
+		if (repos.some(isFullNameRepo)) {
+			const picks = draft.repos.slice().reverse();
+			void picks.reduce<Promise<void>>(
+				(prev, r) => prev.then(() => saveLastCloudRepo(session.userId, { repo: r.repo, branch: r.branch.trim() })),
+				Promise.resolve(),
+			);
 		}
 		// 次に開いたとき同じモデル (Division Project ならそのプロジェクト) を選んだ状態にする
 		const selection = modelSelectionOf(draft);
@@ -2264,7 +2327,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
 				count,
-				repo,
+				repos,
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
@@ -2571,7 +2634,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					draft={draft}
 					onChange={setDraft}
 					onGoalLoopTouched={() => { goalLoopTouched.current = true; }}
-					onLaunch={repo => void launch(repo)}
+					onLaunch={repos => void launch(repos)}
 					optionsOpen={optionsOpen}
 					onOptionsOpen={setOptionsOpen}
 					costLabel={cost.known > 0 ? formatUsdCompact(cost.totalUsd) : null}
