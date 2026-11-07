@@ -3,12 +3,15 @@
  *   - 論文 … .division/paper.md (searcher / researcher が書く)
  *   - 仕様書 … .division/specification.md (writer が書く)
  *   - デザイン … .division/design/<画面>.html (designer が書く。index.html が先頭)
+ *   - ワークフロー … .division/workflow.json (leader の計画の図。クラウドのセッションの文書に載る)
+ * PC の文書もクラウドのセッションの文書も、同じ形 (RemoteDocument) で扱う (lib/documentSource.ts)。
  */
 
 import type { DocumentKind, EditedOutput, RemoteDocument, ReviewOutputs } from '../api/types';
 import type { IconName } from '../components/ui';
 
 export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
+	workflow: 'ワークフロー',
 	paper: '論文',
 	specification: '仕様書',
 	design: 'デザイン',
@@ -16,6 +19,7 @@ export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
 };
 
 export const DOCUMENT_KIND_ICON: Record<DocumentKind, IconName> = {
+	workflow: 'git-branch',
 	paper: 'book-open',
 	specification: 'file-text',
 	design: 'layout',
@@ -27,6 +31,7 @@ export const isHtmlPath = (path: string): boolean => /\.html?$/i.test(path);
 /** 成果物のファイル名 (例: paper.md, design/index.html) から文書の種類 */
 export const documentKindOf = (name: string): DocumentKind => {
 	const base = name.replace(/^\.division\//, '');
+	if (base === 'workflow.json') return 'workflow';
 	if (base === 'paper.md') return 'paper';
 	if (base === 'specification.md') return 'specification';
 	if (base.startsWith('design/') || /^DESIGN\.html?$/i.test(base)) return 'design';
@@ -35,13 +40,13 @@ export const documentKindOf = (name: string): DocumentKind => {
 
 /** 一覧の見出し (論文・仕様書はその名前、デザインはページ名) */
 export const documentTitle = (doc: Pick<RemoteDocument, 'kind' | 'name'>): string => {
-	if (doc.kind === 'paper' || doc.kind === 'specification') return DOCUMENT_KIND_LABEL[doc.kind];
+	if (doc.kind === 'workflow' || doc.kind === 'paper' || doc.kind === 'specification') return DOCUMENT_KIND_LABEL[doc.kind];
 	return doc.name.replace(/^design\//, '');
 };
 
-/** 種類ごとにまとめる (論文 → 仕様書 → デザイン → 成果物) */
+/** 種類ごとにまとめる (ワークフロー → 論文 → 仕様書 → デザイン → 成果物) */
 export const groupDocuments = (docs: RemoteDocument[]): { kind: DocumentKind; docs: RemoteDocument[] }[] =>
-	(['paper', 'specification', 'design', 'output'] as DocumentKind[])
+	(['workflow', 'paper', 'specification', 'design', 'output'] as DocumentKind[])
 		.map(kind => ({ kind, docs: docs.filter(d => d.kind === kind) }))
 		.filter(g => g.docs.length > 0);
 

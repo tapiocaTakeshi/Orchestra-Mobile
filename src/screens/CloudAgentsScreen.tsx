@@ -87,6 +87,8 @@ import {
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
 import { DocumentView } from '../components/DocumentView';
+import { DocumentList } from '../components/DocumentList';
+import { cloudDocumentSource } from '../lib/documentSource';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
 	CloudApproval,
@@ -1686,11 +1688,13 @@ const ChangesView = ({ data, loading, error, onReload }: {
 // ---------------------------------------------------------------------------
 
 /** 詳細の見出し。題名の下に「リポジトリ · モデル」、右に差分の切り替えとアーカイブ。 */
-const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, archiving, onArchive }: {
+const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, onOpenDocuments, archiving, onArchive }: {
 	session: CloudSession;
 	subtitle: string;
 	showChanges: boolean;
 	onToggleChanges: () => void;
+	/** サンドボックスの .division の文書 (ワークフロー・論文・仕様書・デザイン) を開く。サンドボックスが無ければ undefined */
+	onOpenDocuments?: () => void;
 	archiving: boolean;
 	onArchive: () => void;
 }) => {
@@ -1715,6 +1719,7 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, archivi
 					{showChanges ? 'ログ' : session.changedFiles > 0 ? `${session.changedFiles}` : '差分'}
 				</Text>
 			</Pressable>
+			{onOpenDocuments ? <IconButton icon='book-open' accessibilityLabel='文書 (ワークフロー・論文・仕様書・デザイン)' onPress={onOpenDocuments} /> : null}
 			{archiving
 				? <View style={styles.headerSpinner}><ActivityIndicator size='small' color={colors.fgMuted} /></View>
 				: <IconButton icon='archive' accessibilityLabel='アーカイブ' onPress={onArchive} />}
@@ -1748,6 +1753,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const [stopping, setStopping] = useState(false);
 	const [archiving, setArchiving] = useState(false);
 	const [composingPr, setComposingPr] = useState(false);
+	const [documentsOpen, setDocumentsOpen] = useState(false);
+	// 文書はエージェントが動くたびに変わりうるので、イベントが増えたら (lastSeq) 読み直す
+	const documentSource = useMemo(() => cloudDocumentSource(auth, id, current.lastSeq), [auth, id, current.lastSeq]);
 
 	const [changes, setChanges] = useState<CloudChanges | null>(null);
 	const [changesLoading, setChangesLoading] = useState(false);
@@ -1951,6 +1959,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 					.filter(Boolean).join(' · ')}
 				showChanges={showChanges}
 				onToggleChanges={() => setTab(showChanges ? 'log' : 'changes')}
+				onOpenDocuments={current.status !== 'provisioning' && current.status !== 'uploading' ? () => setDocumentsOpen(true) : undefined}
 				archiving={archiving}
 				onArchive={() => void archive()}
 			/>
@@ -2053,6 +2062,14 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 			) : (
 				<ChangesView data={changes} loading={changesLoading} error={changesError} onReload={() => void loadChanges()} />
 			)}
+
+			{documentsOpen ? (
+				<Sheet title='文書' eyebrow={`${current.title} · サンドボックスの .division`} onClose={() => setDocumentsOpen(false)}>
+					<ScrollView contentContainerStyle={styles.documentsContent}>
+						<DocumentList source={documentSource} />
+					</ScrollView>
+				</Sheet>
+			) : null}
 
 			{composingPr && prState.info ? (
 				<PullRequestSheet
@@ -2768,6 +2785,7 @@ const styles = StyleSheet.create({
 		borderWidth: 1,
 		borderColor: colors.borderStrong,
 	},
+	documentsContent: { padding: spacing.lg, gap: spacing.md },
 	diffPillActive: { backgroundColor: colors.accent, borderColor: colors.accent },
 	diffPillText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', fontVariant: ['tabular-nums'] },
 	headerSpinner: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },

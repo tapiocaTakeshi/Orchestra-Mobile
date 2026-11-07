@@ -165,8 +165,11 @@ export type ReviewOutput = { role: string; mdFileName: string; mdFilePath: strin
 export type ReviewOutputs = { flowRole: string; title: string; outputs: ReviewOutput[] };
 export type EditedOutput = { mdFileName: string; mdContent: string };
 
-/** .division の下の文書 (GET /api/documents)。path はワークスペースからの相対パス */
-export type DocumentKind = 'paper' | 'specification' | 'design' | 'output';
+/**
+ * .division の下の文書 (PC: GET /api/documents、クラウド: GET /api/cloud-sessions/:id/documents)。path はワークスペースからの相対パス。
+ * workflow (.division/workflow.json) はクラウドのセッションだけが一覧に載せる
+ */
+export type DocumentKind = 'workflow' | 'paper' | 'specification' | 'design' | 'output';
 export type RemoteDocument = { path: string; name: string; kind: DocumentKind; size: number; mtime: number };
 export type RemoteDocumentContent = { path: string; content: string; size: number; mtime: number };
 
