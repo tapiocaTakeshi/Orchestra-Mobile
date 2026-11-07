@@ -9,6 +9,7 @@
  *
  * The server commits and pushes with the user's GitHub token; the device only sends title, body and branch.
  * Sessions from a URL, a PC folder or an empty folder never show any of this (canOfferPullRequest).
+ * Sessions started from several repositories get one bar (and sheet) per GitHub repository (RepoPullRequests).
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -20,6 +21,7 @@ import {
 	CloudPullRequestInfo,
 	CloudPullRequestState,
 	CloudSession,
+	CloudSessionRepo,
 	CreatePullRequestResult,
 	PULL_REQUEST_LIMITS,
 	PULL_REQUEST_STATE_LABELS,
@@ -29,6 +31,7 @@ import {
 	getPullRequestInfo,
 	initialPullRequestForm,
 	isPullRequestNotConnected,
+	multiRepos,
 	openPullRequestLabel,
 	pullRequestActionLabel,
 	pullRequestErrorText,
@@ -57,8 +60,8 @@ const openPullRequestUrl = async (url: string, toast: Toast) => {
 };
 
 /** The PR to show: the session DTO is polled every 2 s, the GET result fills in until it has one. */
-export const currentPullRequest = (session: CloudSession, info: CloudPullRequestInfo | null): CloudPullRequest | null =>
-	session.pullRequest ?? info?.pullRequest ?? null;
+export const currentPullRequest = (session: CloudSession, info: CloudPullRequestInfo | null, repo?: CloudSessionRepo): CloudPullRequest | null =>
+	(repo ? repo.pullRequest : session.pullRequest) ?? info?.pullRequest ?? null;
 
 const STATE_COLORS: Record<CloudPullRequestState, string> = {
 	open: colors.success,
@@ -86,9 +89,10 @@ export type PullRequestState = {
 	applyResult: (pullRequest: CloudPullRequest) => void;
 };
 
-export const usePullRequestInfo = (auth: DivisionSession, session: CloudSession): PullRequestState => {
-	const available = canOfferPullRequest(session);
+export const usePullRequestInfo = (auth: DivisionSession, session: CloudSession, repo?: CloudSessionRepo): PullRequestState => {
+	const available = canOfferPullRequest(session, repo);
 	const id = session.id;
+	const repoName = repo?.fullName;
 	const [info, setInfo] = useState<CloudPullRequestInfo | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -99,7 +103,7 @@ export const usePullRequestInfo = (auth: DivisionSession, session: CloudSession)
 		const rid = ++requestId.current;
 		setLoading(true);
 		try {
-			const next = await getPullRequestInfo(auth, id);
+			const next = await getPullRequestInfo(auth, id, repoName);
 			if (rid !== requestId.current) return;
 			setInfo(next);
 			setError(null);
@@ -108,10 +112,10 @@ export const usePullRequestInfo = (auth: DivisionSession, session: CloudSession)
 		} finally {
 			if (rid === requestId.current) setLoading(false);
 		}
-	}, [auth, id]);
+	}, [auth, id, repoName]);
 
 	// Re-read whenever something that changes canCreate / the PR moves (finished a turn, new changes, a push).
-	const pr = session.pullRequest;
+	const pr = repo ? repo.pullRequest : session.pullRequest;
 	const key = `${session.status}|${session.changedFiles}|${pr?.number ?? ''}|${pr?.headSha ?? ''}|${pr?.updatedAt ?? ''}`;
 	useEffect(() => {
 		if (!available) {
@@ -177,16 +181,18 @@ export const PullRequestGitHubConnect = ({ auth, onConnected }: { auth: Division
 // Bar in the session header
 // ---------------------------------------------------------------------------
 
-export const PullRequestBar = ({ auth, session, state, onCompose }: {
+export const PullRequestBar = ({ auth, session, state, onCompose, repo }: {
 	auth: DivisionSession;
 	session: CloudSession;
 	state: PullRequestState;
+	/** Multi-repo sessions: the repository this bar is for (its name is shown first) */
+	repo?: CloudSessionRepo;
 	/** Opens PullRequestSheet (only offered once the GET said canCreate) */
 	onCompose: () => void;
 }) => {
 	const toast = useToast();
-	const pr = currentPullRequest(session, state.info);
-	if (!session.workspaceInfo?.repoFullName) return null;
+	const pr = currentPullRequest(session, state.info, repo);
+	if (!(repo ? repo.fullName : session.workspaceInfo?.repoFullName)) return null;
 	if (!state.available && !pr) return null;
 
 	const info = state.info;
@@ -197,6 +203,12 @@ export const PullRequestBar = ({ auth, session, state, onCompose }: {
 	return (
 		<View style={styles.bar}>
 			<Row style={styles.wrapRow}>
+				{repo ? (
+					<Row style={styles.repoName}>
+						<Icon name='book' size={13} color={colors.fgFaint} />
+						<Text style={styles.repoNameText} numberOfLines={1}>{repo.fullName}</Text>
+					</Row>
+				) : null}
 				{pr ? (
 					<Button
 						title={openPullRequestLabel(pr)}
@@ -244,16 +256,18 @@ export const PullRequestBar = ({ auth, session, state, onCompose }: {
 
 type SubmitError = { text: string; notConnected: boolean };
 
-export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: {
+export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted, repo: target }: {
 	auth: DivisionSession;
 	session: CloudSession;
 	info: CloudPullRequestInfo;
+	/** Multi-repo sessions: the repository the PR is for */
+	repo?: CloudSessionRepo;
 	onClose: () => void;
 	/** Called after a successful POST (also when the sheet was closed while submitting) */
 	onSubmitted: (result: CreatePullRequestResult) => void;
 }) => {
 	const toast = useToast();
-	const existing = currentPullRequest(session, info);
+	const existing = currentPullRequest(session, info, target);
 	const existingState = pullRequestStateFor(existing, info);
 	// Fixed for the sheet's lifetime, so the form does not flip to "update" right after creating
 	const [mode] = useState(() => pullRequestMode(existing, existingState));
@@ -276,7 +290,7 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 		setSubmitting(true);
 		setError(null);
 		try {
-			const res = await createPullRequest(auth, session.id, input);
+			const res = await createPullRequest(auth, session.id, input, target?.fullName);
 			setResult(res);
 			onSubmitted(res);
 		} catch (e) {
@@ -286,7 +300,7 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 		}
 	};
 
-	const repo = session.workspaceInfo?.repoFullName ?? '';
+	const repo = (target ? target.fullName : session.workspaceInfo?.repoFullName) ?? '';
 
 	if (result) {
 		const pr = result.pullRequest;
@@ -426,6 +440,57 @@ export const PullRequestSheet = ({ auth, session, info, onClose, onSubmitted }: 
 };
 
 // ---------------------------------------------------------------------------
+// Several repositories
+// ---------------------------------------------------------------------------
+
+/** One repository's PR bar and its sheet (its own GET state). */
+const RepoPullRequest = ({ auth, session, repo, onSubmitted }: {
+	auth: DivisionSession;
+	session: CloudSession;
+	repo: CloudSessionRepo;
+	onSubmitted: (pullRequest: CloudPullRequest) => void;
+}) => {
+	const state = usePullRequestInfo(auth, session, repo);
+	const [composing, setComposing] = useState(false);
+	const apply = state.applyResult;
+	return (
+		<>
+			<PullRequestBar auth={auth} session={session} state={state} repo={repo} onCompose={() => setComposing(true)} />
+			{composing && state.info ? (
+				<PullRequestSheet
+					auth={auth}
+					session={session}
+					info={state.info}
+					repo={repo}
+					onClose={() => setComposing(false)}
+					onSubmitted={result => {
+						apply(result.pullRequest);
+						onSubmitted(result.pullRequest);
+					}}
+				/>
+			) : null}
+		</>
+	);
+};
+
+/** Multi-repo sessions: a PR bar per GitHub repository. Renders nothing for other sessions. */
+export const RepoPullRequests = ({ auth, session, onSubmitted }: {
+	auth: DivisionSession;
+	session: CloudSession;
+	onSubmitted: (pullRequest: CloudPullRequest) => void;
+}) => {
+	const repos = multiRepos(session.workspaceInfo).filter(r => !!r.fullName);
+	if (!repos.length) return null;
+	return (
+		<View style={styles.repoBars}>
+			{repos.map(repo => (
+				<RepoPullRequest key={repo.dir} auth={auth} session={session} repo={repo} onSubmitted={onSubmitted} />
+			))}
+		</View>
+	);
+};
+
+// ---------------------------------------------------------------------------
 // Log event
 // ---------------------------------------------------------------------------
 
@@ -461,6 +526,9 @@ export const PullRequestEventCard = ({ data }: { data: Record<string, unknown> }
 const MONO_FONT = { fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) };
 
 const styles = StyleSheet.create({
+	repoBars: { gap: spacing.sm },
+	repoName: { gap: spacing.xs, maxWidth: '100%' },
+	repoNameText: { color: colors.fgMuted, fontSize: fontSize.sm, fontWeight: '600', flexShrink: 1 },
 	flex: { flex: 1 },
 	wrapRow: { flexWrap: 'wrap' },
 	pressed: { opacity: 0.6 },

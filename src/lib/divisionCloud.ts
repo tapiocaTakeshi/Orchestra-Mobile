@@ -69,6 +69,20 @@ export type CloudWorkspaceInfo = {
 	repoUrl?: string;
 	/** GitHub 連携で選んだリポジトリから始めたときの "owner/name" */
 	repoFullName?: string;
+	/** 開始したリポジトリ。2 個以上のときは各リポジトリが workspace 直下の dir に clone されている */
+	repos?: CloudSessionRepo[];
+};
+
+/** セッションのリポジトリ 1 個 (workspaceInfo.repos)。 */
+export type CloudSessionRepo = {
+	/** workspace 直下のディレクトリ (1 個だけのときは ".") */
+	dir: string;
+	url: string;
+	/** GitHub のリポジトリなら "owner/name" */
+	fullName?: string;
+	branch?: string;
+	/** 複数リポジトリのセッション: このリポジトリから作った PR */
+	pullRequest?: CloudPullRequest | null;
 };
 
 export type CloudSession = {
@@ -347,7 +361,28 @@ const toWorkspaceInfo = (raw: unknown): CloudWorkspaceInfo | null => {
 		...(typeof w.gitCommit === 'string' ? { gitCommit: w.gitCommit } : {}),
 		...(typeof w.repoUrl === 'string' ? { repoUrl: w.repoUrl } : {}),
 		...(typeof w.repoFullName === 'string' ? { repoFullName: w.repoFullName } : {}),
+		...(Array.isArray(w.repos) ? { repos: w.repos.map(toSessionRepo).filter((r): r is CloudSessionRepo => !!r) } : {}),
 	};
+};
+
+const toSessionRepo = (raw: unknown): CloudSessionRepo | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const r = raw as Record<string, unknown>;
+	if (typeof r.dir !== 'string' || !r.dir || typeof r.url !== 'string') return null;
+	const pullRequest = toCloudPullRequest(r.pullRequest);
+	return {
+		dir: r.dir,
+		url: r.url,
+		...(typeof r.fullName === 'string' && r.fullName ? { fullName: r.fullName } : {}),
+		...(typeof r.branch === 'string' && r.branch ? { branch: r.branch } : {}),
+		...(pullRequest ? { pullRequest } : {}),
+	};
+};
+
+/** 複数リポジトリのセッションならそのリポジトリ (2 個以上、または dir が "." でない)。それ以外は []。 */
+export const multiRepos = (info: CloudWorkspaceInfo | null | undefined): CloudSessionRepo[] => {
+	const repos = info?.repos ?? [];
+	return repos.length > 1 || repos.some(r => r.dir !== '.') ? repos : [];
 };
 
 /** Reads a PR DTO. Returns null when it is missing or has no usable number / https URL. */
@@ -515,8 +550,10 @@ export const repoBody = (repo: CloudRepo): Record<string, string> => {
  * エージェントを動かし始める。repo を渡すとそのリポジトリを clone し、無ければ空のフォルダで始める。
  * { fullName } (GitHub 連携で選んだもの) はサーバーがユーザーの GitHub トークンで clone するので非公開でもよい。
  */
-export const startCloudSession = async (session: DivisionSession, id: string, options: { repo?: CloudRepo } = {}): Promise<CloudSession> => {
-	const body = options.repo ? { repo: repoBody(options.repo) } : {};
+export const startCloudSession = async (session: DivisionSession, id: string, options: { repo?: CloudRepo; repos?: CloudRepo[] } = {}): Promise<CloudSession> => {
+	const list = options.repos ?? (options.repo ? [options.repo] : []);
+	// 1 個は従来どおり repo (古いサーバーでも動く)。2 個以上は repos で、それぞれ別のディレクトリに clone される
+	const body = list.length > 1 ? { repos: list.map(repoBody) } : list.length === 1 ? { repo: repoBody(list[0]) } : {};
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/start`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.launch });
 	return toCloudSession(data.session);
 };
@@ -530,6 +567,12 @@ export const messageBody = (text: string, options: { continueGoal?: boolean } = 
 
 export const sendCloudMessage = async (session: DivisionSession, id: string, text: string, options: { continueGoal?: boolean } = {}): Promise<CloudSession> => {
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/messages`, { method: 'POST', body: messageBody(text, options) });
+	return toCloudSession(data.session);
+};
+
+/** エラーで止まった (failed) セッションを、止まったところから続ける。指示は足さない (POST .../resume)。 */
+export const resumeCloudSession = async (session: DivisionSession, id: string): Promise<CloudSession> => {
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/resume`, { method: 'POST', body: {} });
 	return toCloudSession(data.session);
 };
 
@@ -847,6 +890,10 @@ export type CloudSource = { kind: 'repo' | 'workspace' | 'empty'; label: string 
 /** 一覧と詳細の「どこで動いているか」。リポジトリ > PC のフォルダ > 空のフォルダ の順に決める。 */
 export const cloudSource = (session: Pick<CloudSession, 'workspaceInfo' | 'workspaceName'>): CloudSource => {
 	const info = session.workspaceInfo;
+	const many = multiRepos(info);
+	if (many.length) {
+		return { kind: 'repo', label: many.map(r => `${r.fullName ?? repoLabel(r.url)}${r.branch ? ` @ ${r.branch}` : ''}`).join(', ') };
+	}
 	if (info?.repoFullName) {
 		return { kind: 'repo', label: `${info.repoFullName}${info.gitBranch ? ` @ ${info.gitBranch}` : ''}` };
 	}
@@ -1330,8 +1377,12 @@ export const toPullRequestInfo = (raw: unknown): CloudPullRequestInfo => {
 };
 
 /** PR state and form suggestion for a session. */
-export const getPullRequestInfo = async (session: DivisionSession, id: string): Promise<CloudPullRequestInfo> =>
-	toPullRequestInfo(await request<unknown>(session, `${idPath(id)}/pull-request`, { timeoutMs: CLOUD_TIMEOUTS.pullRequestInfo }));
+export const getPullRequestInfo = async (session: DivisionSession, id: string, repo?: string): Promise<CloudPullRequestInfo> =>
+	toPullRequestInfo(await request<unknown>(
+		session,
+		`${idPath(id)}/pull-request${repo ? `?repo=${encodeURIComponent(repo)}` : ''}`,
+		{ timeoutMs: CLOUD_TIMEOUTS.pullRequestInfo },
+	));
 
 /**
  * Whether a branch name can be used as the PR's head branch (git ref rules on top of validateBranch).
@@ -1379,8 +1430,10 @@ export const createPullRequest = async (
 	session: DivisionSession,
 	id: string,
 	input: CreatePullRequestInput,
+	/** 複数リポジトリのセッション: PR を作るリポジトリ ("owner/name") */
+	repo?: string,
 ): Promise<CreatePullRequestResult> => {
-	const body = pullRequestBody(input);
+	const body = { ...pullRequestBody(input), ...(repo ? { repo } : {}) };
 	const data = await request<{ pullRequest?: unknown; updated?: unknown; action?: unknown }>(
 		session, `${idPath(id)}/pull-request`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.pullRequest },
 	);
@@ -1406,8 +1459,8 @@ export const pullRequestErrorText = (e: unknown): string => {
 };
 
 /** Whether a session offers the PR button: started from a GitHub repo and not working right now. */
-export const canOfferPullRequest = (session: Pick<CloudSession, 'workspaceInfo' | 'status'>): boolean =>
-	!!session.workspaceInfo?.repoFullName?.trim() && !isActive(session.status);
+export const canOfferPullRequest = (session: Pick<CloudSession, 'workspaceInfo' | 'status'>, repo?: CloudSessionRepo): boolean =>
+	!!(repo ? repo.fullName : session.workspaceInfo?.repoFullName)?.trim() && !isActive(session.status);
 
 /** The GET says GitHub is not connected (offer the "GitHub と連携" flow). */
 export const isPullRequestNotConnected = (info: Pick<CloudPullRequestInfo, 'code' | 'reason'>): boolean =>
@@ -1521,6 +1574,12 @@ export const pullRequestEventText = (event: Pick<CloudPullRequestEvent, 'number'
 // ---------------------------------------------------------------------------
 
 export const MAX_PARALLEL_SESSIONS = 10;
+/** 1 セッションで選べるリポジトリの数 (サーバーの MAX_SESSION_REPOS と同じ) */
+export const MAX_SESSION_REPOS = 10;
+
+/** 同じリポジトリ (とブランチ) かどうかを比べるキー。 */
+export const cloudRepoKey = (repo: CloudRepo): string =>
+	`${(isFullNameRepo(repo) ? `github.com/${repo.fullName}` : repoLabel(repo.url)).toLowerCase()}#${repo.branch?.trim() ?? ''}`;
 
 export type LaunchInput = {
 	prompt: string;
@@ -1528,6 +1587,8 @@ export type LaunchInput = {
 	count: number;
 	/** 無ければ空のフォルダで始める。{ url } か GitHub 連携で選んだ { fullName } */
 	repo?: CloudRepo;
+	/** 複数のリポジトリ (Claude Code のように)。それぞれ workspace 直下の別ディレクトリに clone される。repo より優先 */
+	repos?: CloudRepo[];
 	/** provider/model か DIVISION_PROJECT_MODEL (このときは projectId が必須) */
 	model?: string;
 	title?: string;
@@ -1573,19 +1634,22 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 	if (!Number.isInteger(input.count) || input.count < 1 || input.count > MAX_PARALLEL_SESSIONS) {
 		throw new Error(`並列数は 1〜${MAX_PARALLEL_SESSIONS} で指定してください。`);
 	}
-	const repo = input.repo;
-	if (repo) {
+	const repos = input.repos?.length ? input.repos : input.repo ? [input.repo] : [];
+	if (repos.length > MAX_SESSION_REPOS) throw new Error(`リポジトリは ${MAX_SESSION_REPOS} 個まで選べます。`);
+	for (const repo of repos) {
 		const issue = (isFullNameRepo(repo) ? validateRepoFullName(repo.fullName) : validateRepoUrl(repo.url))
 			?? validateBranch(repo.branch ?? '');
 		if (issue) throw new Error(issue);
 	}
+	const keys = repos.map(cloudRepoKey);
+	if (new Set(keys).size !== keys.length) throw new Error('同じリポジトリが重複しています。');
 	const modelIssue = modelInputIssue(input.model, input.projectId);
 	if (modelIssue) throw new Error(modelIssue);
 
 	const titles = launchTitles({ ...input, prompt });
 	// workspaceName はリポジトリ名 (clone したときのフォルダ名) にする
-	const workspaceName = repo
-		? (isFullNameRepo(repo) ? repoNameOf(repo.fullName) : repoFolderName(repo.url)) || undefined
+	const workspaceName = repos.length
+		? repos.map(repo => (isFullNameRepo(repo) ? repoNameOf(repo.fullName) : repoFolderName(repo.url))).filter(Boolean).join(', ').slice(0, 200) || undefined
 		: undefined;
 
 	return Promise.all(titles.map(async (title, index): Promise<LaunchResult> => {
@@ -1593,7 +1657,7 @@ export const launchSessions = async (session: DivisionSession, input: LaunchInpu
 		try {
 			created = await createCloudSession(session, { prompt, title, model: input.model, projectId: input.projectId, workspaceName, goalLoop: input.goalLoop, approvalMode: input.approvalMode });
 			try { input.onCreated?.(created, index); } catch { /* 通知側の失敗で起動は止めない */ }
-			const started = await startCloudSession(session, created.id, { repo });
+			const started = await startCloudSession(session, created.id, { repos });
 			return { index, title, session: started };
 		} catch (e) {
 			return { index, title, ...(created ? { session: created } : {}), error: cloudErrorText(e) };

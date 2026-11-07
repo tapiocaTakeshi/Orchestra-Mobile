@@ -262,10 +262,11 @@ export const GitHubConnectPanel = ({ starting, waiting, onConnect, onCancel, des
 // リポジトリ一覧
 // ---------------------------------------------------------------------------
 
-const RepoRow = ({ repo, onPress }: { repo: GitHubRepo; onPress: () => void }) => (
+const RepoRow = ({ repo, selected = false, onPress }: { repo: GitHubRepo; selected?: boolean; onPress: () => void }) => (
 	<Pressable
 		accessibilityRole='button'
-		accessibilityLabel={`${repo.fullName}${repo.private ? '、非公開' : ''}を選ぶ`}
+		accessibilityState={{ selected }}
+		accessibilityLabel={`${repo.fullName}${repo.private ? '、非公開' : ''}を${selected ? '外す' : '選ぶ'}`}
 		onPress={onPress}
 		style={({ pressed }) => [styles.repoRow, pressed && styles.pressed]}
 	>
@@ -278,12 +279,15 @@ const RepoRow = ({ repo, onPress }: { repo: GitHubRepo; onPress: () => void }) =
 			{repo.description ? <Muted numberOfLines={1}>{repo.description}</Muted> : null}
 		</View>
 		{repo.pushedAt ? <Text style={styles.repoTime}>{relativeTimeFromIso(repo.pushedAt)}</Text> : null}
+		{selected ? <Icon name='check' size={14} color={colors.accentText} /> : null}
 	</Pressable>
 );
 
-export const GitHubRepoPicker = ({ auth, onSelect, onNotConnected }: {
+export const GitHubRepoPicker = ({ auth, onSelect, selected = [], onNotConnected }: {
 	auth: DivisionSession;
 	onSelect: (repo: GitHubRepo) => void;
+	/** 選んである "owner/name" (チェックを付ける。複数選択のとき) */
+	selected?: string[];
 	/** トークンが失効していた (409 github_not_connected) */
 	onNotConnected: () => void;
 }) => {
@@ -349,7 +353,7 @@ export const GitHubRepoPicker = ({ auth, onSelect, onNotConnected }: {
 			{error ? <ErrorBanner message={error} onRetry={() => void load(debounced, 1)} style={styles.inlineBanner} /> : null}
 			<View style={styles.repoBox}>
 				<ScrollView nestedScrollEnabled keyboardShouldPersistTaps='handled'>
-					{repos.map(repo => <RepoRow key={repo.fullName} repo={repo} onPress={() => onSelect(repo)} />)}
+					{repos.map(repo => <RepoRow key={repo.fullName} repo={repo} selected={selected.includes(repo.fullName)} onPress={() => onSelect(repo)} />)}
 					{firstLoad && repos.length === 0 ? (
 						<View style={styles.boxNote}><ActivityIndicator size='small' color={colors.fgMuted} /></View>
 					) : null}
@@ -379,13 +383,14 @@ export const GitHubRepoPicker = ({ auth, onSelect, onNotConnected }: {
 // 選んだリポジトリとブランチ
 // ---------------------------------------------------------------------------
 
-export const GitHubRepoSelection = ({ auth, repo, branch, onBranch, onChange, onNotConnected }: {
+export const GitHubRepoSelection = ({ auth, repo, branch, onBranch, onChange, changeLabel = '変更', onNotConnected }: {
 	auth: DivisionSession;
 	repo: GitHubRepo;
 	branch: string;
 	onBranch: (branch: string) => void;
-	/** 「変更」 (一覧に戻る) */
+	/** 「変更」 (一覧に戻る) / 複数選択では「外す」 */
 	onChange: () => void;
+	changeLabel?: string;
 	onNotConnected: () => void;
 }) => {
 	const toast = useToast();
@@ -447,7 +452,13 @@ export const GitHubRepoSelection = ({ auth, repo, branch, onBranch, onChange, on
 					<Text style={styles.selectedName} numberOfLines={1}>{repo.fullName}</Text>
 					{repo.description ? <Muted numberOfLines={1}>{repo.description}</Muted> : null}
 				</View>
-				<Button title='変更' variant='ghost' size='sm' onPress={onChange} accessibilityLabel='リポジトリを選び直す' />
+				<Button
+					title={changeLabel}
+					variant='ghost'
+					size='sm'
+					onPress={onChange}
+					accessibilityLabel={changeLabel === '変更' ? 'リポジトリを選び直す' : `${repo.fullName} を${changeLabel}`}
+				/>
 			</View>
 
 			<Pressable

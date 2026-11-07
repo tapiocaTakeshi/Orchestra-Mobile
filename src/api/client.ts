@@ -450,6 +450,11 @@ export class OrchestraClient {
 		return this.request('/api/chat/abort', { method: 'POST', body: { threadId } });
 	}
 
+	/** エラーで止まった返答を、止まったところから続ける (IDE の「続ける」と同じ)。 */
+	async continueAfterError(threadId?: string): Promise<ChatState> {
+		return this.request('/api/chat/continue', { method: 'POST', body: { threadId } });
+	}
+
 	async newThread(): Promise<ChatState> {
 		return this.request('/api/chat/new', { method: 'POST' });
 	}

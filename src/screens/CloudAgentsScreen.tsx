@@ -82,10 +82,12 @@ import {
 	PullRequestBar,
 	PullRequestEventCard,
 	PullRequestSheet,
+	RepoPullRequests,
 	currentPullRequest,
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { AiLoading } from '../components/AiLoading';
 import { DocumentView } from '../components/DocumentView';
 import { DocumentList } from '../components/DocumentList';
 import { cloudDocumentSource } from '../lib/documentSource';
@@ -102,6 +104,7 @@ import {
 	CloudSessionStatus,
 	DivisionTimeline,
 	MAX_PARALLEL_SESSIONS,
+	MAX_SESSION_REPOS,
 	PatchSection,
 	PlanProgress,
 	PlanTaskState,
@@ -129,6 +132,7 @@ import {
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
+	multiRepos,
 	CLOUD_SESSION_FILTERS,
 	CloudSessionFilter,
 	isDivisionProjectModel,
@@ -147,6 +151,7 @@ import {
 	pullRequestActionLabel,
 	pullRequestStateFor,
 	sectionForChange,
+	resumeCloudSession,
 	sendCloudMessage,
 	splitPatch,
 	stopCloudSession,
@@ -223,7 +228,7 @@ const useForeground = (): boolean => {
 /** 状態の印。動いているあいだはくるくる、止まっていれば色の点。 */
 const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
 	isActive(status)
-		? <ActivityIndicator size='small' color={cloudStatusColor(status)} />
+		? <AiLoading size={20} />
 		: <View style={styles.statusDotWrap}><Dot color={cloudStatusColor(status)} /></View>
 );
 
@@ -331,7 +336,7 @@ const PcChatRow = ({ item, onPress }: { item: Extract<HomeItem, { kind: 'pc-chat
 			style={({ pressed }) => [styles.sessionRow, pressed && styles.rowPressed]}
 		>
 			{item.state === 'running'
-				? <ActivityIndicator size='small' color={colors.running} />
+				? <AiLoading size={20} />
 				: <View style={styles.statusDotWrap}><Icon name='monitor' size={14} color={state?.color ?? colors.fgMuted} /></View>}
 			<View style={styles.flex}>
 				<Row style={styles.rowTop}>
@@ -402,10 +407,13 @@ type Draft = {
 	prompt: string;
 	count: string;
 	source: 'repo' | 'empty';
-	/** GitHub 連携で選んだリポジトリ (未選択なら null) */
-	repo: GitHubRepo | null;
-	/** 選んだリポジトリのブランチ (空なら既定のブランチ) */
-	repoBranch: string;
+	/**
+	 * GitHub 連携で選んだリポジトリとブランチ (空のブランチは既定のブランチ)。Claude Code のように複数選べて、
+	 * 2 個以上ならサンドボックスの workspace 直下にそれぞれのディレクトリで clone される
+	 */
+	repos: DraftRepo[];
+	/** 選んだリポジトリがあっても一覧を開いている (「リポジトリを追加」) */
+	addingRepo: boolean;
 	/** 「URL を直接入力」を開いているか (GitHub 連携が使えないときは常に直接入力) */
 	manualUrl: boolean;
 	repoUrl: string;
@@ -427,6 +435,8 @@ type Draft = {
 	showAdvanced: boolean;
 };
 
+type DraftRepo = { repo: GitHubRepo; branch: string };
+
 const modelSelectionOf = (draft: Pick<Draft, 'modelMode' | 'model' | 'projectId'>): CloudModelSelection =>
 	({ mode: draft.modelMode, model: draft.model, projectId: draft.projectId });
 
@@ -434,8 +444,8 @@ const EMPTY_DRAFT: Draft = {
 	prompt: '',
 	count: '1',
 	source: 'repo',
-	repo: null,
-	repoBranch: '',
+	repos: [],
+	addingRepo: false,
 	manualUrl: false,
 	repoUrl: '',
 	branch: '',
@@ -473,8 +483,8 @@ const draftIssues = (draft: Draft, mode: RepoMode, connected: boolean): { repoUr
 		const branch = validateBranch(draft.branch);
 		return { repoUrl, branch, settings: model && !repoUrl && !branch };
 	}
-	const branch = validateBranch(draft.repoBranch);
-	return { repoUrl: null, branch, settings: model && mode === 'picker' && connected && !!draft.repo && !branch };
+	const branch = draft.repos.map(r => validateBranch(r.branch)).find(Boolean) ?? null;
+	return { repoUrl: null, branch, settings: model && mode === 'picker' && connected && draft.repos.length > 0 && !branch };
 };
 
 const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): RepoMode => {
@@ -489,7 +499,11 @@ const repoModeOf = (draft: Pick<Draft, 'manualUrl'>, github: GitHubConnection): 
 const draftSourceLabel = (draft: Draft, mode: RepoMode): string => {
 	if (draft.source === 'empty') return '空のフォルダ';
 	if (mode === 'manual') return draft.repoUrl.trim() ? repoLabel(draft.repoUrl) : 'リポジトリの URL';
-	if (draft.repo) return draft.repoBranch.trim() ? `${draft.repo.fullName} @ ${draft.repoBranch.trim()}` : draft.repo.fullName;
+	const [first, ...rest] = draft.repos;
+	if (first) {
+		const one = first.branch.trim() ? `${first.repo.fullName} @ ${first.branch.trim()}` : first.repo.fullName;
+		return rest.length ? `${first.repo.name} ほか ${rest.length} 件` : one;
+	}
 	return mode === 'loading' ? 'GitHub を確認中…' : 'リポジトリを選ぶ';
 };
 
@@ -500,11 +514,11 @@ const draftModelLabel = (draft: Draft, projects: CloudProjectOption[]): string =
 	return '既定のモデル';
 };
 
-/** 起動に使うリポジトリ。一覧から選んでいれば { fullName }、直接入力なら { url }。 */
-const draftRepo = (draft: Draft, mode: RepoMode): CloudRepo | undefined => {
-	if (draft.source !== 'repo') return undefined;
-	if (mode === 'picker' && draft.repo) return { fullName: draft.repo.fullName, branch: draft.repoBranch.trim() || undefined };
-	return { url: draft.repoUrl, branch: draft.branch.trim() || undefined };
+/** 起動に使うリポジトリ。一覧から選んでいれば { fullName } (複数可)、直接入力なら { url }。 */
+const draftRepos = (draft: Draft, mode: RepoMode): CloudRepo[] => {
+	if (draft.source !== 'repo') return [];
+	if (mode === 'picker' && draft.repos.length) return draft.repos.map(r => ({ fullName: r.repo.fullName, branch: r.branch.trim() || undefined }));
+	return [{ url: draft.repoUrl, branch: draft.branch.trim() || undefined }];
 };
 
 /** 起動の設定 (始める場所・モデル・プロジェクト・並列数・題名)。指示は画面下の入力欄で書く。 */
@@ -529,20 +543,34 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 	const markDisconnected = github.markDisconnected;
 	const onNotConnected = useCallback(() => {
 		markDisconnected();
-		onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+		onChange(d => ({ ...d, repos: [], addingRepo: false }));
 	}, [markDisconnected, onChange]);
 
 	const disconnect = async () => {
 		if (await github.disconnect()) {
-			onChange(d => ({ ...d, repo: null, repoBranch: '' }));
+			onChange(d => ({ ...d, repos: [], addingRepo: false }));
 			void clearLastCloudRepo();
 		}
 	};
 
+	// 一覧で押したリポジトリを足す (選んである物を押したら外す)
 	const selectRepo = useCallback((repo: GitHubRepo) => {
-		onChange(d => ({ ...d, repo, repoBranch: d.repo?.fullName === repo.fullName ? d.repoBranch : '' }));
+		onChange(d => {
+			if (d.repos.some(r => r.repo.fullName === repo.fullName)) {
+				return { ...d, repos: d.repos.filter(r => r.repo.fullName !== repo.fullName) };
+			}
+			if (d.repos.length >= MAX_SESSION_REPOS) return d;
+			return { ...d, repos: [...d.repos, { repo, branch: '' }], addingRepo: false };
+		});
 	}, [onChange]);
-	const setRepoBranch = useCallback((value: string) => onChange(d => ({ ...d, repoBranch: value })), [onChange]);
+	const setRepoBranch = useCallback((fullName: string, value: string) => onChange(d => ({
+		...d,
+		repos: d.repos.map(r => (r.repo.fullName === fullName ? { ...r, branch: value } : r)),
+	})), [onChange]);
+	const removeRepo = useCallback((fullName: string) => onChange(d => ({
+		...d,
+		repos: d.repos.filter(r => r.repo.fullName !== fullName),
+	})), [onChange]);
 
 	return (
 		<Sheet title='起動の設定' eyebrow='クラウドエージェント' onClose={onClose}>
@@ -568,19 +596,41 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 						connected ? (
 							<>
 								<GitHubAccountRow status={status} disconnecting={github.disconnecting} onDisconnect={() => void disconnect()} />
-								{draft.repo ? (
+								{draft.repos.map(r => (
 									<GitHubRepoSelection
+										key={r.repo.fullName}
 										auth={auth}
-										repo={draft.repo}
-										branch={draft.repoBranch}
-										onBranch={setRepoBranch}
-										onChange={() => onChange(d => ({ ...d, repo: null, repoBranch: '' }))}
+										repo={r.repo}
+										branch={r.branch}
+										onBranch={value => setRepoBranch(r.repo.fullName, value)}
+										onChange={() => removeRepo(r.repo.fullName)}
+										changeLabel='外す'
 										onNotConnected={onNotConnected}
 									/>
-								) : (
-									<GitHubRepoPicker auth={auth} onSelect={selectRepo} onNotConnected={onNotConnected} />
-								)}
-								<Muted>非公開のリポジトリも、連携したアカウントの権限でサーバーが clone します。</Muted>
+								))}
+								{draft.repos.length === 0 || draft.addingRepo ? (
+									<>
+										<GitHubRepoPicker
+											auth={auth}
+											onSelect={selectRepo}
+											selected={draft.repos.map(r => r.repo.fullName)}
+											onNotConnected={onNotConnected}
+										/>
+										{draft.addingRepo && draft.repos.length > 0 ? (
+											<Button title='閉じる' variant='ghost' size='sm' onPress={() => set('addingRepo', false)} style={styles.alignStart} />
+										) : null}
+									</>
+								) : draft.repos.length < MAX_SESSION_REPOS ? (
+									<Pressable accessibilityRole='button' onPress={() => set('addingRepo', true)} style={styles.linkButton}>
+										<Icon name='plus' size={14} color={colors.accentText} />
+										<Text style={styles.linkText}>リポジトリを追加</Text>
+									</Pressable>
+								) : null}
+								<Muted>
+									{draft.repos.length > 1
+										? `${draft.repos.length} 個のリポジトリを、サンドボックスの workspace 直下にそれぞれのフォルダ (${draft.repos.map(r => r.repo.name).join(', ')}) として clone します。PR はリポジトリごとに作れます。`
+										: 'リポジトリは複数選べます (最大 ' + MAX_SESSION_REPOS + ' 個)。非公開のリポジトリも、連携したアカウントの権限でサーバーが clone します。'}
+								</Muted>
 							</>
 						) : (
 							<GitHubConnectPanel
@@ -731,7 +781,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	draft: Draft;
 	onChange: React.Dispatch<React.SetStateAction<Draft>>;
 	onGoalLoopTouched: () => void;
-	onLaunch: (repo: CloudRepo | undefined) => void;
+	onLaunch: (repos: CloudRepo[]) => void;
 	optionsOpen: boolean;
 	onOptionsOpen: (open: boolean) => void;
 	/** 「コスト」チップに添える金額 (一覧の料金の合計)。分からなければ出さない */
@@ -757,14 +807,14 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	// 連携済みなら、前回選んだリポジトリとブランチを選んだ状態にする (1 回だけ)。
 	const preselectTried = useRef(false);
 	useEffect(() => {
-		if (!connected || draft.repo || preselectTried.current) return;
+		if (!connected || draft.repos.length || preselectTried.current) return;
 		preselectTried.current = true;
 		void loadLastCloudRepo(auth.userId).then(last => {
-			if (last) onChange(d => (d.repo ? d : { ...d, repo: last.repo, repoBranch: last.branch }));
+			if (last) onChange(d => (d.repos.length ? d : { ...d, repos: [{ repo: last.repo, branch: last.branch }] }));
 		});
-	}, [connected, draft.repo, auth.userId, onChange]);
+	}, [connected, draft.repos.length, auth.userId, onChange]);
 
-	const sourceMissing = draft.source === 'repo' && (mode === 'picker' ? !draft.repo : mode === 'manual' ? !!issues.repoUrl || !!issues.branch : false);
+	const sourceMissing = draft.source === 'repo' && (mode === 'picker' ? draft.repos.length === 0 : mode === 'manual' ? !!issues.repoUrl || !!issues.branch : false);
 
 	const toPc = target === 'pc' && !!pcLabel && !!onSendToPc;
 
@@ -779,7 +829,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 			if (mode !== 'loading') onOptionsOpen(true);
 			return;
 		}
-		onLaunch(draftRepo(draft, mode));
+		onLaunch(draftRepos(draft, mode));
 	};
 
 	return (
@@ -927,18 +977,9 @@ const UserBubble = ({ value }: { value: string }) => (
 	</View>
 );
 
-/** エージェントの印 (返答の頭に出す丸いアイコン)。 */
-const AgentAvatar = () => (
-	<View style={styles.avatar}><Text style={styles.avatarGlyph}>✻</Text></View>
-);
-
-/** エージェントの 1 回分の返答。アイコンと名前を頭に 1 度だけ出し、中身を下に並べる。 */
+/** エージェントの 1 回分の返答。Claude のように見出し (アイコン・名前) は付けず、中身をそのまま詰めて並べる。 */
 const AgentTurn = ({ name, children }: { name: string; children: React.ReactNode }) => (
-	<View style={styles.agentTurn}>
-		<View style={styles.agentHead}>
-			<AgentAvatar />
-			<Text style={styles.agentName}>{name}</Text>
-		</View>
+	<View style={styles.agentTurn} accessibilityLabel={`${name} の返答`}>
 		<View style={styles.agentBody}>{children}</View>
 	</View>
 );
@@ -980,9 +1021,10 @@ const ToolGroup = ({ events }: { events: CloudSessionEvent[] }) => {
 
 /** 「作業中」の吹き出し。点が順に光り、経過時間を数える。 */
 const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: string }) => {
-	const [tick, setTick] = useState(0);
+	// 経過時間を数え直すためだけの再描画 (1 秒ごと)
+	const [, setTick] = useState(0);
 	useEffect(() => {
-		const timer = setInterval(() => setTick(t => t + 1), 400);
+		const timer = setInterval(() => setTick(t => t + 1), 1000);
 		return () => clearInterval(timer);
 	}, []);
 	const started = Date.parse(since);
@@ -990,11 +1032,7 @@ const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: st
 	const label = status === 'running' ? '作業中' : cloudStatusLabel(status);
 	return (
 		<View style={styles.typing} accessibilityLiveRegion='polite' accessibilityLabel={`${label}…`}>
-			<View style={styles.typingDots}>
-				{[0, 1, 2].map(i => (
-					<View key={i} style={[styles.typingDot, tick % 3 === i && styles.typingDotOn]} />
-				))}
-			</View>
+			<AiLoading size={18} />
 			<Text style={styles.typingText}>
 				{label}
 				{elapsed !== null ? <Text style={styles.workingElapsed}> · {durationText(elapsed)}</Text> : null}
@@ -1024,7 +1062,7 @@ const ToolRow = ({ data }: { data: Record<string, unknown> }) => {
 		>
 			<View style={styles.line}>
 				<Bullet color={ok ? colors.success : colors.danger} />
-				<Text style={styles.toolCall} numberOfLines={open ? undefined : 2}>
+				<Text style={styles.toolCall} numberOfLines={open ? undefined : 1}>
 					<Text style={styles.toolName}>{parts.name}</Text>
 					{parts.arg ? <Text style={styles.toolArg}>({parts.arg})</Text> : null}
 				</Text>
@@ -1119,7 +1157,7 @@ const PlanMarker = ({ state }: { state: PlanTaskState }) => (
 	<View style={styles.planMarker}>
 		{state === 'done' ? <Icon name='check-square' size={14} color={colors.success} />
 			: state === 'failed' ? <Icon name='x-square' size={14} color={colors.danger} />
-				: state === 'running' ? <ActivityIndicator size='small' color={colors.running} />
+				: state === 'running' ? <AiLoading size={15} />
 					: state === 'interrupted' ? <Icon name='minus-square' size={14} color={colors.fgFaint} />
 						: <Icon name='square' size={14} color={colors.fgFaint} />}
 	</View>
@@ -1766,6 +1804,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const lastKey = useRef(sessionKey(initial));
 	const scrollRef = useRef<ScrollView | null>(null);
 	const follow = useRef(true);
+	/** 指でスクロールしている最中 (このときだけ、上へ離れたら追従をやめる) */
+	const dragging = useRef(false);
 
 	const applySession = useCallback((next: CloudSession) => {
 		setCurrent(next);
@@ -1893,6 +1933,21 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		}
 	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
 
+	// エラーで止まったセッションを、止まったところから続ける (失敗したタスクを飛ばさず、その途中から)
+	const resume = useCallback(async () => {
+		if (sending) return;
+		setSending(true);
+		try {
+			applySession(await resumeCloudSession(auth, id));
+			follow.current = true;
+			void loadEvents();
+		} catch (e) {
+			toast.show(cloudErrorText(e), 'error');
+		} finally {
+			setSending(false);
+		}
+	}, [auth, id, sending, applySession, loadEvents, toast]);
+
 	// 承認モードで成果物の承認・差し戻しをしたら、セッションとログを取り直す
 	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise') => {
 		applySession(next);
@@ -1927,6 +1982,11 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		// Picks up the session's pullRequest and the new pull_request event
 		void loadEvents();
 	}, [applyPrResult, loadEvents]);
+	// Multi-repo sessions: each repository's bar keeps its own state; only the log is followed here
+	const onRepoPrSubmitted = useCallback(() => {
+		follow.current = true;
+		void loadEvents();
+	}, [loadEvents]);
 	const pausedSeq = useMemo(() => (active ? null : pausedReviewSeq(events)), [events, active]);
 	const lastDoneSeq = useMemo(() => {
 		for (let i = events.length - 1; i >= 0; i--) if (events[i].type === 'done') return events[i].seq;
@@ -1972,6 +2032,11 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 					<PullRequestBar auth={auth} session={current} state={prState} onCompose={() => setComposingPr(true)} />
 				</View>
 			) : null}
+			{multiRepos(current.workspaceInfo).some(r => r.fullName) ? (
+				<View style={styles.prBar}>
+					<RepoPullRequests auth={auth} session={current} onSubmitted={onRepoPrSubmitted} />
+				</View>
+			) : null}
 
 			{error ? <ErrorBanner message={error} onRetry={() => void loadEvents()} /> : null}
 
@@ -1984,10 +2049,19 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						keyboardShouldPersistTaps='handled'
 						keyboardDismissMode='on-drag'
 						scrollEventThrottle={16}
+						// 既定で常に最新を表示する。追従をやめるのは、指で上へ動かして一番下から離れたときだけ
+						// (中身の伸び縮みやこちらからのスクロールでは切れない)。一番下の近くに戻ればまた追いかける
+						onScrollBeginDrag={() => { dragging.current = true; }}
+						onScrollEndDrag={() => { dragging.current = false; }}
+						onMomentumScrollEnd={() => { dragging.current = false; }}
 						onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
-							follow.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
+							const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
+							if (distance < 80) follow.current = true;
+							else if (dragging.current) follow.current = false;
 						}}
 						onContentSizeChange={() => { if (follow.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
+						// キーボードが開いて見える高さが縮んだときも一番下を保つ
+						onLayout={() => { if (follow.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
 					>
 						{!loaded ? <Loading label='ログを読み込んでいます…' /> : null}
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
@@ -2021,6 +2095,12 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 							) : null}
 							{awaitingApproval ? (
 								<ApprovalCard key={id} auth={auth} sessionId={id} lastSeq={current.lastSeq} onResolved={onApprovalResolved} />
+							) : null}
+							{current.status === 'failed' && loaded && events.length > 0 ? (
+								<View style={styles.resumeRow}>
+									<Button title='続ける' icon='play' size='sm' loading={sending} disabled={sending} onPress={() => void resume()} style={styles.alignStart} />
+									<Muted style={styles.flex}>止まったところから再開します (失敗したステップを飛ばさず、その途中から続けます)。</Muted>
+								</View>
 							) : null}
 						</View>
 					</ScrollView>
@@ -2153,7 +2233,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		setSessions([]);
 		setSelectedId(null);
 		setLoading(true);
-		setDraft(d => ({ ...d, repo: null, repoBranch: '', projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
+		setDraft(d => ({ ...d, repos: [], addingRepo: false, projectId: '', modelMode: 'default', model: '', goalLoop: DEFAULT_GOAL_LOOP, approvalMode: false }));
 	}, [session?.userId]);
 
 	// 前回選んだモデル (Division Project ならそのプロジェクト) を選んだ状態にする。まだ何も選んでいないときだけ。
@@ -2247,15 +2327,20 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		}
 	}, [session, patchSession, toast]);
 
-	const launch = useCallback(async (repo: CloudRepo | undefined) => {
+	const launch = useCallback(async (repos: CloudRepo[]) => {
 		if (!session) return;
 		const count = Number(draft.count);
 		setOptionsOpen(false);
 		setLaunchError(null);
 		setLaunching(n => n + count);
 		// 次に開いたとき同じリポジトリを選んだ状態にする
-		if (repo && isFullNameRepo(repo) && draft.repo) {
-			void saveLastCloudRepo(session.userId, { repo: draft.repo, branch: repo.branch ?? '' });
+		// (後ろから保存して、最初に選んだ物を履歴の先頭にする)
+		if (repos.some(isFullNameRepo)) {
+			const picks = draft.repos.slice().reverse();
+			void picks.reduce<Promise<void>>(
+				(prev, r) => prev.then(() => saveLastCloudRepo(session.userId, { repo: r.repo, branch: r.branch.trim() })),
+				Promise.resolve(),
+			);
 		}
 		// 次に開いたとき同じモデル (Division Project ならそのプロジェクト) を選んだ状態にする
 		const selection = modelSelectionOf(draft);
@@ -2264,7 +2349,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
 				count,
-				repo,
+				repos,
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
@@ -2480,7 +2565,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 
 					{launching > 0 ? (
 						<View style={styles.launching} accessibilityLiveRegion='polite'>
-							<ActivityIndicator size='small' color={colors.running} />
+							<AiLoading size={22} />
 							<View style={styles.flex}>
 								<Text style={styles.rowTitle}>{launching} 個のセッションを起動しています…</Text>
 								<Muted>サンドボックスの用意に数分かかることがあります。この画面を離れても起動は続きます。</Muted>
@@ -2571,7 +2656,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					draft={draft}
 					onChange={setDraft}
 					onGoalLoopTouched={() => { goalLoopTouched.current = true; }}
-					onLaunch={repo => void launch(repo)}
+					onLaunch={repos => void launch(repos)}
 					optionsOpen={optionsOpen}
 					onOptionsOpen={setOptionsOpen}
 					costLabel={cost.known > 0 ? formatUsdCompact(cost.totalUsd) : null}
@@ -2808,10 +2893,10 @@ const styles = StyleSheet.create({
 	logContent: {
 		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
-		paddingTop: spacing.lg,
-		paddingBottom: spacing.lg,
+		paddingTop: spacing.md,
+		paddingBottom: spacing.md,
 	},
-	conversation: { gap: spacing.lg + 4 },
+	conversation: { gap: spacing.md },
 	line: { flexDirection: 'row', alignItems: 'flex-start' },
 	gutter: { width: GUTTER, minHeight: 22, alignItems: 'flex-start', justifyContent: 'center' },
 	indent: { marginLeft: GUTTER },
@@ -2819,28 +2904,17 @@ const styles = StyleSheet.create({
 	bullet: { fontSize: 10, lineHeight: 22 },
 	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
 	userBubble: {
-		borderRadius: 20,
+		borderRadius: 18,
 		borderBottomRightRadius: 6,
-		paddingHorizontal: spacing.md + 2,
-		paddingVertical: spacing.sm + 2,
+		paddingHorizontal: spacing.md,
+		paddingVertical: spacing.sm,
 		backgroundColor: colors.bgHover,
 	},
-	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	agentTurn: { gap: spacing.sm },
-	agentHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	avatar: {
-		width: 26,
-		height: 26,
-		borderRadius: 13,
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: withAlpha(colors.accent, '1f'),
-	},
-	avatarGlyph: { color: colors.accent, fontSize: 14, lineHeight: 18 },
-	agentName: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
-	agentBody: { gap: spacing.md, paddingLeft: 34 },
+	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 21 },
+	agentTurn: { gap: spacing.xs },
+	agentBody: { gap: spacing.sm },
 	assistantBody: { gap: spacing.xs },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
 	roleChip: {
 		alignSelf: 'flex-start',
 		maxWidth: 160,
@@ -2850,33 +2924,27 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgHover,
 	},
 	roleChipText: { color: colors.fgMuted, fontSize: fontSize.xs - 1, fontWeight: '600' },
-	toolGroup: {
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: colors.border,
-		backgroundColor: colors.bgElevated,
-		overflow: 'hidden',
-	},
+	// ツールは枠の無い 1 行 (Claude と同じ)。押すと下に開く
+	toolGroup: {},
 	toolGroupHead: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.sm,
-		minHeight: 38,
-		paddingHorizontal: spacing.md,
+		gap: spacing.xs + 2,
+		minHeight: 28,
 	},
 	toolGroupLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	toolGroupLast: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
 	toolGroupFailed: { color: colors.danger, fontSize: fontSize.xs },
 	toolGroupBody: {
-		gap: spacing.md,
-		paddingHorizontal: spacing.md,
-		paddingTop: spacing.sm,
-		paddingBottom: spacing.md,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: colors.border,
+		gap: spacing.sm,
+		marginLeft: 6,
+		paddingLeft: spacing.sm + 2,
+		paddingVertical: spacing.xs,
+		borderLeftWidth: StyleSheet.hairlineWidth,
+		borderLeftColor: colors.border,
 	},
 	tool: { gap: 2 },
-	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 22 },
+	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 20 },
 	toolName: { color: colors.fgStrong, fontWeight: '700' },
 	toolArg: { color: colors.fgMuted },
 	toolDuration: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 22, marginLeft: spacing.sm },
@@ -2893,6 +2961,7 @@ const styles = StyleSheet.create({
 	note: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
 	errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	resumeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
 	errorText: { color: colors.danger, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
 	plan: {
 		gap: spacing.xs + 2,
@@ -2950,9 +3019,6 @@ const styles = StyleSheet.create({
 		borderTopLeftRadius: 6,
 		backgroundColor: colors.bgElevated,
 	},
-	typingDots: { flexDirection: 'row', gap: 4 },
-	typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint, opacity: 0.4 },
-	typingDotOn: { backgroundColor: colors.running, opacity: 1 },
 	typingText: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	workingElapsed: { color: colors.fgFaint },
 

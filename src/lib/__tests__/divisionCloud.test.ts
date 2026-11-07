@@ -41,6 +41,7 @@ import {
 	isActive,
 	launchSessions,
 	launchTitles,
+	multiRepos,
 	listCloudSessions,
 	listPollInterval,
 	mergeEvents,
@@ -49,6 +50,7 @@ import {
 	repoFolderName,
 	repoLabel,
 	repoNameOf,
+	resumeCloudSession,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
@@ -490,6 +492,64 @@ describe('GitHub repo names', () => {
 		mockFetch(() => ({ status: 200, body: { session: rawSession() } }));
 		await startCloudSession(auth, 's1', { repo: { fullName: ' octo/app ', branch: 'main' } });
 		expect(bodyOf(calls[0])).toEqual({ repo: { fullName: 'octo/app', branch: 'main' } });
+	});
+});
+
+describe('resumeCloudSession', () => {
+	it('posts an empty body to /resume (no new instruction)', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession({ id: 'r1', status: 'running' }) } }));
+		const s = await resumeCloudSession(auth, 'r1');
+		expect(calls[0].url).toBe(`${BASE}/r1/resume`);
+		expect(bodyOf(calls[0])).toEqual({});
+		expect(s.status).toBe('running');
+	});
+});
+
+describe('several repositories', () => {
+	it('sends repos when more than one is picked, repo for one', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession() } }));
+		await startCloudSession(auth, 's1', { repos: [{ fullName: 'o/web', branch: 'main' }, { url: 'https://github.com/o/api.git' }] });
+		expect(bodyOf(calls[0])).toEqual({ repos: [{ fullName: 'o/web', branch: 'main' }, { url: 'https://github.com/o/api.git' }] });
+		await startCloudSession(auth, 's1', { repos: [{ fullName: 'o/web' }] });
+		expect(bodyOf(calls[1])).toEqual({ repo: { fullName: 'o/web' } });
+	});
+
+	it('launches with every repository and names the workspace after them', async () => {
+		mockFetch(url => (url === BASE
+			? { status: 201, body: { session: rawSession({ id: 'm1', status: 'uploading' }) } }
+			: { status: 200, body: { session: rawSession({ id: 'm1' }) } }));
+		const [result] = await launchSessions(auth, { prompt: 'p', count: 1, repos: [{ fullName: 'o/web' }, { fullName: 'o/api', branch: 'dev' }] });
+		expect(result.error).toBeUndefined();
+		expect(bodyOf(calls[0])).toMatchObject({ workspaceName: 'web, api' });
+		expect(bodyOf(calls[1])).toEqual({ repos: [{ fullName: 'o/web' }, { fullName: 'o/api', branch: 'dev' }] });
+	});
+
+	it('rejects duplicates and too many repositories before calling the API', async () => {
+		mockFetch(() => ({ status: 500, body: {} }));
+		await expect(launchSessions(auth, { prompt: 'p', count: 1, repos: [{ fullName: 'o/web' }, { url: 'https://github.com/O/web.git' }] }))
+			.rejects.toThrow('重複');
+		const many = Array.from({ length: 11 }, (_, i) => ({ fullName: `o/r${i}` }));
+		await expect(launchSessions(auth, { prompt: 'p', count: 1, repos: many })).rejects.toThrow('10 個まで');
+		expect(calls).toHaveLength(0);
+	});
+
+	it('reads workspaceInfo.repos and labels the source with every repository', () => {
+		const s = toCloudSession(rawSession({
+			workspaceInfo: {
+				fileCount: 0, bytes: 0, skipped: 0,
+				repos: [
+					{ dir: 'web', url: 'https://github.com/o/web', fullName: 'o/web', branch: 'main', pullRequest: { number: 3, url: 'https://github.com/o/web/pull/3', branch: 'b', base: 'main', headSha: 'a'.repeat(40), title: 't', draft: false, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' } },
+					{ dir: 'api', url: 'https://example.com/api.git' },
+					{ dir: 5 },
+				],
+			},
+		}));
+		const repos = multiRepos(s.workspaceInfo);
+		expect(repos.map(r => r.dir)).toEqual(['web', 'api']);
+		expect(repos[0].pullRequest?.number).toBe(3);
+		expect(cloudSource(s)).toEqual({ kind: 'repo', label: 'o/web @ main, example.com/api' });
+		// a single repo is not "multi"
+		expect(multiRepos({ fileCount: 0, bytes: 0, skipped: 0, repos: [{ dir: '.', url: 'u' }] })).toEqual([]);
 	});
 });
 
