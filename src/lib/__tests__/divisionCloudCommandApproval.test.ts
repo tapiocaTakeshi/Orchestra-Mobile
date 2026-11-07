@@ -38,3 +38,24 @@ describe('command approval', () => {
 		expect(toCloudCommandApprovalEvent({ status: 'weird' })).toBeNull();
 	});
 });
+
+describe('getCloudCommandApproval', () => {
+	const realFetch = global.fetch;
+	afterEach(() => { global.fetch = realFetch; });
+	const respond = (status: number, body: unknown) => {
+		global.fetch = jest.fn(async () => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) })) as unknown as typeof fetch;
+	};
+	const auth = { accessToken: 'jwt-token' } as never;
+
+	it('returns the waiting command', async () => {
+		respond(200, { approval: { requestSeq: 5, command: 'git push', reason: 'git のプッシュ' } });
+		const { getCloudCommandApproval } = require('../divisionCloud');
+		expect(await getCloudCommandApproval(auth, 's1')).toMatchObject({ requestSeq: 5, command: 'git push' });
+	});
+
+	it('treats a server without the endpoint (404) as nothing waiting', async () => {
+		respond(404, { error: 'Not found' });
+		const { getCloudCommandApproval } = require('../divisionCloud');
+		expect(await getCloudCommandApproval(auth, 's1')).toBeNull();
+	});
+});

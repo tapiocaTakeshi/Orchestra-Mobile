@@ -754,8 +754,14 @@ export const toCloudCommandApproval = (raw: unknown): CloudCommandApproval | nul
 
 /** 承認を待っているコマンド。待っていなければ null。 */
 export const getCloudCommandApproval = async (session: DivisionSession, id: string): Promise<CloudCommandApproval | null> => {
-	const data = await request<{ approval?: unknown }>(session, `${idPath(id)}/command-approval`, { timeoutMs: CLOUD_TIMEOUTS.changes });
-	return toCloudCommandApproval(data.approval);
+	try {
+		const data = await request<{ approval?: unknown }>(session, `${idPath(id)}/command-approval`, { timeoutMs: CLOUD_TIMEOUTS.changes });
+		return toCloudCommandApproval(data.approval);
+	} catch (e) {
+		// A server without command approval yet: nothing can be waiting there.
+		if (e instanceof DivisionCloudError && e.status === 404) return null;
+		throw e;
+	}
 };
 
 /** POST .../command-approval の body。 */
