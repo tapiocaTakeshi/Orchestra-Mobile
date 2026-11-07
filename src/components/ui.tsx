@@ -18,7 +18,7 @@ import {
 	View,
 	ViewStyle,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
 
@@ -521,9 +521,14 @@ export const Sheet = ({ title, eyebrow, onClose, headerRight, children }: {
 	onClose: () => void;
 	headerRight?: React.ReactNode;
 	children: React.ReactNode;
-}) => (
-	<Modal animationType='slide' presentationStyle='pageSheet' onRequestClose={onClose}>
-		<SafeAreaView style={styles.screen} edges={Platform.OS === 'ios' ? ['bottom'] : ['top', 'bottom']}>
+}) => {
+	// Modal の中の SafeAreaView は余白を取れない (0 になる) ことがあるので、アプリが受け取っている余白で空ける。
+	// iOS の pageSheet はステータスバーの下から出るので下だけ、Android は端まで描いて上下とも。
+	const insets = useSafeAreaInsets();
+	const pad = { paddingTop: Platform.OS === 'ios' ? 0 : insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right };
+	return (
+	<Modal animationType='slide' presentationStyle='pageSheet' statusBarTranslucent navigationBarTranslucent onRequestClose={onClose}>
+		<View style={[styles.screen, pad]}>
 			<View style={styles.sheetHeader}>
 				<View style={styles.sheetTitle}>
 					{eyebrow ? <Muted numberOfLines={1}>{eyebrow}</Muted> : null}
@@ -536,9 +541,10 @@ export const Sheet = ({ title, eyebrow, onClose, headerRight, children }: {
 				{children}
 				<ToastHost />
 			</View>
-		</SafeAreaView>
+		</View>
 	</Modal>
-);
+	);
+};
 
 export const Loading = ({ label }: { label?: string }) => (
 	<View style={styles.loading}>
