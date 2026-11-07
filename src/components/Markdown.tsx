@@ -102,7 +102,7 @@ export const Markdown = ({ text, textStyle }: { text: string; textStyle: StylePr
 };
 
 const styles = StyleSheet.create({
-	root: { gap: spacing.sm + 2 },
+	root: { gap: spacing.sm },
 	flex: { flex: 1 },
 	heading: { color: colors.fgStrong, fontWeight: '700', marginTop: spacing.xs },
 	bold: { fontWeight: '700', color: colors.fgStrong },

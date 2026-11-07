@@ -85,16 +85,20 @@ const ToolMessage = ({ name, text }: { name?: string; text: string }) => {
 			onPress={() => setOpen(v => !v)}
 			style={styles.tool}
 		>
+			{/* Claude と同じく 1 行: 名前と出力の 1 行目。押すと出力を全部開く */}
 			<View style={styles.toolHeader}>
 				<View style={styles.toolDot} />
-				<Text style={styles.toolName} numberOfLines={1}>{name || 'ツール'}</Text>
-			</View>
-			<View style={styles.toolResult}>
-				<Elbow />
-				<Text selectable={open} style={styles.toolText} numberOfLines={open ? undefined : 1}>
-					{open ? (text || '(出力なし)') : (firstLine || '(出力なし)')}
+				<Text style={styles.toolName} numberOfLines={1}>
+					{name || 'ツール'}
+					{!open && firstLine ? <Text style={styles.toolInline}>  {firstLine}</Text> : null}
 				</Text>
 			</View>
+			{open ? (
+				<View style={styles.toolResult}>
+					<Elbow />
+					<Text selectable style={styles.toolText}>{text || '(出力なし)'}</Text>
+				</View>
+			) : null}
 		</Pressable>
 	);
 };
@@ -213,13 +217,12 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	const [showJump, setShowJump] = useState(false);
 	const insets = useSafeAreaInsets();
 	const followMessages = useRef(true);
-	const lastContent = useRef('');
+	/** 指でスクロールしている最中 (このときだけ、上へ離れたら追従をやめる) */
+	const dragging = useRef(false);
 	const scrollRef = useRef<ScrollView | null>(null);
 
 	const chat = snapshot?.chat ?? null;
 	const ide = snapshot?.ide ?? null;
-	const lastMessage = chat?.messages[chat.messages.length - 1];
-	const contentKey = JSON.stringify([chat?.threadId, chat?.messages.length, lastMessage?.text, chat?.isRunning, chat?.awaitingApproval]);
 	useEffect(() => { followMessages.current = true; }, [chat?.threadId]);
 
 	const act = useCallback(async (fn: () => Promise<unknown>, successNote?: string) => {
@@ -358,7 +361,24 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						onRetry={() => void refresh()}
 					/>
 				) : null}
-				{chat?.error ? <ErrorBanner message={chat.error} /> : null}
+				{chat?.error ? (
+					<View>
+						<ErrorBanner message={chat.error} />
+						{/* 止まったところから続ける (最初からやり直さない) */}
+						{!lost && client ? (
+							<Button
+								title='続ける'
+								icon='play'
+								size='sm'
+								onPress={() => {
+									followMessages.current = true;
+									void act(() => client.continueAfterError(chat.threadId ?? undefined));
+								}}
+								style={styles.continueButton}
+							/>
+						) : null}
+					</View>
+				) : null}
 
 				<View style={styles.flex}>
 					<ScrollView
@@ -368,17 +388,23 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						keyboardDismissMode='on-drag'
 						refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 						scrollEventThrottle={16}
+						// 既定で常に最新を表示する。追従をやめるのは、指で上へ動かして一番下から離れたときだけ
+						// (中身の伸び縮み・Markdown の描画・ツールの開閉では切れない)。一番下の近くに戻ればまた追いかける
+						onScrollBeginDrag={() => { dragging.current = true; }}
+						onScrollEndDrag={() => { dragging.current = false; }}
+						onMomentumScrollEnd={() => { dragging.current = false; }}
 						onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
 							const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
-							followMessages.current = distance < 80;
-							const nextShowJump = distance > JUMP_THRESHOLD;
+							if (distance < 80) followMessages.current = true;
+							else if (dragging.current) followMessages.current = false;
+							const nextShowJump = !followMessages.current && distance > JUMP_THRESHOLD;
 							setShowJump(prev => (prev === nextShowJump ? prev : nextShowJump));
 						}}
 						onContentSizeChange={() => {
-							if (lastContent.current === contentKey) return;
-							lastContent.current = contentKey;
 							if (followMessages.current) scrollRef.current?.scrollToEnd({ animated: false });
 						}}
+						// キーボードが開いて見える高さが縮んだときも一番下を保つ
+						onLayout={() => { if (followMessages.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
 					>
 						{hasMessages ? (
 							<View style={styles.conversation}>
@@ -584,21 +610,23 @@ const styles = StyleSheet.create({
 	content: {
 		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
-		paddingTop: spacing.lg,
-		paddingBottom: spacing.xl,
+		paddingTop: spacing.md,
+		paddingBottom: spacing.lg,
 	},
-	conversation: { gap: spacing.lg },
+	conversation: { gap: spacing.md },
 	// 会話の見た目はクラウドのチャット (CloudAgentsScreen) と揃える: 自分の吹き出しは右寄せ・右下だけ小さい角
 	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
 	userBubble: {
-		borderRadius: 20,
+		borderRadius: 18,
 		borderBottomRightRadius: 6,
-		paddingHorizontal: spacing.md + 2,
-		paddingVertical: spacing.sm + 2,
+		paddingHorizontal: spacing.md,
+		paddingVertical: spacing.sm,
 		backgroundColor: colors.bgHover,
 	},
-	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
+	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 21 },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
+	toolInline: { color: colors.fgFaint, fontSize: fontSize.xs },
+	continueButton: { alignSelf: 'flex-start', marginHorizontal: spacing.lg, marginTop: spacing.xs },
 	tool: { gap: 2 },
 	toolHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	toolDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint },

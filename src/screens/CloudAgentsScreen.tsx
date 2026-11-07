@@ -150,6 +150,7 @@ import {
 	pullRequestActionLabel,
 	pullRequestStateFor,
 	sectionForChange,
+	resumeCloudSession,
 	sendCloudMessage,
 	splitPatch,
 	stopCloudSession,
@@ -975,18 +976,9 @@ const UserBubble = ({ value }: { value: string }) => (
 	</View>
 );
 
-/** エージェントの印 (返答の頭に出す丸いアイコン)。 */
-const AgentAvatar = () => (
-	<View style={styles.avatar}><Text style={styles.avatarGlyph}>✻</Text></View>
-);
-
-/** エージェントの 1 回分の返答。アイコンと名前を頭に 1 度だけ出し、中身を下に並べる。 */
+/** エージェントの 1 回分の返答。Claude のように見出し (アイコン・名前) は付けず、中身をそのまま詰めて並べる。 */
 const AgentTurn = ({ name, children }: { name: string; children: React.ReactNode }) => (
-	<View style={styles.agentTurn}>
-		<View style={styles.agentHead}>
-			<AgentAvatar />
-			<Text style={styles.agentName}>{name}</Text>
-		</View>
+	<View style={styles.agentTurn} accessibilityLabel={`${name} の返答`}>
 		<View style={styles.agentBody}>{children}</View>
 	</View>
 );
@@ -1072,7 +1064,7 @@ const ToolRow = ({ data }: { data: Record<string, unknown> }) => {
 		>
 			<View style={styles.line}>
 				<Bullet color={ok ? colors.success : colors.danger} />
-				<Text style={styles.toolCall} numberOfLines={open ? undefined : 2}>
+				<Text style={styles.toolCall} numberOfLines={open ? undefined : 1}>
 					<Text style={styles.toolName}>{parts.name}</Text>
 					{parts.arg ? <Text style={styles.toolArg}>({parts.arg})</Text> : null}
 				</Text>
@@ -1814,6 +1806,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const lastKey = useRef(sessionKey(initial));
 	const scrollRef = useRef<ScrollView | null>(null);
 	const follow = useRef(true);
+	/** 指でスクロールしている最中 (このときだけ、上へ離れたら追従をやめる) */
+	const dragging = useRef(false);
 
 	const applySession = useCallback((next: CloudSession) => {
 		setCurrent(next);
@@ -1941,6 +1935,21 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		}
 	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
 
+	// エラーで止まったセッションを、止まったところから続ける (失敗したタスクを飛ばさず、その途中から)
+	const resume = useCallback(async () => {
+		if (sending) return;
+		setSending(true);
+		try {
+			applySession(await resumeCloudSession(auth, id));
+			follow.current = true;
+			void loadEvents();
+		} catch (e) {
+			toast.show(cloudErrorText(e), 'error');
+		} finally {
+			setSending(false);
+		}
+	}, [auth, id, sending, applySession, loadEvents, toast]);
+
 	// 承認モードで成果物の承認・差し戻しをしたら、セッションとログを取り直す
 	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise') => {
 		applySession(next);
@@ -2042,10 +2051,19 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 						keyboardShouldPersistTaps='handled'
 						keyboardDismissMode='on-drag'
 						scrollEventThrottle={16}
+						// 既定で常に最新を表示する。追従をやめるのは、指で上へ動かして一番下から離れたときだけ
+						// (中身の伸び縮みやこちらからのスクロールでは切れない)。一番下の近くに戻ればまた追いかける
+						onScrollBeginDrag={() => { dragging.current = true; }}
+						onScrollEndDrag={() => { dragging.current = false; }}
+						onMomentumScrollEnd={() => { dragging.current = false; }}
 						onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
-							follow.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 80;
+							const distance = contentSize.height - layoutMeasurement.height - contentOffset.y;
+							if (distance < 80) follow.current = true;
+							else if (dragging.current) follow.current = false;
 						}}
 						onContentSizeChange={() => { if (follow.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
+						// キーボードが開いて見える高さが縮んだときも一番下を保つ
+						onLayout={() => { if (follow.current) scrollRef.current?.scrollToEnd({ animated: false }); }}
 					>
 						{!loaded ? <Loading label='ログを読み込んでいます…' /> : null}
 						{loaded && events.length === 0 ? <Muted>{active ? 'サンドボックスを用意しています…' : 'ログはまだありません。'}</Muted> : null}
@@ -2079,6 +2097,12 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 							) : null}
 							{awaitingApproval ? (
 								<ApprovalCard key={id} auth={auth} sessionId={id} lastSeq={current.lastSeq} onResolved={onApprovalResolved} />
+							) : null}
+							{current.status === 'failed' && loaded && events.length > 0 ? (
+								<View style={styles.resumeRow}>
+									<Button title='続ける' icon='play' size='sm' loading={sending} disabled={sending} onPress={() => void resume()} style={styles.alignStart} />
+									<Muted style={styles.flex}>止まったところから再開します (失敗したステップを飛ばさず、その途中から続けます)。</Muted>
+								</View>
 							) : null}
 						</View>
 					</ScrollView>
@@ -2871,10 +2895,10 @@ const styles = StyleSheet.create({
 	logContent: {
 		flexGrow: 1,
 		paddingHorizontal: spacing.lg,
-		paddingTop: spacing.lg,
-		paddingBottom: spacing.lg,
+		paddingTop: spacing.md,
+		paddingBottom: spacing.md,
 	},
-	conversation: { gap: spacing.lg + 4 },
+	conversation: { gap: spacing.md },
 	line: { flexDirection: 'row', alignItems: 'flex-start' },
 	gutter: { width: GUTTER, minHeight: 22, alignItems: 'flex-start', justifyContent: 'center' },
 	indent: { marginLeft: GUTTER },
@@ -2882,28 +2906,17 @@ const styles = StyleSheet.create({
 	bullet: { fontSize: 10, lineHeight: 22 },
 	userWrap: { alignItems: 'flex-end', paddingLeft: spacing.xl * 2 },
 	userBubble: {
-		borderRadius: 20,
+		borderRadius: 18,
 		borderBottomRightRadius: 6,
-		paddingHorizontal: spacing.md + 2,
-		paddingVertical: spacing.sm + 2,
+		paddingHorizontal: spacing.md,
+		paddingVertical: spacing.sm,
 		backgroundColor: colors.bgHover,
 	},
-	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
-	agentTurn: { gap: spacing.sm },
-	agentHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	avatar: {
-		width: 26,
-		height: 26,
-		borderRadius: 13,
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: withAlpha(colors.accent, '1f'),
-	},
-	avatarGlyph: { color: colors.accent, fontSize: 14, lineHeight: 18 },
-	agentName: { color: colors.fgMuted, fontSize: fontSize.xs + 1, fontWeight: '600' },
-	agentBody: { gap: spacing.md, paddingLeft: 34 },
+	userText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 21 },
+	agentTurn: { gap: spacing.xs },
+	agentBody: { gap: spacing.sm },
 	assistantBody: { gap: spacing.xs },
-	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 23 },
+	assistantText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
 	roleChip: {
 		alignSelf: 'flex-start',
 		maxWidth: 160,
@@ -2913,33 +2926,27 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgHover,
 	},
 	roleChipText: { color: colors.fgMuted, fontSize: fontSize.xs - 1, fontWeight: '600' },
-	toolGroup: {
-		borderRadius: radius.md,
-		borderWidth: 1,
-		borderColor: colors.border,
-		backgroundColor: colors.bgElevated,
-		overflow: 'hidden',
-	},
+	// ツールは枠の無い 1 行 (Claude と同じ)。押すと下に開く
+	toolGroup: {},
 	toolGroupHead: {
 		flexDirection: 'row',
 		alignItems: 'center',
-		gap: spacing.sm,
-		minHeight: 38,
-		paddingHorizontal: spacing.md,
+		gap: spacing.xs + 2,
+		minHeight: 28,
 	},
 	toolGroupLabel: { flex: 1, color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	toolGroupLast: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
 	toolGroupFailed: { color: colors.danger, fontSize: fontSize.xs },
 	toolGroupBody: {
-		gap: spacing.md,
-		paddingHorizontal: spacing.md,
-		paddingTop: spacing.sm,
-		paddingBottom: spacing.md,
-		borderTopWidth: StyleSheet.hairlineWidth,
-		borderTopColor: colors.border,
+		gap: spacing.sm,
+		marginLeft: 6,
+		paddingLeft: spacing.sm + 2,
+		paddingVertical: spacing.xs,
+		borderLeftWidth: StyleSheet.hairlineWidth,
+		borderLeftColor: colors.border,
 	},
 	tool: { gap: 2 },
-	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 22 },
+	toolCall: { flex: 1, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 20 },
 	toolName: { color: colors.fgStrong, fontWeight: '700' },
 	toolArg: { color: colors.fgMuted },
 	toolDuration: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 22, marginLeft: spacing.sm },
@@ -2956,6 +2963,7 @@ const styles = StyleSheet.create({
 	note: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, lineHeight: 18, flexShrink: 1 },
 	errorRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+	resumeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
 	errorText: { color: colors.danger, fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
 	plan: {
 		gap: spacing.xs + 2,

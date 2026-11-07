@@ -50,6 +50,7 @@ import {
 	repoFolderName,
 	repoLabel,
 	repoNameOf,
+	resumeCloudSession,
 	sectionForChange,
 	sendCloudMessage,
 	splitPatch,
@@ -491,6 +492,16 @@ describe('GitHub repo names', () => {
 		mockFetch(() => ({ status: 200, body: { session: rawSession() } }));
 		await startCloudSession(auth, 's1', { repo: { fullName: ' octo/app ', branch: 'main' } });
 		expect(bodyOf(calls[0])).toEqual({ repo: { fullName: 'octo/app', branch: 'main' } });
+	});
+});
+
+describe('resumeCloudSession', () => {
+	it('posts an empty body to /resume (no new instruction)', async () => {
+		mockFetch(() => ({ status: 200, body: { session: rawSession({ id: 'r1', status: 'running' }) } }));
+		const s = await resumeCloudSession(auth, 'r1');
+		expect(calls[0].url).toBe(`${BASE}/r1/resume`);
+		expect(bodyOf(calls[0])).toEqual({});
+		expect(s.status).toBe('running');
 	});
 });
 

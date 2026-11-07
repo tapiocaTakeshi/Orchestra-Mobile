@@ -570,6 +570,12 @@ export const sendCloudMessage = async (session: DivisionSession, id: string, tex
 	return toCloudSession(data.session);
 };
 
+/** エラーで止まった (failed) セッションを、止まったところから続ける。指示は足さない (POST .../resume)。 */
+export const resumeCloudSession = async (session: DivisionSession, id: string): Promise<CloudSession> => {
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/resume`, { method: 'POST', body: {} });
+	return toCloudSession(data.session);
+};
+
 export const stopCloudSession = async (session: DivisionSession, id: string): Promise<CloudSession> => {
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/stop`, { method: 'POST', body: {} });
 	return toCloudSession(data.session);
