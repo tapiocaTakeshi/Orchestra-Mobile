@@ -14,7 +14,7 @@
  * ツールの実行は 1 行 (押すと出力を開く)、承認の確認は入力欄のすぐ上に出す。
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	ActivityIndicator,
 	KeyboardAvoidingView,
@@ -32,8 +32,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TuningScreen } from './TuningScreen';
 import { OrchestraApiError } from '../api/client';
-import { ChatMessage, GoalLoopMode, PendingReview, ThreadSummary } from '../api/types';
+import { ChatMessage, GoalLoopMode, PendingReview, ThreadSummary, WorkflowAnswer } from '../api/types';
 import { Markdown } from '../components/Markdown';
+import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
 	Badge,
 	Button,
@@ -235,6 +236,23 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 		}
 	}, [invalidate, toast]);
 
+	// Leader のワークフロー案 (承認モード) への答え。図で編集した内容も送る
+	const [workflowBusy, setWorkflowBusy] = useState<'approve' | 'revise' | 'reject' | null>(null);
+	const answerWorkflow = useCallback(async (kind: 'approve' | 'revise' | 'reject', answer: WorkflowAnswer, note: string) => {
+		if (!client) return;
+		setWorkflowBusy(kind);
+		try {
+			await act(() => client.answerWorkflow(answer), note);
+		} finally {
+			setWorkflowBusy(null);
+		}
+	}, [act, client]);
+	const workflowRoleOptions = useMemo(() => {
+		const division = snapshot?.division;
+		const active = division?.projects.find(p => division.activeProjectIds.includes(p.projectId ?? '')) ?? division?.projects[0];
+		return [...new Set((active?.agents ?? []).map(a => String(a.role)))];
+	}, [snapshot?.division]);
+
 	const scrollToLatest = useCallback(() => {
 		followMessages.current = true;
 		setShowJump(false);
@@ -397,7 +415,20 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				</View>
 
 				{/* 承認の確認は入力欄のすぐ上 (指が届く場所) に出す */}
-				{isAwaiting ? (
+				{isAwaiting && chat?.pendingWorkflow ? (
+					<ScrollView style={styles.workflowWrap} nestedScrollEnabled keyboardShouldPersistTaps='handled'>
+						<WorkflowReviewCard
+							key={JSON.stringify(chat.pendingWorkflow.workflow.nodes.map(n => n.id))}
+							workflow={chat.pendingWorkflow.workflow}
+							leader={chat.pendingWorkflow.leader}
+							roleOptions={workflowRoleOptions}
+							busy={workflowBusy}
+							onApprove={workflow => void answerWorkflow('approve', workflow ? { action: 'approve', workflow } : { action: 'approve' }, 'ワークフローを承認しました')}
+							onRevise={feedback => void answerWorkflow('revise', { action: 'revise', feedback }, 'Leader に作り直してもらいます')}
+							onReject={() => void answerWorkflow('reject', { action: 'reject' }, 'ここで止めました')}
+						/>
+					</ScrollView>
+				) : isAwaiting ? (
 					<View accessibilityRole='alert' style={styles.approval}>
 						<Text style={styles.approvalKicker}>承認待ち 1 件</Text>
 						<Text style={styles.approvalTitle}>{approval.title}</Text>
@@ -632,6 +663,11 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgHover,
 		borderWidth: StyleSheet.hairlineWidth,
 		borderColor: colors.borderStrong,
+	},
+	workflowWrap: {
+		maxHeight: '70%',
+		marginHorizontal: spacing.md,
+		marginBottom: spacing.sm,
 	},
 	approval: {
 		marginHorizontal: spacing.md,

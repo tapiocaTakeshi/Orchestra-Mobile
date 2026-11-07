@@ -24,6 +24,7 @@ import {
 	RoleAssignment,
 	Snapshot,
 	ThreadSummary,
+	WorkflowAnswer,
 } from './types';
 import { RelayError, relayForToken } from './relay';
 
@@ -454,6 +455,11 @@ export class OrchestraClient {
 
 	async rejectTool(threadId?: string): Promise<ChatState> {
 		return this.request('/api/chat/reject', { method: 'POST', body: { threadId } });
+	}
+
+	/** Leader のワークフロー案に答える: 承認 (図で編集した内容) / 差し戻し (feedback) / 中止 */
+	async answerWorkflow(answer: WorkflowAnswer, threadId?: string): Promise<ChatState> {
+		return this.request('/api/chat/workflow', { method: 'POST', body: { threadId, ...answer } });
 	}
 
 	async setGoalLoopMode(mode: GoalLoopMode): Promise<ChatState> {
