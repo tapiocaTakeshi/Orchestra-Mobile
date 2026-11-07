@@ -110,7 +110,6 @@ import {
 	classifyPatchLines,
 	CloudGoalLoopMode,
 	DEFAULT_GOAL_LOOP,
-	GOAL_LOOP_HINTS,
 	GOAL_LOOP_LABELS,
 	cloudErrorText,
 	cloudModelLabel,
@@ -188,10 +187,8 @@ import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import {
 	clearLastCloudRepo,
-	loadLastCloudGoalLoop,
 	loadLastCloudModel,
 	loadLastCloudRepo,
-	saveLastCloudGoalLoop,
 	saveLastCloudModel,
 	saveLastCloudRepo,
 } from '../state/cloudStorage';
@@ -448,8 +445,6 @@ const EMPTY_DRAFT: Draft = {
 	showAdvanced: false,
 };
 
-const GOAL_LOOP_OPTIONS: { value: CloudGoalLoopMode; label: string }[] =
-	(['auto', 'confirm', 'off'] as const).map(value => ({ value, label: GOAL_LOOP_LABELS[value] }));
 
 const COUNT_OPTIONS = Array.from({ length: MAX_PARALLEL_SESSIONS }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
@@ -670,19 +665,7 @@ const LaunchOptionsSheet = ({ auth, github, projects, draft, onChange, onGoalLoo
 				</View>
 
 				<View style={styles.field}>
-					<SectionTitle>目標ループ</SectionTitle>
-					<SegmentedControl
-						options={GOAL_LOOP_OPTIONS}
-						value={draft.goalLoop}
-						onChange={value => {
-							onGoalLoopTouched();
-							set('goalLoop', value);
-						}}
-					/>
-					<Muted>
-						{GOAL_LOOP_HINTS[draft.goalLoop]}
-						{draft.goalLoop !== 'off' ? '。最初にリーダーが目標と確認できる達成条件を立て、ラウンドごとにレビュアーがサンドボックスで確かめます。' : '。'}
-					</Muted>
+					<Muted>繰り返し (ループ実行) と目標は、プロジェクトのワークフローの for / while ループで設定します。</Muted>
 				</View>
 
 				<View style={styles.field}>
@@ -832,15 +815,6 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 							accessibilityLabel={`モデル: ${draftModelLabel(draft, projects.projects)}。変更する`}
 							onPress={() => onOptionsOpen(true)}
 						/>
-						{/* 目標ループは既定値から変えたときだけ見せる (既定値なら「始める場所」「モデル」から開く設定で変えられる) */}
-						{draft.goalLoop !== DEFAULT_GOAL_LOOP ? (
-							<ComposerChip
-								icon='repeat'
-								label={`ループ · ${GOAL_LOOP_LABELS[draft.goalLoop]}`}
-								accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[draft.goalLoop]}。変更する`}
-								onPress={() => onOptionsOpen(true)}
-							/>
-						) : null}
 						{draft.modelMode === 'division' && draft.approvalMode ? (
 							<ComposerChip icon='check-square' label='承認モード' accessibilityLabel='承認モード: オン。変更する' onPress={() => onOptionsOpen(true)} />
 						) : null}
@@ -2180,17 +2154,6 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		return () => { cancelled = true; };
 	}, [session?.userId]);
 
-	// 前回選んだ目標ループ
-	useEffect(() => {
-		const userId = session?.userId;
-		if (!userId) return;
-		let cancelled = false;
-		void loadLastCloudGoalLoop(userId).then(last => {
-			if (!cancelled && !goalLoopTouched.current && last) setDraft(d => ({ ...d, goalLoop: last }));
-		});
-		return () => { cancelled = true; };
-	}, [session?.userId]);
-
 	const loadList = useCallback(async () => {
 		if (!session) return;
 		try {
@@ -2281,7 +2244,6 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		// 次に開いたとき同じモデル (Division Project ならそのプロジェクト) を選んだ状態にする
 		const selection = modelSelectionOf(draft);
 		void saveLastCloudModel(session.userId, selection);
-		void saveLastCloudGoalLoop(session.userId, draft.goalLoop);
 		try {
 			const results = await launchSessions(session, {
 				prompt: draft.prompt,
@@ -2290,7 +2252,6 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 				title: draft.title || undefined,
 				// model と projectId。Division Project なら model: 'division-project' + そのプロジェクト
 				...launchModelFields(selection),
-				goalLoop: draft.goalLoop,
 				// 承認モードは Division Project のときだけ
 				approvalMode: selection.mode === 'division' && draft.approvalMode,
 				// 1 つだけ起動したときは、作れた時点でそのセッションのチャットを開く (サンドボックスの用意はチャットの中で待つ)

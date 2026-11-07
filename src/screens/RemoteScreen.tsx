@@ -32,7 +32,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TuningScreen } from './TuningScreen';
 import { OrchestraApiError } from '../api/client';
-import { ChatMessage, GoalLoopMode, PendingReview, ThreadSummary, WorkflowAnswer } from '../api/types';
+import { ChatMessage, PendingReview, ThreadSummary, WorkflowAnswer } from '../api/types';
 import { Markdown } from '../components/Markdown';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
@@ -114,12 +114,6 @@ const ChatMessageView = ({ message }: { message: ChatMessage }) => {
 		default:
 			return message.text ? <Text style={styles.noteText}>{message.text}</Text> : null;
 	}
-};
-
-const GOAL_LOOP_LABELS: Record<GoalLoopMode, string> = { auto: '自動', confirm: '毎回確認' };
-const GOAL_LOOP_HINTS: Record<GoalLoopMode, string> = {
-	auto: '未達なら自動で次のラウンドに進みます',
-	confirm: '未達のラウンドが終わるたびに止まり、続けるかを確認します',
 };
 
 /** 承認の確認の文言。ツールの承認と、フローのレビュー (目標ループの「毎回確認」など) で変える。 */
@@ -304,7 +298,6 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	const isRunning = !!chat?.isRunning;
 	const isAwaiting = !!chat?.awaitingApproval;
 	const approval = approvalCopy(chat?.pendingReview);
-	const goalLoopMode = chat?.goalLoopMode ?? null;
 	const hasMessages = !!chat && chat.messages.length > 0;
 	const canSend = !!draft.trim() && !sending && !lost;
 	// 接続が切れていれば、作業中かどうかも分からない (最後に見た内容でしかない) ので接続切れを出す
@@ -469,22 +462,6 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 								<Icon name='bar-chart-2' size={15} color={colors.fgFaint} />
 								<Text style={styles.composerChipText}>コスト</Text>
 							</Pressable>
-							{/* 目標ループ: PC のチャット欄の「ループ」と同じ。押すたびに 自動 ⇄ 毎回確認 */}
-							{goalLoopMode ? (
-								<Pressable
-									accessibilityRole='button'
-									accessibilityLabel={`目標ループ: ${GOAL_LOOP_LABELS[goalLoopMode]}。${GOAL_LOOP_HINTS[goalLoopMode]}。押すと切り替え`}
-									onPress={() => {
-										const next: GoalLoopMode = goalLoopMode === 'auto' ? 'confirm' : 'auto';
-										void act(() => client.setGoalLoopMode(next), `ループ: ${GOAL_LOOP_LABELS[next]}（${GOAL_LOOP_HINTS[next]}）`);
-									}}
-									hitSlop={6}
-									style={({ pressed }) => [styles.composerChip, pressed && styles.composerChipPressed]}
-								>
-									<Icon name='repeat' size={15} color={colors.fgFaint} />
-									<Text style={styles.composerChipText}>ループ · {GOAL_LOOP_LABELS[goalLoopMode]}</Text>
-								</Pressable>
-							) : null}
 							<View style={styles.flex} />
 							{isRunning && !isAwaiting && !draft.trim() && !lost ? (
 								<Pressable

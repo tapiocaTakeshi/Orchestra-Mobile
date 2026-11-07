@@ -92,13 +92,10 @@ describe('RemoteScreen', () => {
 		expect(texts).not.toContain('##');
 	});
 
-	it('ループの切り替えで IDE の設定を変える', async () => {
+	it('入力欄にループの設定は出さない (繰り返しはワークフローで設定する)', async () => {
 		mockSnapshot = snapshotWith({ goalLoopMode: 'auto' });
 		const tree = await render();
-		expect(textsOf(tree)).toContain('自動');
-		await act(async () => { byLabel(tree, /^目標ループ: 自動/).props.onPress(); });
-		expect(mockClient.setGoalLoopMode).toHaveBeenCalledWith('confirm');
-		expect(mockInvalidate).toHaveBeenCalled();
+		expect(() => byLabel(tree, /^目標ループ/)).toThrow();
 	});
 
 	it('Division API 以外 / 古い IDE ではループを出さない', async () => {

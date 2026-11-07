@@ -118,7 +118,7 @@ describe('ProjectsScreen 割り当て管理 (PC 接続時)', () => {
 	it('adds a role and persists it through saveProject', async () => {
 		const root = await render();
 		await press(root, 'Web アプリ を編集');
-		await press(root, 'レビュー を追加');
+		await press(root, 'レビュアー を追加');
 		await act(async () => { saveButtons(root)[0].props.onPress(); });
 		expect(mockClient.saveProject).toHaveBeenCalledTimes(1);
 		const [id, body] = mockClient.saveProject.mock.calls[0];
@@ -140,7 +140,7 @@ describe('ProjectsScreen 割り当て管理 (PC 接続時)', () => {
 		mockClient.saveProject.mockImplementation(() => new Promise(r => { resolve = r; }));
 		const root = await render();
 		await press(root, 'Web アプリ を編集');
-		await press(root, 'レビュー を追加');
+		await press(root, 'レビュアー を追加');
 		await act(async () => { saveButtons(root)[0].props.onPress(); });
 		await act(async () => { saveButtons(root)[0].props.onPress(); });
 		expect(mockClient.saveProject).toHaveBeenCalledTimes(1);
@@ -151,7 +151,7 @@ describe('ProjectsScreen 割り当て管理 (PC 接続時)', () => {
 		mockClient.saveProject.mockRejectedValue(new Error('network down'));
 		const root = await render();
 		await press(root, 'Web アプリ を編集');
-		await press(root, 'レビュー を追加');
+		await press(root, 'レビュアー を追加');
 		await act(async () => { saveButtons(root)[0].props.onPress(); });
 		expect(mockToast).toHaveBeenCalledWith(expect.stringContaining('network down'), 'error');
 		expect(JSON.stringify(renderer!.toJSON())).toContain('プロジェクトを編集');
