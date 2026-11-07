@@ -66,34 +66,34 @@ export const providerTitle = (provider: string): string =>
 	PROVIDER_TITLES[provider] ?? provider;
 
 /**
- * Division のロール表示名。IDE 側の AgentRole と、Division API 側で使われている
- * 綴り (reviewer / file-searcher など) の両方を引けるようにしてある。
+ * Division のロール表示名。ロールは リーダー・サーチャー・リサーチャー・ライター・デザイナー・コーダー・レビュアー の 7 つだけ。
+ * IDE 側の名前 (search / writing / review など) と Division API 側の名前 (searcher / writer / reviewer など) の両方を引ける。
+ * 廃止したロール (planner / ideaman / image / file-searcher) は、古い記録用に引き継ぎ先のロール名で出す。
  */
 const ROLE_TITLES: Record<string, string> = {
 	leader: 'リーダー',
+	search: 'サーチャー',
+	searcher: 'サーチャー',
+	research: 'リサーチャー',
+	researcher: 'リサーチャー',
+	writing: 'ライター',
+	writer: 'ライター',
+	design: 'デザイナー',
+	designer: 'デザイナー',
 	coder: 'コーダー',
-	planner: 'プランナー',
-	search: '検索',
-	searcher: '検索',
-	research: 'リサーチ',
-	researcher: 'リサーチ',
-	design: 'デザイン',
-	designer: 'デザイン',
-	writing: 'ライティング',
-	writer: 'ライティング',
-	ideaman: 'アイデア',
-	filesearch: 'ファイル検索',
-	'file-searcher': 'ファイル検索',
-	image: '画像',
-	imager: '画像',
-	review: 'レビュー',
-	reviewer: 'レビュー',
+	review: 'レビュアー',
+	reviewer: 'レビュアー',
+	// 廃止したロール
+	planner: 'ライター',
+	ideaman: 'リサーチャー',
+	image: 'デザイナー',
+	imager: 'デザイナー',
+	filesearch: 'サーチャー',
+	'file-searcher': 'サーチャー',
 	generate: '生成',
 };
 
 export const roleTitle = (role: string): string => ROLE_TITLES[role] ?? role;
 
-/** 役割を追加するときの候補。表示名が分かっているものだけ出す。 */
-export const KNOWN_ROLES: string[] = [
-	'leader', 'planner', 'coder', 'review', 'search', 'research', 'design', 'writing', 'ideaman', 'filesearch', 'image',
-];
+/** 役割を追加するときの候補: 7 つのロール (IDE 側の名前) */
+export const KNOWN_ROLES: string[] = ['leader', 'search', 'research', 'writing', 'design', 'coder', 'review'];
