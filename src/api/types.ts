@@ -156,6 +156,19 @@ export type PendingReview = {
 	total: number;
 };
 
+/** Division Project 承認モード: Leader が計画を図にしたワークフロー案 (PC の IDE で止まっている) */
+export type PendingWorkflow = {
+	workflow: import('../lib/divisionWorkflow').DivisionWorkflow;
+	input: string;
+	leader?: string;
+};
+
+/** POST /api/chat/workflow: ワークフロー案への答え */
+export type WorkflowAnswer =
+	| { action: 'approve'; workflow?: import('../lib/divisionWorkflow').DivisionWorkflow }
+	| { action: 'revise'; feedback: string }
+	| { action: 'reject' };
+
 export type ChatState = {
 	threadId: string;
 	messages: ChatMessage[];
@@ -163,6 +176,8 @@ export type ChatState = {
 	awaitingApproval: boolean;
 	/** フローのレビューで止まっているときの中身。古い IDE は返さない */
 	pendingReview?: PendingReview | null;
+	/** Leader のワークフロー案で止まっているときの中身 (answerWorkflow で答える)。古い IDE は返さない */
+	pendingWorkflow?: PendingWorkflow | null;
 	/** 目標ループの設定。チャットのモデルが Division API でなければ null、古い IDE は返さない */
 	goalLoopMode?: GoalLoopMode | null;
 	error?: string;

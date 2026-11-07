@@ -86,6 +86,7 @@ import {
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
 	CloudApproval,
 	CloudChange,
@@ -120,6 +121,9 @@ import {
 	editedApprovalContent,
 	fetchCloudChanges,
 	getCloudApproval,
+	getCloudWorkflowProposal,
+	CloudWorkflowProposal,
+	resolveCloudWorkflowProposal,
 	fetchCloudEvents,
 	finishedSessions,
 	isActive,
@@ -1319,6 +1323,8 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 	onResolved: (next: CloudSession, action: 'approve' | 'revise') => void;
 }) => {
 	const [approval, setApproval] = useState<CloudApproval | null>(null);
+	/** 成果物ではなく、Leader のワークフロー案 (計画を図にしたもの) を待っているとき */
+	const [proposal, setProposal] = useState<CloudWorkflowProposal | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
 	const [content, setContent] = useState('');
@@ -1333,6 +1339,8 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 		try {
 			const next = await getCloudApproval(auth, sessionId);
 			setApproval(next);
+			const nextProposal = next ? null : await getCloudWorkflowProposal(auth, sessionId);
+			setProposal(prev => (prev && nextProposal && prev.proposalSeq === nextProposal.proposalSeq ? prev : nextProposal));
 			// 同じ成果物を読み直したときは、編集中の内容とフィードバックを消さない
 			if (next && next.taskSeq !== shownSeq.current) {
 				shownSeq.current = next.taskSeq;
@@ -1374,6 +1382,33 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 	const readOnly = !approval || approval.content === null;
 	const edited = !!approval && editedApprovalContent(approval, content) !== undefined;
 
+	if (!approval && proposal) {
+		const answer = async (action: 'approve' | 'revise', input: { workflow?: CloudWorkflowProposal['workflow']; feedback?: string }) => {
+			if (busy) return;
+			setBusy(action);
+			setError(null);
+			try {
+				const next = await resolveCloudWorkflowProposal(auth, sessionId, { proposalSeq: proposal.proposalSeq, action, ...input });
+				setProposal(null);
+				onResolved(next, action);
+			} catch (e) {
+				setError(approvalErrorText(e));
+			} finally {
+				setBusy(null);
+			}
+		};
+		return (
+			<WorkflowReviewCard
+				key={proposal.proposalSeq}
+				workflow={proposal.workflow}
+				busy={busy}
+				error={error}
+				onApprove={workflow => void answer('approve', workflow ? { workflow } : {})}
+				onRevise={feedback => void answer('revise', { feedback })}
+			/>
+		);
+	}
+
 	return (
 		<View style={[styles.done, styles.approval]} accessibilityLabel='成果物の承認'>
 			<View style={styles.line}>
@@ -1387,7 +1422,7 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 			{loading && !approval && !loadError ? <Loading label='成果物を読み込んでいます…' /> : null}
 			{loadError ? <ErrorBanner message={loadError} onRetry={() => void load()} style={styles.inlineBanner} /> : null}
 			{!loading && !loadError && !approval ? (
-				<Muted>承認待ちの成果物が見つかりません。少し待ってから「更新」を押してください。</Muted>
+				<Muted>承認待ちの成果物やワークフロー案が見つかりません。少し待ってから「更新」を押してください。</Muted>
 			) : null}
 			{approval ? (
 				<>
@@ -1533,6 +1568,10 @@ const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal,
 			return <GoalCard data={data} />;
 		case 'approval':
 			return <ApprovalEventView data={data} />;
+		case 'workflow':
+			return <Muted>🗺️ Leader がワークフロー案を作りました{text(data.leaderModel) ? ` (${text(data.leaderModel)})` : ''}</Muted>;
+		case 'workflow_review':
+			return <Muted>{data.status === 'approved' ? `✅ ワークフローを承認しました${data.edited ? ' (図で編集)' : ''}` : `↩️ ワークフローを差し戻しました: ${text(data.feedback)}`}</Muted>;
 		case 'review': {
 			const role = text(data.role) || 'reviewer';
 			return <ReviewEventView data={data} roleName={timeline.roleNames.get(role) ?? 'レビュー'} onContinue={onContinueGoal} continuing={continuing} />;

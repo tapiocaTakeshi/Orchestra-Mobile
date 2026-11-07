@@ -18,6 +18,8 @@
  *   POST /api/cloud-sessions/:id/pull-request  PR を作成 / 既存の PR に push して更新
  *   GET  /api/cloud-sessions/:id/approval      承認モードで承認待ちの成果物 (.division/*.md など) と内容
  *   POST /api/cloud-sessions/:id/approval      承認して続行 / フィードバックを付けて差し戻す (編集した内容も一緒に送れる)
+ *   GET  /api/cloud-sessions/:id/workflow-proposal  承認モードで Leader が計画を図にしたワークフロー案 (承認待ち)
+ *   POST /api/cloud-sessions/:id/workflow-proposal  ワークフロー案を承認 (図で編集した内容も送れる) / 差し戻す
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -44,6 +46,7 @@ import { DIVISION_API_BASE_URL } from './divisionAuthConfig';
 import { DivisionSession, getDivisionAccessToken, getDivisionSupabase } from './divisionAuth';
 import { oneLine } from './format';
 import { colors } from '../theme';
+import { DivisionWorkflow, normalizeWorkflow, workflowErrors } from './divisionWorkflow';
 
 // ---------------------------------------------------------------------------
 // 型 (Division 側の DTO と同じ形)
@@ -139,6 +142,8 @@ export type CloudSessionEventType =
 	| 'goal' | 'review'
 	// 承認モード: { taskSeq, index, role, roleName, title, file, status: 'approved' | 'revised', edited, feedback? } (toCloudApprovalEvent)
 	| 'approval'
+	// 承認モード: Leader のワークフロー案 { status: 'proposed', workflow } と、その承認 / 差し戻し { proposalSeq, status, edited, feedback? }
+	| 'workflow' | 'workflow_review'
 	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
 	| 'pull_request';
 
@@ -607,6 +612,64 @@ export const approvalBody = (input: ResolveApprovalInput): Record<string, unknow
 export const resolveCloudApproval = async (session: DivisionSession, id: string, input: ResolveApprovalInput): Promise<CloudSession> => {
 	const body = approvalBody(input);
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/approval`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.changes });
+	return toCloudSession(data.session);
+};
+
+// ---------------------------------------------------------------------------
+// 承認モード: Leader のワークフロー案 (計画を図にしたもの)
+// ---------------------------------------------------------------------------
+
+export type CloudWorkflowProposal = {
+	/** 案の workflow イベントの seq。POST でそのまま送り返す */
+	proposalSeq: number;
+	workflow: DivisionWorkflow;
+};
+
+/** GET .../workflow-proposal の proposal を取り出す。無い・壊れていれば null。 */
+export const toCloudWorkflowProposal = (raw: unknown): CloudWorkflowProposal | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const p = raw as Record<string, unknown>;
+	const proposalSeq = num(p.proposalSeq, Number.NaN);
+	const workflow = normalizeWorkflow(p.workflow);
+	if (!Number.isInteger(proposalSeq) || proposalSeq < 1 || !workflow) return null;
+	return { proposalSeq, workflow };
+};
+
+/** 承認を待っているワークフロー案。待っていなければ null。 */
+export const getCloudWorkflowProposal = async (session: DivisionSession, id: string): Promise<CloudWorkflowProposal | null> => {
+	const data = await request<{ proposal?: unknown }>(session, `${idPath(id)}/workflow-proposal`, { timeoutMs: CLOUD_TIMEOUTS.changes });
+	return toCloudWorkflowProposal(data.proposal);
+};
+
+export type ResolveWorkflowInput = {
+	proposalSeq: number;
+	action: CloudApprovalAction;
+	/** 図で編集したワークフロー。編集していなければ省略 (Leader の案のまま) */
+	workflow?: DivisionWorkflow;
+	/** 差し戻しの理由 (revise では必須) */
+	feedback?: string;
+};
+
+/** POST .../workflow-proposal の body。差し戻しなのにフィードバックが空、編集した図が実行できないなら投げる。 */
+export const workflowProposalBody = (input: ResolveWorkflowInput): Record<string, unknown> => {
+	const feedback = input.feedback?.trim() ?? '';
+	if (input.action === 'revise' && !feedback) throw new Error('差し戻す理由 (フィードバック) を入力してください。');
+	if (input.action === 'approve' && input.workflow) {
+		const errors = workflowErrors(input.workflow);
+		if (errors.length) throw new Error(errors.join(' '));
+	}
+	return {
+		proposalSeq: input.proposalSeq,
+		action: input.action,
+		...(input.action === 'approve' && input.workflow ? { workflow: input.workflow } : {}),
+		...(feedback ? { feedback } : {}),
+	};
+};
+
+/** ワークフロー案を承認して実行 / 差し戻して作り直させる。セッションは running に戻る。 */
+export const resolveCloudWorkflowProposal = async (session: DivisionSession, id: string, input: ResolveWorkflowInput): Promise<CloudSession> => {
+	const body = workflowProposalBody(input);
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/workflow-proposal`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.changes });
 	return toCloudSession(data.session);
 };
 
