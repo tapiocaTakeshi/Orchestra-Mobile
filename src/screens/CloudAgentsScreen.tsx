@@ -126,6 +126,13 @@ import {
 	editedApprovalContent,
 	fetchCloudChanges,
 	getCloudApproval,
+	getCloudCommandApproval,
+	aiEditCloudDocument,
+	aiEditErrorText,
+	CloudCommandApproval,
+	resolveCloudCommandApproval,
+	toCloudCommandApprovalEvent,
+	commandApprovalEventText,
 	getCloudWorkflowProposal,
 	CloudWorkflowProposal,
 	resolveCloudWorkflowProposal,
@@ -1332,14 +1339,75 @@ const ApprovalEventView = ({ data }: { data: Record<string, unknown> }) => {
  * 承認モードで止まっているときのカード。成果物の中身を編集でき、「承認して続行」か
  * フィードバックを付けて「差し戻す」。中身が読めない (大きすぎるなど) ときは編集せずに承認・差し戻しだけできる。
  */
+/** command_approval イベント: 「⚠️ コマンドの承認待ち: 理由」+ コマンド / 許可 / 拒否 (とメモ) */
+const CommandApprovalEventView = ({ data, roleName }: { data: Record<string, unknown>; roleName?: string }) => {
+	const event = toCloudCommandApprovalEvent(data);
+	if (!event) return null;
+	const label = commandApprovalEventText(event);
+	const color = event.status === 'pending' ? colors.warning : event.status === 'approved' ? colors.success : colors.danger;
+	return (
+		<View style={styles.line} accessibilityLabel={`${roleName ? `${roleName}: ` : ''}${label}`}>
+			<Text selectable style={[styles.approvalEventText, { color }]}>
+				{roleName ? `${roleName}: ` : ''}{label}
+				{event.status === 'pending' && event.command ? <Text style={styles.approvalEventFile}>{'\n'}{event.command}</Text> : null}
+			</Text>
+		</View>
+	);
+};
+
+/** 承認待ちのコマンド: 内容と理由を見せて、実行を許可 / 拒否 (理由は任意。エージェントに伝わる) */
+const CommandApprovalView = ({ command, busy, error, onAnswer, onReload, loading }: {
+	command: CloudCommandApproval;
+	busy: 'approve' | 'deny' | null;
+	error: string | null;
+	loading: boolean;
+	onAnswer: (action: 'approve' | 'deny', feedback: string) => void;
+	onReload: () => void;
+}) => {
+	const [feedback, setFeedback] = useState('');
+	useEffect(() => { setFeedback(''); }, [command.requestSeq]);
+	return (
+		<View style={[styles.done, styles.approval]} accessibilityLabel='コマンドの承認'>
+			<View style={styles.line}>
+				<View style={styles.gutter}><Icon name='shield' size={14} color={colors.warning} /></View>
+				<Text style={[styles.doneTitle, styles.flex]}>
+					コマンドの承認待ち
+					{command.role ? <Text style={styles.doneCount}>  {command.role}</Text> : null}
+				</Text>
+				<Button title='更新' icon='refresh-cw' variant='ghost' size='sm' loading={loading} disabled={!!busy} onPress={onReload} />
+			</View>
+			<Text selectable style={styles.planMeta}>理由: {command.reason}</Text>
+			<Text selectable style={styles.commandText}>{command.command}</Text>
+			<Muted>エージェントが実行する前に止まっています。許可するとこのまま実行し、拒否すると実行せずに続けます。</Muted>
+			<Input
+				value={feedback}
+				onChangeText={setFeedback}
+				multiline
+				editable={!busy}
+				placeholder='任意: 拒否する理由や、代わりにしてほしいこと'
+				accessibilityLabel='拒否の理由'
+				style={styles.approvalFeedback}
+			/>
+			{error ? <ErrorBanner message={error} style={styles.inlineBanner} /> : null}
+			<Row style={styles.doneActions}>
+				<Button title='許可して実行' icon='check' size='sm' loading={busy === 'approve'} disabled={!!busy} onPress={() => onAnswer('approve', '')} />
+				<Button title='拒否' icon='x' variant='secondary' size='sm' loading={busy === 'deny'} disabled={!!busy} onPress={() => onAnswer('deny', feedback)} />
+			</Row>
+		</View>
+	);
+};
+
 const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 	auth: DivisionSession;
 	sessionId: string;
 	/** ログが進んだら (別の端末で承認されて次の成果物を待っているなど) 読み直す */
 	lastSeq: number;
-	onResolved: (next: CloudSession, action: 'approve' | 'revise') => void;
+	onResolved: (next: CloudSession, action: 'approve' | 'revise' | 'deny') => void;
 }) => {
 	const [approval, setApproval] = useState<CloudApproval | null>(null);
+	/** エージェントが実行しようとしている危険なコマンド (どのセッションでも) */
+	const [command, setCommand] = useState<CloudCommandApproval | null>(null);
+	const [commandBusy, setCommandBusy] = useState<'approve' | 'deny' | null>(null);
 	/** 成果物ではなく、Leader のワークフロー案 (計画を図にしたもの) を待っているとき */
 	const [proposal, setProposal] = useState<CloudWorkflowProposal | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -1354,6 +1422,13 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 		setLoading(true);
 		setLoadError(null);
 		try {
+			const nextCommand = await getCloudCommandApproval(auth, sessionId);
+			setCommand(nextCommand);
+			if (nextCommand) {
+				setApproval(null);
+				setProposal(null);
+				return;
+			}
 			const next = await getCloudApproval(auth, sessionId);
 			setApproval(next);
 			const nextProposal = next ? null : await getCloudWorkflowProposal(auth, sessionId);
@@ -1398,6 +1473,25 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 
 	const readOnly = !approval || approval.content === null;
 	const edited = !!approval && editedApprovalContent(approval, content) !== undefined;
+
+	if (command) {
+		const answerCommand = async (action: 'approve' | 'deny', feedback: string) => {
+			if (commandBusy) return;
+			setCommandBusy(action);
+			setError(null);
+			try {
+				const next = await resolveCloudCommandApproval(auth, sessionId, { requestSeq: command.requestSeq, action, ...(action === 'deny' ? { feedback } : {}) });
+				setCommand(null);
+				onResolved(next, action);
+			} catch (e) {
+				setError(approvalErrorText(e));
+				void load();
+			} finally {
+				setCommandBusy(null);
+			}
+		};
+		return <CommandApprovalView command={command} busy={commandBusy} error={error} loading={loading} onAnswer={(a, f) => void answerCommand(a, f)} onReload={() => void load()} />;
+	}
 
 	if (!approval && proposal) {
 		const answer = async (action: 'approve' | 'revise', input: { workflow?: CloudWorkflowProposal['workflow']; feedback?: string }) => {
@@ -1454,14 +1548,16 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						</Muted>
 					) : (
 						<>
-							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直す */}
+							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直し、選んだ部分はロールの AI にも頼める */}
 							<DocumentView
 								name={approval.file}
 								value={content}
 								onChangeText={busy ? undefined : setContent}
 								height={360}
+								aiEdit={req => aiEditCloudDocument(auth, sessionId, { ...req, path: approval.file })}
+								aiEditErrorText={aiEditErrorText}
 							/>
-							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直してから承認できます。'}</Muted>
+							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直すか、選んだ部分をロールの AI に直してもらってから承認できます。'}</Muted>
 						</>
 					)}
 					<Input
@@ -1581,6 +1677,10 @@ const EventView = ({ event, timeline, onShowChanges, doneAction, onContinueGoal,
 			return <GoalCard data={data} />;
 		case 'approval':
 			return <ApprovalEventView data={data} />;
+		case 'command_approval': {
+			const role = text(data.role);
+			return <CommandApprovalEventView data={data} roleName={role ? timeline.roleNames.get(role) ?? role : undefined} />;
+		}
 		case 'workflow':
 			return <Muted>🗺️ Leader がワークフロー案を作りました{text(data.leaderModel) ? ` (${text(data.leaderModel)})` : ''}</Muted>;
 		case 'workflow_review':
@@ -1949,9 +2049,9 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	}, [auth, id, sending, applySession, loadEvents, toast]);
 
 	// 承認モードで成果物の承認・差し戻しをしたら、セッションとログを取り直す
-	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise') => {
+	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise' | 'deny') => {
 		applySession(next);
-		toast.show(action === 'approve' ? '承認しました' : '差し戻しました', 'success');
+		toast.show(action === 'approve' ? '承認しました' : action === 'deny' ? '実行を拒否しました' : '差し戻しました', 'success');
 		follow.current = true;
 		void loadEvents();
 	}, [applySession, loadEvents, toast]);
@@ -2259,7 +2359,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					void notifyRemoteEvent(
 						'クラウドエージェント',
 						s.status === 'idle' ? `「${s.title}」が終わりました。`
-							: s.status === 'awaiting_approval' ? `「${s.title}」が成果物の承認を待っています。`
+							: s.status === 'awaiting_approval' ? `「${s.title}」が承認を待っています。`
 								: `「${s.title}」が失敗しました。`,
 						'cloud-session',
 					);
@@ -3007,6 +3107,7 @@ const styles = StyleSheet.create({
 	approvalFeedback: { minHeight: 64, textAlignVertical: 'top' },
 	approvalEventText: { fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
 	approvalEventFile: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },
+	commandText: { color: colors.fgStrong, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 19, padding: spacing.sm, borderRadius: radius.sm, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.bgInput },
 	toggleLabel: { color: colors.fg, fontSize: fontSize.sm },
 	typing: {
 		flexDirection: 'row',

@@ -8,7 +8,8 @@
 import { useMemo } from 'react';
 import { OrchestraApiError } from '../api/client';
 import type { RemoteDocument, RemoteDocumentContent } from '../api/types';
-import { DivisionCloudError, cloudErrorText, getCloudDocument, listCloudDocuments, saveCloudDocument } from './divisionCloud';
+import { DivisionCloudError, aiEditCloudDocument, cloudErrorText, getCloudDocument, listCloudDocuments, saveCloudDocument } from './divisionCloud';
+import type { DocumentAiEditProposal, DocumentAiEditRequest } from './divisionCloud';
 import type { DivisionSession } from './divisionAuth';
 import { useApp } from '../state/AppContext';
 
@@ -25,6 +26,8 @@ export type DocumentSource = {
 	errorText(e: unknown): string;
 	/** After a save (e.g. refresh the PC's snapshot) */
 	onSaved?(): void;
+	/** The role that writes the document rewrites a selected part (cloud sessions only); nothing is saved */
+	aiEdit?(req: DocumentAiEditRequest): Promise<DocumentAiEditProposal>;
 };
 
 /** The PC's documents (needs the remote-control connection). */
@@ -54,6 +57,7 @@ export const cloudDocumentSource = (auth: DivisionSession, sessionId: string, re
 	list: () => listCloudDocuments(auth, sessionId),
 	get: path => getCloudDocument(auth, sessionId, path),
 	save: (path, content, baseMtime) => saveCloudDocument(auth, sessionId, path, content, baseMtime),
+	aiEdit: req => aiEditCloudDocument(auth, sessionId, req),
 	revision,
 	isConflict: e => e instanceof DivisionCloudError && e.status === 409 && e.code === 'document_changed',
 	errorText: e => {

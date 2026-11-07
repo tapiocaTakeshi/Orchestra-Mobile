@@ -20,6 +20,8 @@
  *   POST /api/cloud-sessions/:id/approval      承認して続行 / フィードバックを付けて差し戻す (編集した内容も一緒に送れる)
  *   GET  /api/cloud-sessions/:id/workflow-proposal  承認モードで Leader が計画を図にしたワークフロー案 (承認待ち)
  *   POST /api/cloud-sessions/:id/workflow-proposal  ワークフロー案を承認 (図で編集した内容も送れる) / 差し戻す
+ *   GET  /api/cloud-sessions/:id/command-approval   エージェントが実行しようとしている危険なコマンド (rm -rf / git push / sudo など。承認待ち)
+ *   POST /api/cloud-sessions/:id/command-approval   そのコマンドの実行を許可 / 拒否 (拒否の理由はエージェントに伝わる)
  *   GET  /api/cloud-sessions/:id/documents          サンドボックスの .division の文書 (ワークフロー・論文・仕様書・デザイン・成果物)
  *   GET  /api/cloud-sessions/:id/documents/content  ?path= で 1 つ読む
  *   POST /api/cloud-sessions/:id/documents/content  保存 (開いたときの mtime を付ける。エージェントが先に書き換えていれば 409)
@@ -56,7 +58,7 @@ import type { DocumentKind, RemoteDocument, RemoteDocumentContent } from '../api
 // 型 (Division 側の DTO と同じ形)
 // ---------------------------------------------------------------------------
 
-/** awaiting_approval … 承認モードの Division Project が、役割の成果物の承認を待って止まっている */
+/** awaiting_approval … 承認を待って止まっている: 承認モードの成果物・ワークフロー案、または危険なコマンドの実行 (どのセッションでも) */
 export type CloudSessionStatus = 'provisioning' | 'uploading' | 'running' | 'idle' | 'awaiting_approval' | 'failed' | 'cancelled';
 
 export type CloudWorkspaceInfo = {
@@ -162,6 +164,8 @@ export type CloudSessionEventType =
 	| 'approval'
 	// 承認モード: Leader のワークフロー案 { status: 'proposed', workflow } と、その承認 / 差し戻し { proposalSeq, status, edited, feedback? }
 	| 'workflow' | 'workflow_review'
+	// 危険なコマンド: 依頼 { status: 'pending', command, reason, role? } と、その答え { requestSeq, status: 'approved' | 'denied', feedback? } (toCloudCommandApprovalEvent)
+	| 'command_approval'
 	// data: { number, url, branch, base, action: 'created' | 'updated', title } (see toPullRequestEvent)
 	| 'pull_request';
 
@@ -718,6 +722,84 @@ export const resolveCloudWorkflowProposal = async (session: DivisionSession, id:
 	const body = workflowProposalBody(input);
 	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/workflow-proposal`, { method: 'POST', body, timeoutMs: CLOUD_TIMEOUTS.changes });
 	return toCloudSession(data.session);
+};
+
+// ---------------------------------------------------------------------------
+// 危険なコマンドの承認 (IDE と同じ規則。どのセッションでも、実行する前に止まる)
+// ---------------------------------------------------------------------------
+
+/** 承認を待っているコマンド (GET .../command-approval)。 */
+export type CloudCommandApproval = {
+	/** 依頼の command_approval イベントの seq。POST でそのまま送り返す */
+	requestSeq: number;
+	tool: string;
+	command: string;
+	/** 承認が要る理由 (例: 再帰的な削除 (rm -r)) */
+	reason: string;
+	/** Division Project のときは、実行しようとしたロール */
+	role?: string;
+};
+
+export type CloudCommandApprovalAction = 'approve' | 'deny';
+
+/** GET .../command-approval の approval を取り出す。無い・requestSeq が無ければ null。 */
+export const toCloudCommandApproval = (raw: unknown): CloudCommandApproval | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const a = raw as Record<string, unknown>;
+	const requestSeq = num(a.requestSeq, Number.NaN);
+	if (!Number.isInteger(requestSeq) || requestSeq < 1) return null;
+	const role = str(a.role);
+	return { requestSeq, tool: str(a.tool) || 'run_command', command: str(a.command), reason: str(a.reason), ...(role ? { role } : {}) };
+};
+
+/** 承認を待っているコマンド。待っていなければ null。 */
+export const getCloudCommandApproval = async (session: DivisionSession, id: string): Promise<CloudCommandApproval | null> => {
+	try {
+		const data = await request<{ approval?: unknown }>(session, `${idPath(id)}/command-approval`, { timeoutMs: CLOUD_TIMEOUTS.changes });
+		return toCloudCommandApproval(data.approval);
+	} catch (e) {
+		// A server without command approval yet: nothing can be waiting there.
+		if (e instanceof DivisionCloudError && e.status === 404) return null;
+		throw e;
+	}
+};
+
+/** POST .../command-approval の body。 */
+export const commandApprovalBody = (input: { requestSeq: number; action: CloudCommandApprovalAction; feedback?: string }): Record<string, unknown> => {
+	const feedback = input.feedback?.trim() ?? '';
+	return { requestSeq: input.requestSeq, action: input.action, ...(feedback ? { feedback } : {}) };
+};
+
+/** コマンドの実行を許可 / 拒否する。セッションは running に戻る。 */
+export const resolveCloudCommandApproval = async (
+	session: DivisionSession,
+	id: string,
+	input: { requestSeq: number; action: CloudCommandApprovalAction; feedback?: string },
+): Promise<CloudSession> => {
+	const data = await request<{ session?: unknown }>(session, `${idPath(id)}/command-approval`, { method: 'POST', body: commandApprovalBody(input), timeoutMs: CLOUD_TIMEOUTS.changes });
+	return toCloudSession(data.session);
+};
+
+/** command_approval イベント: 依頼 (pending) か、その答え。 */
+export type CloudCommandApprovalEvent =
+	| { status: 'pending'; command: string; reason: string; role?: string }
+	| { status: 'approved' | 'denied'; requestSeq: number; command: string; role?: string; feedback?: string };
+
+/** command_approval イベントの data を取り出す。status が分からなければ null (表示しない)。 */
+export const toCloudCommandApprovalEvent = (data: Record<string, unknown>): CloudCommandApprovalEvent | null => {
+	const role = str(data.role);
+	const roleField = role ? { role } : {};
+	if (data.status === 'pending') return { status: 'pending', command: str(data.command), reason: str(data.reason), ...roleField };
+	if (data.status !== 'approved' && data.status !== 'denied') return null;
+	const feedback = str(data.feedback).trim();
+	return { status: data.status, requestSeq: num(data.requestSeq), command: str(data.command), ...roleField, ...(feedback ? { feedback } : {}) };
+};
+
+/** タイムラインの 1 行。例: "⚠️ 承認待ち: git のプッシュ" / "✅ コマンドの実行を許可" / "⛔ コマンドの実行を拒否: PR で出すので不要"。 */
+export const commandApprovalEventText = (event: CloudCommandApprovalEvent): string => {
+	if (event.status === 'pending') return `⚠️ コマンドの承認待ち: ${event.reason}`;
+	if (event.status === 'approved') return '✅ コマンドの実行を許可';
+	return `⛔ コマンドの実行を拒否${event.feedback ? `: ${event.feedback}` : ''}`;
 };
 
 /** 編集した内容のうち送るもの。中身が読めなかった (null) か、変えていなければ undefined (送らない)。 */
@@ -1927,3 +2009,66 @@ export const saveCloudDocument = async (session: DivisionSession, id: string, pa
 		body: baseMtime === undefined ? { path, content } : { path, content, baseMtime },
 		timeoutMs: CLOUD_TIMEOUTS.changes,
 	}), path);
+
+// ---------------------------------------------------------------------------
+// 文書の一部を、その文書を書くロールの AI で直す (POST .../documents/ai-edit)。
+// サーバーは書き込まず提案だけ返す。ユーザーが差分を見て「適用」したら、編集中の文書に入る (保存・承認はいつもどおり)。
+// ---------------------------------------------------------------------------
+
+export type DocumentAiEditRequest = {
+	path: string;
+	start: number;
+	end: number;
+	selected: string;
+	instruction: string;
+	/** 今の (保存前かもしれない) 文書。選択はこの文書の位置 */
+	content: string;
+};
+
+export type DocumentAiEditProposal = {
+	path: string;
+	start: number;
+	end: number;
+	original: string;
+	replacement: string;
+	/** 直したロール (普通のセッションでは '') と、その表示名・モデル */
+	role: string;
+	roleName: string;
+	model: string;
+};
+
+export const toDocumentAiEditProposal = (raw: unknown): DocumentAiEditProposal | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const p = raw as Record<string, unknown>;
+	if (typeof p.replacement !== 'string' || typeof p.original !== 'string') return null;
+	const start = num(p.start, Number.NaN);
+	const end = num(p.end, Number.NaN);
+	if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start) return null;
+	return { path: str(p.path), start, end, original: p.original, replacement: p.replacement, role: str(p.role), roleName: str(p.roleName) || 'AI', model: str(p.model) };
+};
+
+/** 選んだ部分の書き直しを、その文書のロールの AI に頼む (書き込まない)。 */
+export const aiEditCloudDocument = async (session: DivisionSession, id: string, req: DocumentAiEditRequest): Promise<DocumentAiEditProposal> => {
+	const data = await request<{ proposal?: unknown }>(session, `${idPath(id)}/documents/ai-edit`, {
+		method: 'POST',
+		body: req,
+		// The model rewrites the part: give it as long as a model call may take.
+		timeoutMs: 200_000,
+	});
+	const proposal = toDocumentAiEditProposal(data.proposal);
+	if (!proposal) throw new Error('AI の提案を読み取れませんでした。');
+	return proposal;
+};
+
+/** 提案を文書に入れる。提案のあとで選んだ部分が変わっていれば null (入れない)。 */
+export const applyAiEditProposal = (text: string, p: Pick<DocumentAiEditProposal, 'start' | 'end' | 'original' | 'replacement'>): string | null =>
+	text.slice(p.start, p.end) === p.original ? text.slice(0, p.start) + p.replacement + text.slice(p.end) : null;
+
+const AI_EDIT_CODES = new Set(['ai_edit_unsupported', 'bad_selection', 'document_changed', 'model_failed', 'unusable_reply', 'no_model', 'not_a_document', 'file_not_found', 'document_too_large']);
+
+/** AI の編集のエラー: サーバーの説明 (日本語) を優先する。 */
+export const aiEditErrorText = (e: unknown): string => {
+	if (e instanceof DivisionCloudError && e.code && AI_EDIT_CODES.has(e.code) && e.message) return e.message;
+	if (e instanceof DivisionCloudError && e.status === 404 && !e.code) return 'この Division サーバーは AI での部分編集に未対応です。';
+	return cloudErrorText(e);
+};

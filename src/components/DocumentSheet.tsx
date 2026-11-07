@@ -15,6 +15,7 @@ import { Button, ErrorBanner, Input, Loading, Muted, Row, Sheet, confirmAction, 
 import { DocumentMode, DocumentView } from './DocumentView';
 import { DOCUMENT_KIND_LABEL, documentTitle, isEdited, isHtmlPath, localStylesheets, resolveRelative } from '../lib/divisionDocs';
 import { DocumentSource, usePcDocumentSource } from '../lib/documentSource';
+import { aiEditErrorText } from '../lib/divisionCloud';
 import { normalizeWorkflow, workflowErrors, type DivisionWorkflow } from '../lib/divisionWorkflow';
 import { WorkflowCanvasEditor } from './WorkflowCanvasEditor';
 import { fontSize, spacing } from '../theme';
@@ -168,7 +169,19 @@ export const DocumentSheet = ({ doc, source: given, onClose }: {
 								/>
 							</>
 						) : (
-							<DocumentView name={doc.path} value={text} onChangeText={setText} mode={mode} onModeChange={setMode} css={css} height={520} />
+							<DocumentView
+								name={doc.path}
+								value={text}
+								onChangeText={setText}
+								mode={mode}
+								onModeChange={setMode}
+								css={css}
+								height={520}
+								{...(source?.aiEdit ? {
+									aiEdit: req => source.aiEdit!({ ...req, path: doc.path }),
+									aiEditErrorText: aiEditErrorText,
+								} : {})}
+							/>
 						)}
 						<Row style={styles.footer}>
 							<Muted>{dirty ? '未保存の変更があります' : `${where}の内容と同じです`}</Muted>
