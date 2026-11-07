@@ -871,10 +871,13 @@ describe('approval mode', () => {
 		expect(finishedSessions(before, next).map(s => s.id)).toEqual(['a']);
 	});
 
-	it('sends approvalMode only for Division Project sessions', async () => {
+	it('sends approvalMode (on or off) only for Division Project sessions', async () => {
 		expect(createSessionBody({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true }))
 			.toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: true });
+		// サーバーの既定はオンなので、オフも明示して送る
 		expect(createSessionBody({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: false }))
+			.toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj', approvalMode: false });
+		expect(createSessionBody({ prompt: 'p', model: 'division-project', projectId: 'proj' }))
 			.toEqual({ prompt: 'p', model: 'division-project', projectId: 'proj' });
 		expect(createSessionBody({ prompt: 'p', model: 'anthropic/x', approvalMode: true })).toEqual({ prompt: 'p', model: 'anthropic/x' });
 
