@@ -3,19 +3,21 @@
  *   - Markdown (論文・仕様書・成果物) … Markdown で描く
  *   - デザインの HTML ページ … そのまま描く (HtmlPreview)
  *   - Designer の出力 (```html <ページ名> のブロックが並んだもの) … ページに分けて、ページごとに描く
- * 編集は全文をそのまま直す (保存・承認は呼び出し側)。
+ * 編集は全文をそのまま直す。デザインの HTML ページは「見た目」でタップして直すこともできる (DesignVisualEditor)。
+ * 保存・承認は呼び出し側。
  */
 
 import React, { useMemo, useState } from 'react';
 import { Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { ChipGroup, Input, Muted, SegmentedControl } from './ui';
 import { HtmlPreview } from './HtmlPreview';
+import { DesignVisualEditor } from './DesignVisualEditor';
 import { Markdown } from './Markdown';
 import { colors, fontSize, spacing } from '../theme';
 import { splitDesignPages } from '../lib/designPages';
 import { documentFormat, inlineStylesheets, withViewport } from '../lib/divisionDocs';
 
-export type DocumentMode = 'preview' | 'edit';
+export type DocumentMode = 'preview' | 'visual' | 'edit';
 
 export const DocumentView = ({ name, value, onChangeText, editable = true, mode: modeProp, onModeChange, css, height = 420 }: {
 	/** ファイル名 (例: paper.md, design/index.html)。描き方を決める */
@@ -37,17 +39,24 @@ export const DocumentView = ({ name, value, onChangeText, editable = true, mode:
 	const pages = useMemo(() => (format === 'pages' ? splitDesignPages(value) : []), [format, value]);
 	const [page, setPage] = useState<string | null>(null);
 	const current = pages.find(p => p.name === page) ?? pages[0];
+	const canEdit = editable && !!onChangeText;
+	// 見た目の編集は 1 ページの HTML だけ (ほかの形式では「プレビュー」に戻す)
+	const visual = mode === 'visual' && canEdit && format === 'html';
 
 	return (
 		<View style={styles.root}>
-			{editable && onChangeText ? (
+			{canEdit ? (
 				<SegmentedControl
-					options={[{ value: 'preview', label: 'プレビュー' }, { value: 'edit', label: '編集' }]}
-					value={mode}
+					options={format === 'html'
+						? [{ value: 'preview', label: 'プレビュー' }, { value: 'visual', label: '見た目で編集' }, { value: 'edit', label: 'コード' }]
+						: [{ value: 'preview', label: 'プレビュー' }, { value: 'edit', label: '編集' }]}
+					value={mode === 'visual' && format !== 'html' ? 'preview' : mode}
 					onChange={setMode}
 				/>
 			) : null}
-			{mode === 'edit' && editable && onChangeText ? (
+			{visual && onChangeText ? (
+				<DesignVisualEditor name={name} value={value} onChangeText={onChangeText} css={css} height={height} />
+			) : mode === 'edit' && canEdit && onChangeText ? (
 				<Input
 					value={value}
 					onChangeText={onChangeText}
