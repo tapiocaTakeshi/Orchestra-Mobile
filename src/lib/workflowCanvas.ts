@@ -16,7 +16,8 @@ export const NODE_W = 200;
 export const HANDLE_Y = 22;
 /** Horizontal room the layout gives a column (the same as layoutWorkflow). */
 const COLUMN = 270;
-export const MIN_ZOOM = 0.3;
+/** Small enough that a long workflow (8+ nodes) fits a phone's width when the whole of it is shown. */
+export const MIN_ZOOM = 0.12;
 export const MAX_ZOOM = 2;
 
 export type Point = { x: number; y: number };
@@ -169,12 +170,15 @@ export const workflowBounds = (w: DivisionWorkflow): { x: number; y: number; w: 
 	return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 };
 
-/** Fit the workflow into the board, but not so small that the cards cannot be read on a phone (a long one starts at the left). */
-export const fitView = (w: DivisionWorkflow, size: { w: number; h: number }, pad = 32, minZoom = 0.7): CanvasView => {
+/**
+ * Fit the whole workflow into the board (opening the editor, 全体を表示, 整列): every node is on the
+ * screen, centred, never larger than 100%. On a phone a long workflow becomes small; pinch or tap a
+ * node to read it.
+ */
+export const fitView = (w: DivisionWorkflow, size: { w: number; h: number }, pad = 24): CanvasView => {
 	const b = workflowBounds(w);
-	const zoom = Math.max(minZoom, Math.min(1, (size.w - pad * 2) / b.w, (size.h - pad * 2) / b.h));
-	const x = b.w * zoom <= size.w - pad * 2 ? (size.w - b.w * zoom) / 2 : pad;
-	return { zoom, x: x - b.x * zoom, y: (size.h - b.h * zoom) / 2 - b.y * zoom };
+	const zoom = clampZoom(Math.min(1, (size.w - pad * 2) / b.w, (size.h - pad * 2) / b.h));
+	return { zoom, x: (size.w - b.w * zoom) / 2 - b.x * zoom, y: (size.h - b.h * zoom) / 2 - b.y * zoom };
 };
 
 export const clampZoom = (z: number): number => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));

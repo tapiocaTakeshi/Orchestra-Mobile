@@ -1,6 +1,6 @@
 import { DivisionWorkflow, insertAfter, layoutWorkflow, normalizeWorkflow } from '../divisionWorkflow';
 import {
-	HANDLE_Y, NODE_W, canConnect, connectNodes, edgePoints, fitView, hitTest, inPoint, insertIntoEdge, keepPositions, moveNode, outPoint,
+	HANDLE_Y, NODE_W, canConnect, connectNodes, edgePoints, fitView, hitTest, workflowBounds, inPoint, insertIntoEdge, keepPositions, moveNode, outPoint,
 	polylineMidpoint, revealNode, toScreen, toWorld, withLayout, zoomAround,
 } from '../workflowCanvas';
 
@@ -83,8 +83,17 @@ describe('workflowCanvas', () => {
 
 	it('fits the view and zooms around a point', () => {
 		const v = fitView(chain(), { w: 400, h: 600 });
-		expect(v.zoom).toBeGreaterThanOrEqual(0.7);
 		expect(v.zoom).toBeLessThanOrEqual(1);
+		// the whole workflow is on the board (a phone in portrait), not cut off on the right
+		const b = workflowBounds(chain());
+		expect(toScreen(v, { x: b.x, y: b.y }).x).toBeGreaterThanOrEqual(0);
+		expect(toScreen(v, { x: b.x + b.w, y: b.y + b.h }).x).toBeLessThanOrEqual(400);
+		const long = layoutWorkflow({ ...chain(), nodes: chain().nodes.map(n => ({ ...n, position: { x: 0, y: 0 } })) });
+		const wide = { ...long, nodes: long.nodes.map((n, i) => ({ ...n, position: { x: i * 270 * 2, y: 0 } })) };
+		const vw = fitView(wide, { w: 375, h: 500 });
+		const bw = workflowBounds(wide);
+		expect(toScreen(vw, { x: bw.x + bw.w, y: 0 }).x).toBeLessThanOrEqual(375);
+		expect(toScreen(vw, { x: bw.x, y: 0 }).x).toBeGreaterThanOrEqual(0);
 		const z = zoomAround(v, v.zoom * 2, 100, 100);
 		const before = toWorld(v, { x: 100, y: 100 });
 		const after = toWorld(z, { x: 100, y: 100 });
