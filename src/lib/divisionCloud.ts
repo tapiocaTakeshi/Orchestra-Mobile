@@ -20,6 +20,9 @@
  *   POST /api/cloud-sessions/:id/approval      承認して続行 / フィードバックを付けて差し戻す (編集した内容も一緒に送れる)
  *   GET  /api/cloud-sessions/:id/workflow-proposal  承認モードで Leader が計画を図にしたワークフロー案 (承認待ち)
  *   POST /api/cloud-sessions/:id/workflow-proposal  ワークフロー案を承認 (図で編集した内容も送れる) / 差し戻す
+ *   GET  /api/cloud-sessions/:id/documents          サンドボックスの .division の文書 (ワークフロー・論文・仕様書・デザイン・成果物)
+ *   GET  /api/cloud-sessions/:id/documents/content  ?path= で 1 つ読む
+ *   POST /api/cloud-sessions/:id/documents/content  保存 (開いたときの mtime を付ける。エージェントが先に書き換えていれば 409)
  *
  * モバイルには手元のワークスペースが無いので、アップロード (/upload) と取り込み (/file) は使わない。
  * 変更を手元に取り込むのは PC の Orchestra の役目で、ここでは差分を読むだけにする。
@@ -47,6 +50,7 @@ import { DivisionSession, getDivisionAccessToken, getDivisionSupabase } from './
 import { oneLine } from './format';
 import { colors } from '../theme';
 import { DivisionWorkflow, normalizeWorkflow, workflowErrors } from './divisionWorkflow';
+import type { DocumentKind, RemoteDocument, RemoteDocumentContent } from '../api/types';
 
 // ---------------------------------------------------------------------------
 // 型 (Division 側の DTO と同じ形)
@@ -1811,3 +1815,51 @@ export const truncateLines = (lines: string[], max: number): { lines: string[]; 
 	lines.length <= max
 		? { lines, truncated: false, hidden: 0 }
 		: { lines: lines.slice(0, max), truncated: true, hidden: lines.length - max };
+
+// ---------------------------------------------------------------------------
+// 文書 (サンドボックスの .division。PC の GET /api/documents と同じ形)
+// ---------------------------------------------------------------------------
+
+const DOCUMENT_KINDS: DocumentKind[] = ['workflow', 'paper', 'specification', 'design', 'output'];
+
+const toRemoteDocument = (raw: unknown): RemoteDocument | null => {
+	if (!raw || typeof raw !== 'object') return null;
+	const d = raw as Record<string, unknown>;
+	if (typeof d.path !== 'string' || !d.path) return null;
+	const kind = DOCUMENT_KINDS.includes(d.kind as DocumentKind) ? (d.kind as DocumentKind) : 'output';
+	return {
+		path: d.path,
+		name: typeof d.name === 'string' && d.name ? d.name : d.path.replace(/^\.division\//, ''),
+		kind,
+		size: typeof d.size === 'number' ? d.size : 0,
+		mtime: typeof d.mtime === 'number' ? d.mtime : 0,
+	};
+};
+
+const toDocumentContent = (raw: unknown, path: string): RemoteDocumentContent => {
+	const d = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+	return {
+		path: typeof d.path === 'string' ? d.path : path,
+		content: typeof d.content === 'string' ? d.content : '',
+		size: typeof d.size === 'number' ? d.size : 0,
+		mtime: typeof d.mtime === 'number' ? d.mtime : 0,
+	};
+};
+
+export const listCloudDocuments = async (session: DivisionSession, id: string): Promise<{ documents: RemoteDocument[]; revision: number }> => {
+	const data = await request<{ documents?: unknown[]; revision?: unknown }>(session, `${idPath(id)}/documents`, { timeoutMs: CLOUD_TIMEOUTS.changes });
+	return {
+		documents: (data.documents ?? []).map(toRemoteDocument).filter((d): d is RemoteDocument => !!d),
+		revision: typeof data.revision === 'number' ? data.revision : 0,
+	};
+};
+
+export const getCloudDocument = async (session: DivisionSession, id: string, path: string): Promise<RemoteDocumentContent> =>
+	toDocumentContent(await request<unknown>(session, `${idPath(id)}/documents/content?path=${encodeURIComponent(path)}`, { timeoutMs: CLOUD_TIMEOUTS.changes }), path);
+
+export const saveCloudDocument = async (session: DivisionSession, id: string, path: string, content: string, baseMtime?: number): Promise<RemoteDocumentContent> =>
+	toDocumentContent(await request<unknown>(session, `${idPath(id)}/documents/content`, {
+		method: 'POST',
+		body: baseMtime === undefined ? { path, content } : { path, content, baseMtime },
+		timeoutMs: CLOUD_TIMEOUTS.changes,
+	}), path);
