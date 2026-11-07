@@ -87,6 +87,7 @@ import {
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { AiLoading } from '../components/AiLoading';
 import { DocumentView } from '../components/DocumentView';
 import { DocumentList } from '../components/DocumentList';
 import { cloudDocumentSource } from '../lib/documentSource';
@@ -227,7 +228,7 @@ const useForeground = (): boolean => {
 /** 状態の印。動いているあいだはくるくる、止まっていれば色の点。 */
 const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
 	isActive(status)
-		? <ActivityIndicator size='small' color={cloudStatusColor(status)} />
+		? <AiLoading size={20} />
 		: <View style={styles.statusDotWrap}><Dot color={cloudStatusColor(status)} /></View>
 );
 
@@ -335,7 +336,7 @@ const PcChatRow = ({ item, onPress }: { item: Extract<HomeItem, { kind: 'pc-chat
 			style={({ pressed }) => [styles.sessionRow, pressed && styles.rowPressed]}
 		>
 			{item.state === 'running'
-				? <ActivityIndicator size='small' color={colors.running} />
+				? <AiLoading size={20} />
 				: <View style={styles.statusDotWrap}><Icon name='monitor' size={14} color={state?.color ?? colors.fgMuted} /></View>}
 			<View style={styles.flex}>
 				<Row style={styles.rowTop}>
@@ -1020,9 +1021,10 @@ const ToolGroup = ({ events }: { events: CloudSessionEvent[] }) => {
 
 /** 「作業中」の吹き出し。点が順に光り、経過時間を数える。 */
 const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: string }) => {
-	const [tick, setTick] = useState(0);
+	// 経過時間を数え直すためだけの再描画 (1 秒ごと)
+	const [, setTick] = useState(0);
 	useEffect(() => {
-		const timer = setInterval(() => setTick(t => t + 1), 400);
+		const timer = setInterval(() => setTick(t => t + 1), 1000);
 		return () => clearInterval(timer);
 	}, []);
 	const started = Date.parse(since);
@@ -1030,11 +1032,7 @@ const TypingBubble = ({ status, since }: { status: CloudSessionStatus; since: st
 	const label = status === 'running' ? '作業中' : cloudStatusLabel(status);
 	return (
 		<View style={styles.typing} accessibilityLiveRegion='polite' accessibilityLabel={`${label}…`}>
-			<View style={styles.typingDots}>
-				{[0, 1, 2].map(i => (
-					<View key={i} style={[styles.typingDot, tick % 3 === i && styles.typingDotOn]} />
-				))}
-			</View>
+			<AiLoading size={18} />
 			<Text style={styles.typingText}>
 				{label}
 				{elapsed !== null ? <Text style={styles.workingElapsed}> · {durationText(elapsed)}</Text> : null}
@@ -1159,7 +1157,7 @@ const PlanMarker = ({ state }: { state: PlanTaskState }) => (
 	<View style={styles.planMarker}>
 		{state === 'done' ? <Icon name='check-square' size={14} color={colors.success} />
 			: state === 'failed' ? <Icon name='x-square' size={14} color={colors.danger} />
-				: state === 'running' ? <ActivityIndicator size='small' color={colors.running} />
+				: state === 'running' ? <AiLoading size={15} />
 					: state === 'interrupted' ? <Icon name='minus-square' size={14} color={colors.fgFaint} />
 						: <Icon name='square' size={14} color={colors.fgFaint} />}
 	</View>
@@ -2567,7 +2565,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 
 					{launching > 0 ? (
 						<View style={styles.launching} accessibilityLiveRegion='polite'>
-							<ActivityIndicator size='small' color={colors.running} />
+							<AiLoading size={22} />
 							<View style={styles.flex}>
 								<Text style={styles.rowTitle}>{launching} 個のセッションを起動しています…</Text>
 								<Muted>サンドボックスの用意に数分かかることがあります。この画面を離れても起動は続きます。</Muted>
@@ -3021,9 +3019,6 @@ const styles = StyleSheet.create({
 		borderTopLeftRadius: 6,
 		backgroundColor: colors.bgElevated,
 	},
-	typingDots: { flexDirection: 'row', gap: 4 },
-	typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.fgFaint, opacity: 0.4 },
-	typingDotOn: { backgroundColor: colors.running, opacity: 1 },
 	typingText: { color: colors.fgMuted, fontSize: fontSize.xs + 1 },
 	workingElapsed: { color: colors.fgFaint },
 

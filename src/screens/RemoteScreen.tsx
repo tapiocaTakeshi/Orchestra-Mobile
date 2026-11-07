@@ -34,6 +34,7 @@ import { TuningScreen } from './TuningScreen';
 import { OrchestraApiError } from '../api/client';
 import { ChatMessage, PendingReview, ThreadSummary, WorkflowAnswer } from '../api/types';
 import { Markdown } from '../components/Markdown';
+import { AiLoading } from '../components/AiLoading';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import { DocumentList } from '../components/DocumentList';
 import { ReviewOutputsSheet } from '../components/ReviewOutputsSheet';
@@ -411,7 +412,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 								{chat!.messages.map((m, i) => <ChatMessageView key={`${i}-${m.role}`} message={m} />)}
 								{isRunning && !isAwaiting ? (
 									<View style={styles.working} accessibilityLiveRegion='polite'>
-										<ActivityIndicator size='small' color={colors.running} />
+										<AiLoading size={18} />
 										<Text style={styles.workingText}>作業中…</Text>
 									</View>
 								) : null}

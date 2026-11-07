@@ -52,6 +52,7 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { AiLoading } from '../components/AiLoading';
 import { CloudProjectPicker, useCloudProjects } from '../components/CloudProjectPicker';
 import {
 	GitHubAccountRow,
@@ -167,7 +168,7 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 		>
 			<View style={styles.taskTitleRow}>
 				<Text style={styles.taskTitle} numberOfLines={3}>{task.title}</Text>
-				{isRunning ? <ActivityIndicator size='small' color='#f59e0b' /> : null}
+				{isRunning ? <AiLoading size={18} /> : null}
 			</View>
 
 			<View style={styles.taskMetaRow}>
@@ -1032,7 +1033,7 @@ export const KanbanScreen = ({ onOpenPage }: {
 				{runtime.lastError ? <ErrorBanner message={runtime.lastError} style={styles.inlineBanner} /> : null}
 				{cloudLaunching > 0 ? (
 					<View style={styles.cloudLaunching} accessibilityLiveRegion='polite'>
-						<ActivityIndicator size='small' color={colors.running} />
+						<AiLoading size={20} />
 						<Muted style={styles.flex}>クラウドエージェントを起動しています… (サンドボックスの用意に数分かかることがあります)</Muted>
 					</View>
 				) : null}
