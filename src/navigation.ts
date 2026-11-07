@@ -5,7 +5,7 @@
 
 import type { IconName } from './components/ui';
 
-export type PageKey = 'kanban' | 'projects' | 'cloud' | 'mcp' | 'social' | 'tuning' | 'actions' | 'settings';
+export type PageKey = 'kanban' | 'projects' | 'cloud' | 'mcp' | 'social' | 'tuning' | 'actions' | 'settings' | 'documents';
 
 export type PageEntry = {
 	key: PageKey;
@@ -22,6 +22,7 @@ export type PageEntry = {
 /** メニューに並べる順番。 */
 export const PAGES: PageEntry[] = [
 	{ key: 'kanban', label: 'カンバン', icon: 'columns', needsConnection: true },
+	{ key: 'documents', label: '文書', icon: 'file-text', needsConnection: true },
 	{ key: 'projects', label: 'プロジェクト', icon: 'folder', needsConnection: false },
 	{ key: 'cloud', label: 'クラウド', icon: 'cloud', needsConnection: false },
 	{ key: 'mcp', label: 'MCP', icon: 'package', needsConnection: false },
@@ -38,6 +39,7 @@ export const PAGES: PageEntry[] = [
 export const DRAWER_PAGES: (PageEntry & { title: string })[] = [
 	{ key: 'projects', label: 'プロジェクト', title: 'プロジェクト', icon: 'folder', needsConnection: false },
 	{ key: 'kanban', label: 'カンバン', title: 'カンバン', icon: 'columns', needsConnection: true },
+	{ key: 'documents', label: '文書', title: '論文・仕様書・デザイン', icon: 'file-text', needsConnection: true },
 	{ key: 'actions', label: 'クイックアクション', title: 'クイックアクション', icon: 'zap', needsConnection: true },
 	{ key: 'mcp', label: 'MCP', title: 'MCP サーバー', icon: 'link-2', needsConnection: false },
 	{ key: 'settings', label: 'リモート接続', title: 'リモート接続', icon: 'radio', needsConnection: true },

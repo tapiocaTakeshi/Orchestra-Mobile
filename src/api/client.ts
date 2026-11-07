@@ -22,6 +22,10 @@ import {
 	KanbanTask,
 	ProviderModels,
 	RoleAssignment,
+	EditedOutput,
+	RemoteDocument,
+	RemoteDocumentContent,
+	ReviewOutputs,
 	Snapshot,
 	ThreadSummary,
 	WorkflowAnswer,
@@ -43,10 +47,15 @@ export class OrchestraApiError extends Error {
 	get userMessage(): string {
 		switch (this.status) {
 			case 0: return 'IDE に接続できません。PC で Orchestra が起動していて、スマホと同じ Division アカウントでログインしているか確認してください。';
-			case 401: return 'トークンが一致しません。IDE の設定でトークンを確認してください。';
+			case 401: return this.message === 'division_token_invalid'
+				? 'Division のログインを更新しています。少し待ってください。'
+				: 'トークンが一致しません。IDE の設定でトークンを確認してください。';
 			case 403: return this.detail ?? 'この操作は IDE 側の設定で無効になっています。';
 			case 404: return 'この操作に対応していない IDE です。Orchestra を更新してください。';
-			case 503: return 'IDE のウィンドウが応答していません。ウィンドウを開き直してください。';
+			case 409: return this.detail ?? this.message;
+			case 503: return this.message === 'pc_not_signed_in' || this.message === 'auth_unavailable'
+				? (this.detail ?? 'Division のログインを確認できませんでした。')
+				: 'IDE のウィンドウが応答していません。ウィンドウを開き直してください。';
 			case 504: return 'IDE の応答が遅すぎます。処理が終わるまで待ってから再試行してください。';
 			default: return this.detail ? `${this.message}: ${this.detail}` : this.message;
 		}
@@ -449,8 +458,30 @@ export class OrchestraClient {
 		return this.request(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: 'POST' });
 	}
 
-	async approveTool(threadId?: string): Promise<ChatState> {
-		return this.request('/api/chat/approve', { method: 'POST', body: { threadId } });
+	/** editedOutputs: 成果物 (論文・仕様書・デザインなど) を編集した内容で承認する */
+	async approveTool(threadId?: string, editedOutputs?: EditedOutput[]): Promise<ChatState> {
+		return this.request('/api/chat/approve', { method: 'POST', body: { threadId, ...(editedOutputs?.length ? { editedOutputs } : {}) } });
+	}
+
+	/** 承認待ちの成果物の全文 */
+	async getReviewOutputs(threadId?: string): Promise<ReviewOutputs> {
+		return this.request('/api/chat/review', { query: { threadId } });
+	}
+
+	// -----------------------------------------------------------------------
+	// 文書 (.division の論文・仕様書・デザイン・成果物)
+
+	async listDocuments(): Promise<{ documents: RemoteDocument[]; revision: number }> {
+		return this.request('/api/documents');
+	}
+
+	async getDocument(path: string): Promise<RemoteDocumentContent> {
+		return this.request('/api/documents/content', { query: { path }, timeoutMs: 30_000 });
+	}
+
+	/** baseMtime を付けると、開いたあとで PC 側で書き換わっていれば 409 document_changed */
+	async saveDocument(path: string, content: string, baseMtime?: number): Promise<RemoteDocumentContent> {
+		return this.request('/api/documents/content', { method: 'POST', body: { path, content, baseMtime }, timeoutMs: 30_000 });
 	}
 
 	async rejectTool(threadId?: string): Promise<ChatState> {

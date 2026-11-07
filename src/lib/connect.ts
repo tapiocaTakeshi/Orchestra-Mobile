@@ -25,6 +25,8 @@ export type AccountScope = {
 	accessToken: string;
 	/** アカウントの RemoteSession。ペアリングのトークンで照合する */
 	sessions: { token: string }[];
+	/** PC に期限切れと断られたときに、トークンを更新して返す (できなければ null) */
+	refreshAccessToken?: () => Promise<string | null>;
 };
 
 export const NOT_ACCOUNT_SESSION_MESSAGE =
@@ -41,6 +43,10 @@ export const connectionsForAccount = (connections: Connection[], userId: string 
 /** PC が「別のアカウントの端末だ」と断ってきたか (ログイン中に PC 側のアカウントが変わった場合など)。 */
 export const isAccountMismatch = (e: unknown): boolean =>
 	e instanceof OrchestraApiError && e.status === 403 && e.message === 'account_mismatch';
+
+/** PC がスマホの Division のトークンを期限切れ・無効と答えた (更新して送り直せば通る) */
+export const isDivisionTokenInvalid = (e: unknown): boolean =>
+	e instanceof OrchestraApiError && e.status === 401 && e.message === 'division_token_invalid';
 
 /**
  * アカウントのセッションか確かめてから、/api/ping → プロトコル確認 →
@@ -66,7 +72,17 @@ export const verifyAndConnect = async (
 			: undefined;
 
 		// ここでトークン (間違っていれば 401) とアカウント (違えば 403) が検証される。
-		const snapshot = await client.getSnapshot();
+		// Division のトークンが期限切れなら (古い Orchestra は account_mismatch で返す) 更新して 1 回だけ送り直す。
+		let snapshot;
+		try {
+			snapshot = await client.getSnapshot();
+		} catch (e) {
+			if (!(isAccountMismatch(e) || isDivisionTokenInvalid(e)) || !account.refreshAccessToken) throw e;
+			const fresh = await account.refreshAccessToken().catch(() => null);
+			if (!fresh) throw e;
+			client.setDivisionAccessToken(fresh);
+			snapshot = await client.getSnapshot();
+		}
 		const resolved: Connection = {
 			...candidate,
 			label: candidate.label || snapshot.ide.workspaceName || candidate.url,

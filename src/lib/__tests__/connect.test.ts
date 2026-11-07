@@ -11,6 +11,7 @@ import {
 	connectionsForAccount,
 	findAccountSession,
 	isAccountMismatch,
+	isDivisionTokenInvalid,
 	verifyAndConnect,
 } from '../connect';
 import { OrchestraApiError } from '../../api/client';
@@ -147,6 +148,24 @@ describe('verifyAndConnect', () => {
 		expect(result).toEqual({ ok: false, message: NOT_ACCOUNT_SESSION_MESSAGE });
 		expect(connected).toHaveLength(0);
 	});
+
+	it('refreshes an expired Division token and retries once instead of refusing', async () => {
+		const candidate: Connection = { url: baseUrl, token: TOKEN, label: '' };
+		const connected: Connection[] = [];
+		const refresh = jest.fn(async () => ACCOUNT_JWT);
+		const result = await verifyAndConnect(candidate, async (c) => { connected.push(c); }, { accessToken: 'expired-jwt', sessions: [{ token: TOKEN }], refreshAccessToken: refresh });
+		expect(result.ok).toBe(true);
+		expect(refresh).toHaveBeenCalledTimes(1);
+		expect(connected).toHaveLength(1);
+	});
+
+	it('still refuses another account after the refreshed token is rejected too', async () => {
+		const candidate: Connection = { url: baseUrl, token: TOKEN, label: '' };
+		const refresh = jest.fn(async () => 'other-account-fresh-jwt');
+		const result = await verifyAndConnect(candidate, async () => undefined, { accessToken: 'other-account-jwt', sessions: [{ token: TOKEN }], refreshAccessToken: refresh });
+		expect(result).toEqual({ ok: false, message: NOT_ACCOUNT_SESSION_MESSAGE });
+		expect(refresh).toHaveBeenCalledTimes(1);
+	});
 });
 
 describe('account scoping helpers', () => {
@@ -172,5 +191,7 @@ describe('account scoping helpers', () => {
 		expect(isAccountMismatch(new OrchestraApiError(403, 'account_mismatch', '同じ Division アカウントでログインしてください。'))).toBe(true);
 		expect(isAccountMismatch(new OrchestraApiError(403, 'forbidden'))).toBe(false);
 		expect(isAccountMismatch(new OrchestraApiError(401, 'invalid_token'))).toBe(false);
+		expect(isDivisionTokenInvalid(new OrchestraApiError(401, 'division_token_invalid'))).toBe(true);
+		expect(isDivisionTokenInvalid(new OrchestraApiError(401, 'invalid_token'))).toBe(false);
 	});
 });

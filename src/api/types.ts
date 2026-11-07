@@ -154,7 +154,21 @@ export type PendingReview = {
 	content: string;
 	completed: number;
 	total: number;
+	/** レビューする成果物 (論文・仕様書・デザインなど)。全文は getReviewOutputs、編集して承認は approveTool の editedOutputs。古い IDE は返さない */
+	outputs?: { role: string; mdFileName: string }[];
+	/** content が長くて途中で切ってある */
+	contentTruncated?: boolean;
 };
+
+/** 承認待ちの成果物の全文 (GET /api/chat/review) */
+export type ReviewOutput = { role: string; mdFileName: string; mdFilePath: string; content: string };
+export type ReviewOutputs = { flowRole: string; title: string; outputs: ReviewOutput[] };
+export type EditedOutput = { mdFileName: string; mdContent: string };
+
+/** .division の下の文書 (GET /api/documents)。path はワークスペースからの相対パス */
+export type DocumentKind = 'paper' | 'specification' | 'design' | 'output';
+export type RemoteDocument = { path: string; name: string; kind: DocumentKind; size: number; mtime: number };
+export type RemoteDocumentContent = { path: string; content: string; size: number; mtime: number };
 
 /** Division Project 承認モード: Leader が計画を図にしたワークフロー案 (PC の IDE で止まっている) */
 export type PendingWorkflow = {
@@ -210,6 +224,8 @@ export type Snapshot = {
 	threads: ThreadSummary[];
 	/** 同期中のスレッド。同期していなければ null。古い IDE は返さない */
 	remoteSession?: RemoteSessionInfo | null;
+	/** .division の文書が変わるたびに進む。古い IDE は返さない */
+	documentsRevision?: number;
 	revision: number;
 	generatedAt: number;
 };

@@ -86,6 +86,7 @@ import {
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { DocumentView } from '../components/DocumentView';
 import { WorkflowReviewCard } from '../components/WorkflowReviewCard';
 import {
 	CloudApproval,
@@ -1411,18 +1412,14 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						</Muted>
 					) : (
 						<>
-							<Input
+							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直す */}
+							<DocumentView
+								name={approval.file}
 								value={content}
-								onChangeText={setContent}
-								multiline
-								scrollEnabled
-								autoCapitalize='none'
-								autoCorrect={false}
-								editable={!busy}
-								accessibilityLabel={`${approval.file} の内容`}
-								style={styles.approvalEditor}
+								onChangeText={busy ? undefined : setContent}
+								height={360}
 							/>
-							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら中身を直してから承認できます。'}</Muted>
+							<Muted>{edited ? '編集した内容を保存してから続けます。' : '必要なら「編集」で中身を直してから承認できます。'}</Muted>
 						</>
 					)}
 					<Input
@@ -2092,7 +2089,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	 */
 	onOpenPcChat?: () => void;
 } = {}) => {
-	const { session } = useDivisionAuth();
+	const { session, refreshSession } = useDivisionAuth();
 	const { connection, connectionStatus, snapshot, client, connect, invalidate } = useApp();
 	const unified = !!onOpenPcChat;
 	const toast = useToast();
@@ -2351,7 +2348,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		const result = await verifyAndConnect(
 			{ url: item.device.lanUrl, token: item.device.token, label: item.device.deviceLabel },
 			connect,
-			{ accessToken: session.accessToken, sessions: devices },
+			{ accessToken: session.accessToken, sessions: devices, refreshAccessToken: async () => (await refreshSession?.())?.accessToken ?? null },
 		);
 		setConnectingDeviceId(null);
 		if (!result.ok) {
@@ -2360,7 +2357,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 		}
 		if (result.warning) toast.show(result.warning, 'info');
 		onOpenPcChat();
-	}, [session, onOpenPcChat, connect, devices, toast]);
+	}, [session, onOpenPcChat, connect, devices, toast, refreshSession]);
 
 	/** 送り先が PC のとき: PC で新しいチャットを開いて指示を送り、そのチャットを開く */
 	const sendToPc = useCallback(async (prompt: string) => {
@@ -2918,7 +2915,6 @@ const styles = StyleSheet.create({
 	doneActions: { flexWrap: 'wrap' },
 	approval: { borderColor: withAlpha(colors.warning, '66') },
 	approvalFile: { color: colors.fgMuted, fontFamily: MONO, fontSize: fontSize.xs },
-	approvalEditor: { minHeight: 180, maxHeight: 360, fontFamily: MONO, fontSize: fontSize.xs + 1, lineHeight: 19, textAlignVertical: 'top' },
 	approvalFeedback: { minHeight: 64, textAlignVertical: 'top' },
 	approvalEventText: { fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
 	approvalEventFile: { color: colors.fgFaint, fontFamily: MONO, fontSize: fontSize.xs },

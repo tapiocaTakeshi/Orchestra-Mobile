@@ -72,6 +72,37 @@ export const signInWithDivision = async (email: string, password: string): Promi
 	};
 };
 
+/**
+ * アクセストークン (約 1 時間で切れる) を今すぐ更新する。Supabase のクライアントが別のユーザーや
+ * 空のセッションを持っていれば、手元のトークンを入れ直してから更新する。更新できなければ null。
+ */
+export const refreshDivisionSession = async (current: DivisionSession): Promise<DivisionSession | null> => {
+	try {
+		const sb = getDivisionSupabase();
+		const { data } = await sb.auth.getSession();
+		if (!data.session || data.session.user?.id !== current.userId) await restoreSupabaseSession(current.accessToken, current.refreshToken);
+		const { data: refreshed, error } = await sb.auth.refreshSession();
+		if (error || !refreshed.session || refreshed.session.user?.id !== current.userId) return null;
+		return { ...current, accessToken: refreshed.session.access_token, refreshToken: refreshed.session.refresh_token ?? current.refreshToken };
+	} catch {
+		return null;
+	}
+};
+
+/** アクセストークンの有効期限 (ミリ秒)。読めなければ null */
+export const accessTokenExpiresAt = (accessToken: string): number | null => {
+	try {
+		const part = accessToken.split('.')[1] ?? '';
+		const json = typeof atob === 'function'
+			? atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '='))
+			: '';
+		const exp = (JSON.parse(json) as { exp?: unknown }).exp;
+		return typeof exp === 'number' ? exp * 1000 : null;
+	} catch {
+		return null;
+	}
+};
+
 /** 保存済みの accessToken/refreshToken からセッションを復元する。無人での自動再ログイン用。 */
 export const restoreDivisionSession = async (accessToken: string, refreshToken: string): Promise<DivisionSession | null> => {
 	if (!accessToken || !refreshToken) return null;
