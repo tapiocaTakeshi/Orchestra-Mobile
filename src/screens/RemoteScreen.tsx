@@ -215,6 +215,14 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	const [draft, setDraft] = useState('');
 	const [sheet, setSheet] = useState<'menu' | 'cost' | 'documents' | 'review' | null>(null);
 	const [sending, setSending] = useState(false);
+	/** 送信に失敗した本文と理由。再試行は現在の入力欄ではなく、この本文を同じ sendPrompt で送り直す (FR-003 / FR-005) */
+	const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+	const [sendError, setSendError] = useState<string | null>(null);
+	// 失敗表示と再試行対象は対で消す (入力の編集・別操作の成功で古い失敗を残さない。FR-004)
+	const clearSendError = useCallback(() => {
+		setSendError(null);
+		setPendingPrompt(null);
+	}, []);
 	const [showJump, setShowJump] = useState(false);
 	const insets = useSafeAreaInsets();
 	const followMessages = useRef(true);
@@ -229,12 +237,13 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 	const act = useCallback(async (fn: () => Promise<unknown>, successNote?: string) => {
 		try {
 			await fn();
+			clearSendError();
 			if (successNote) toast.show(successNote, 'success');
 			invalidate();
 		} catch (e) {
 			toast.show(e instanceof OrchestraApiError ? e.userMessage : String(e), 'error');
 		}
-	}, [invalidate, toast]);
+	}, [invalidate, toast, clearSendError]);
 
 	// Leader のワークフロー案 (承認モード) への答え。図で編集した内容も送る
 	const [workflowBusy, setWorkflowBusy] = useState<'approve' | 'revise' | 'reject' | null>(null);
@@ -259,22 +268,37 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 		scrollRef.current?.scrollToEnd({ animated: true });
 	}, []);
 
-	const send = useCallback(async () => {
-		const message = draft.trim();
+	const sendMessage = useCallback(async (message: string) => {
 		if (!message || !client || sending) return;
 		setSending(true);
 		try {
 			await client.sendPrompt(message);
 			setDraft('');
+			clearSendError();
 			followMessages.current = true;
 			setShowJump(false);
 			invalidate();
 		} catch (e) {
-			toast.show(e instanceof OrchestraApiError ? e.userMessage : String(e), 'error');
+			// 下書きは消さず、入力欄の直上に理由と再試行を残す (一瞬のトーストだけにしない)
+			setPendingPrompt(message);
+			setSendError(`PC へ送信できませんでした: ${e instanceof OrchestraApiError ? e.userMessage : String(e)}`);
 		} finally {
 			setSending(false);
 		}
-	}, [draft, client, invalidate, sending, toast]);
+	}, [client, invalidate, sending, clearSendError]);
+
+	const send = useCallback(async () => {
+		await sendMessage(draft.trim());
+	}, [draft, sendMessage]);
+
+	const retrySend = useCallback(async () => {
+		if (pendingPrompt) await sendMessage(pendingPrompt);
+	}, [pendingPrompt, sendMessage]);
+
+	const onDraftChange = useCallback((text: string) => {
+		setDraft(text);
+		if (pendingPrompt) clearSendError();
+	}, [pendingPrompt, clearSendError]);
 
 	if (!client) {
 		return (
@@ -480,10 +504,21 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				) : null}
 
 				<View style={styles.composerWrap}>
+					{sendError ? (
+						<ErrorBanner
+							// 接続が切れて再試行できない間は、再試行の代わりに理由と再接続を出す (自動では送り直さない。FR-004 / ISS-12)
+							message={pendingPrompt && lost
+								? `${sendError}\n現在は再試行できません。PC との接続が切れています。失敗した本文は保持しています。先に PC へ再接続してください。`
+								: sendError}
+							onRetry={pendingPrompt && lost ? () => void refresh() : pendingPrompt && !sending ? () => void retrySend() : undefined}
+							retryLabel={pendingPrompt && lost ? 'PCに再接続' : '再試行'}
+							style={styles.inlineBanner}
+						/>
+					) : null}
 					<View style={styles.composer}>
 						<TextInput
 							value={draft}
-							onChangeText={setDraft}
+							onChangeText={onDraftChange}
 							placeholder={lost ? 'PC との接続が切れています' : isRunning ? 'エージェントが作業中です…' : 'エージェントに指示する…'}
 							editable={!lost}
 							placeholderTextColor={colors.fgFaint}
@@ -757,7 +792,9 @@ const styles = StyleSheet.create({
 	composerChipPressed: { backgroundColor: colors.bgHover },
 	composerChipText: { color: colors.fgFaint, fontSize: fontSize.xs },
 	// 送信 / 停止はクラウドのチャットと同じ角丸の正方形。無効時は accent のまま薄くする
-	roundButton: { width: 34, height: 34, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+	// 送信・停止は主要操作なので、hitSlop に頼らず実寸で 44×44 を確保する (FR-011)
+	roundButton: { width: 44, height: 44, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+	inlineBanner: { marginHorizontal: 0, marginBottom: spacing.xs },
 	roundButtonOn: { backgroundColor: colors.accent },
 	roundButtonOff: { backgroundColor: colors.accent, opacity: 0.4 },
 	roundButtonPressed: { opacity: 0.75 },

@@ -224,3 +224,30 @@ describe('HomeScreen のナビゲーションドロワー', () => {
 		expect(findTextNode(r.root, DRAWER_ONLY_TEXT)).toBeTruthy();
 	});
 });
+
+describe('HomeScreen のドロワー「最近の会話」の状態 (FR-004 / FR-008)', () => {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	const cloud = require('../../lib/divisionCloud') as { listCloudSessions: jest.Mock };
+
+	it('取得できたら会話を出し、0 件なら空状態を出す', async () => {
+		cloud.listCloudSessions.mockResolvedValueOnce([]);
+		const r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+		expect(findTextNode(r.root, 'まだ会話はありません')).toBeTruthy();
+		expect(findTextNode(r.root, '最近の会話を読み込めませんでした')).toBeUndefined();
+	});
+
+	it('取得に失敗したら空状態ではなく失敗を出し、再試行で読み直す', async () => {
+		cloud.listCloudSessions.mockRejectedValueOnce(new Error('network'));
+		const r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+
+		expect(findTextNode(r.root, '最近の会話を読み込めませんでした')).toBeTruthy();
+		expect(findTextNode(r.root, 'まだ会話はありません')).toBeUndefined();
+
+		await press(findButtonsByLabel(r.root, '最近の会話をもう一度読み込む')[0]);
+		expect(cloud.listCloudSessions).toHaveBeenCalledTimes(2);
+		expect(findTextNode(r.root, 'README を直す')).toBeTruthy();
+		expect(findTextNode(r.root, '最近の会話を読み込めませんでした')).toBeUndefined();
+	});
+});

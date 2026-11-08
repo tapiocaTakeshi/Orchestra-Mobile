@@ -254,9 +254,11 @@ export const EmptyState = ({ title, detail, icon = 'inbox', action }: {
 	</View>
 );
 
-export const ErrorBanner = ({ message, onRetry, tone = 'error', style }: {
+export const ErrorBanner = ({ message, onRetry, retryLabel = '再試行', tone = 'error', style }: {
 	message: string;
 	onRetry?: () => void;
+	/** 右のボタンの文言。再試行できないときに「PCに再接続」など次に取れる操作へ差し替える */
+	retryLabel?: string;
 	/** warning は「繋がったけど注意がある」ときの黄色。 */
 	tone?: 'error' | 'warning';
 	style?: ViewStyle;
@@ -268,7 +270,8 @@ export const ErrorBanner = ({ message, onRetry, tone = 'error', style }: {
 	>
 		<Icon name='alert-circle' size={16} color={tone === 'warning' ? colors.warning : colors.danger} />
 		<Text style={[styles.errorText, tone === 'warning' && styles.warningText]}>{message}</Text>
-		{onRetry ? <Button title='再試行' variant='ghost' size='sm' onPress={onRetry} /> : null}
+		{/* size='sm' の見た目は変えず、このボタンだけ実寸 44×44pt を確保する (FR-011) */}
+		{onRetry ? <Button title={retryLabel} variant='ghost' size='sm' onPress={onRetry} style={styles.retryButton} /> : null}
 	</View>
 );
 
@@ -736,6 +739,8 @@ const styles = StyleSheet.create({
 		lineHeight: 18,
 		flex: 1,
 	},
+	// ErrorBanner の再試行 / 再接続ボタン。汎用の buttonSmall (38) は変えず、ここだけ 44pt にする
+	retryButton: { minHeight: 44, minWidth: 44 },
 	warningBanner: { backgroundColor: withAlpha(colors.warning, '1a'), borderColor: withAlpha(colors.warning, '4d') },
 	warningText: { color: colors.warning },
 	segmented: {

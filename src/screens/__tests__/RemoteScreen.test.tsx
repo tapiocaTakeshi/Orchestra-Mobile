@@ -25,9 +25,11 @@ const mockClient = {
 let mockSnapshot: Snapshot;
 const mockInvalidate = jest.fn();
 const mockToast = jest.fn();
+const mockRefresh = jest.fn(async () => undefined);
+let mockConnectionStatus: string | undefined;
 
 jest.mock('../../state/AppContext', () => ({
-	useApp: () => ({ snapshot: mockSnapshot, error: null, refresh: jest.fn(), isRefreshing: false, invalidate: mockInvalidate, client: mockClient }),
+	useApp: () => ({ snapshot: mockSnapshot, error: null, refresh: mockRefresh, isRefreshing: false, invalidate: mockInvalidate, client: mockClient, connectionStatus: mockConnectionStatus }),
 }));
 jest.mock('../TuningScreen', () => ({ TuningScreen: () => null }));
 // TextInput (react-native-web) は node 環境で document を参照するので、入力欄は軽量スタブにする
@@ -78,6 +80,7 @@ const byLabel = (tree: ReactTestRenderer, pattern: RegExp): ReactTestInstance =>
 
 beforeEach(() => {
 	jest.clearAllMocks();
+	mockConnectionStatus = undefined;
 	Object.values(mockClient).forEach(fn => fn.mockResolvedValue({}));
 });
 
@@ -155,5 +158,109 @@ describe('RemoteScreen', () => {
 		mockSnapshot = snapshotWith({ messages: [{ role: 'user', text: 'こんにちは' }] });
 		const tree = await render();
 		expect(() => tree.root.find(n => n.props.accessibilityLabel === 'あなた: こんにちは')).not.toThrow();
+	});
+
+	// 送信失敗: 入力を残し、入力欄の直上に理由と再試行を出す。再試行は失敗した本文を同じ sendPrompt で送る (FR-003 / FR-005)
+	const inputOf = (tree: ReactTestRenderer) =>
+		tree.root.find(n => n.props.accessibilityLabel === 'エージェントへの指示' && typeof n.props.onChangeText === 'function');
+	const retryButtons = (tree: ReactTestRenderer) =>
+		tree.root.findAll(n => n.props.title === '再試行' && typeof n.props.onPress === 'function' && n.parent?.props.title !== '再試行');
+
+	it('送信に失敗しても入力は残り、理由と再試行が出る。再試行は同じ本文を送り、成功で表示を消す', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		await act(async () => { inputOf(tree).props.onChangeText('  結果を要約して  '); });
+		mockClient.sendPrompt.mockRejectedValueOnce(new Error('タイムアウトしました'));
+		await act(async () => { byLabel(tree, /^送信$/).props.onPress(); });
+		expect(mockClient.sendPrompt).toHaveBeenLastCalledWith('結果を要約して');
+		expect(inputOf(tree).props.value).toBe('  結果を要約して  ');
+		expect(textsOf(tree)).toContain('PC へ送信できませんでした');
+		expect(mockToast).not.toHaveBeenCalledWith(expect.anything(), 'error');
+		const retry = retryButtons(tree);
+		expect(retry).toHaveLength(1);
+
+		mockClient.sendPrompt.mockResolvedValueOnce({});
+		await act(async () => { retry[0].props.onPress(); });
+		expect(mockClient.sendPrompt).toHaveBeenCalledTimes(2);
+		expect(mockClient.sendPrompt).toHaveBeenLastCalledWith('結果を要約して');
+		expect(textsOf(tree)).not.toContain('PC へ送信できませんでした');
+		expect(retryButtons(tree)).toHaveLength(0);
+		expect(inputOf(tree).props.value).toBe('');
+	});
+
+	it('送信失敗の後に入力を書き換えたら、古い失敗表示と再試行を消す', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		await act(async () => { inputOf(tree).props.onChangeText('最初の指示'); });
+		mockClient.sendPrompt.mockRejectedValueOnce(new Error('タイムアウトしました'));
+		await act(async () => { byLabel(tree, /^送信$/).props.onPress(); });
+		expect(textsOf(tree)).toContain('PC へ送信できませんでした');
+		await act(async () => { inputOf(tree).props.onChangeText('書き直した指示'); });
+		expect(textsOf(tree)).not.toContain('PC へ送信できませんでした');
+		expect(retryButtons(tree)).toHaveLength(0);
+	});
+
+	it('送信・停止ボタンは hitSlop に頼らず実寸 44×44 以上 (FR-011)', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		const style = byLabel(tree, /^送信$/).props.style;
+		const resolved = (typeof style === 'function' ? style({ pressed: false }) : style) as object[];
+		const flat = Object.assign({}, ...[resolved].flat(Infinity).filter(Boolean)) as { width?: number; height?: number };
+		expect(flat.width).toBeGreaterThanOrEqual(44);
+		expect(flat.height).toBeGreaterThanOrEqual(44);
+	});
+
+	const flatStyle = (node: ReactTestInstance) => {
+		const style = node.props.style;
+		const resolved = typeof style === 'function' ? style({ pressed: false }) : style;
+		return Object.assign({}, ...[resolved].flat(Infinity).filter(Boolean)) as { minWidth?: number; minHeight?: number };
+	};
+	const failSend = async (tree: ReactTestRenderer, text = '最初の指示') => {
+		await act(async () => { inputOf(tree).props.onChangeText(text); });
+		mockClient.sendPrompt.mockRejectedValueOnce(new Error('タイムアウトしました'));
+		await act(async () => { byLabel(tree, /^送信$/).props.onPress(); });
+	};
+
+	it('再試行ボタンは実寸 44×44 以上 (size=sm のまま。ISS-10)', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		await failSend(tree);
+		const pressable = tree.root.findAll(n => n.props.accessibilityLabel === '再試行' && typeof n.props.style === 'function')[0];
+		const flat = flatStyle(pressable);
+		expect(flat.minHeight).toBeGreaterThanOrEqual(44);
+		expect(flat.minWidth).toBeGreaterThanOrEqual(44);
+	});
+
+	it('送信失敗の後に別操作 (承認) が成功したら、古い失敗表示を消す (ISS-11)', async () => {
+		mockSnapshot = snapshotWith({ isRunning: true, awaitingApproval: true });
+		const tree = await render();
+		await failSend(tree);
+		expect(textsOf(tree)).toContain('PC へ送信できませんでした');
+		const approve = tree.root.find(n => n.props.title === '許可' && typeof n.props.onPress === 'function');
+		await act(async () => { approve.props.onPress(); });
+		expect(mockClient.approveTool).toHaveBeenCalled();
+		expect(textsOf(tree)).not.toContain('PC へ送信できませんでした');
+		expect(retryButtons(tree)).toHaveLength(0);
+	});
+
+	it('送信失敗の後に接続が切れたら、再試行を消して理由と「PCに再接続」を出す。自動では送り直さない (ISS-12)', async () => {
+		mockSnapshot = snapshotWith({});
+		const tree = await render();
+		await failSend(tree);
+		mockConnectionStatus = 'lost';
+		await act(async () => { tree.update(<RemoteScreen onOpenPage={jest.fn()} />); });
+		expect(textsOf(tree)).toContain('現在は再試行できません。PC との接続が切れています');
+		// 入力欄直上の送信失敗表示の中だけを見る (画面上部の既存の接続切れバナーは別)
+		const sendBanner = tree.root.findAll(n => n.props.accessibilityRole === 'alert'
+			&& n.findAll(c => c.children.some(x => typeof x === 'string' && x.includes('PC へ送信できませんでした'))).length > 0)[0];
+		expect(sendBanner).toBeDefined();
+		const inBanner = (title: string) => sendBanner.findAll(n => n.props.title === title && typeof n.props.onPress === 'function' && n.parent?.props.title !== title);
+		expect(inBanner('再試行')).toHaveLength(0);
+		const reconnect = inBanner('PCに再接続');
+		expect(reconnect).toHaveLength(1);
+		await act(async () => { reconnect[0].props.onPress(); });
+		expect(mockRefresh).toHaveBeenCalled();
+		expect(mockClient.sendPrompt).toHaveBeenCalledTimes(1);
+		expect(inputOf(tree).props.value).toBe('最初の指示');
 	});
 });

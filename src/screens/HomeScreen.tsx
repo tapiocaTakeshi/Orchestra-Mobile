@@ -67,6 +67,9 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 	const { session } = useDivisionAuth();
 	// 「最近の会話」: Division のクラウドセッションを新しい順に数件。開いたときだけ読む (失敗したら出さない)
 	const [recent, setRecent] = useState<CloudSession[] | null>(null);
+	// 読み込みの失敗は「まだ会話はありません」と区別して出す (FR-004 / FR-008)
+	const [recentFailed, setRecentFailed] = useState(false);
+	const [recentReload, setRecentReload] = useState(0);
 	const sessionRef = useRef(session);
 	sessionRef.current = session;
 	const token = session?.accessToken;
@@ -74,9 +77,13 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 		const current = sessionRef.current;
 		if (!open || !current) return;
 		let alive = true;
-		listCloudSessions(current, 5).then(list => { if (alive) setRecent(list); }, () => { if (alive) setRecent([]); });
+		setRecentFailed(false);
+		listCloudSessions(current, 5).then(
+			list => { if (alive) { setRecent(list); setRecentFailed(false); } },
+			() => { if (alive) { setRecent(null); setRecentFailed(true); } },
+		);
 		return () => { alive = false; };
-	}, [open, token]);
+	}, [open, token, recentReload]);
 	return (
 		<Drawer open={open} onClose={onClose}>
 			<ScrollView style={styles.flex} contentContainerStyle={styles.drawerBody} showsVerticalScrollIndicator={false}>
@@ -102,12 +109,25 @@ const NavigationDrawer = ({ open, connected, email, onClose, onOpenPage, onAccou
 					<Pressable
 						key={item.id}
 						accessibilityRole='button'
+						accessibilityLabel={`${item.title || item.prompt}を開く`}
 						onPress={() => onOpenPage('cloud')}
 						style={({ pressed }) => [styles.drawerRecent, pressed && styles.sheetRowPressed]}
 					>
 						<Text style={styles.drawerRecentText} numberOfLines={1}>{item.title || item.prompt}</Text>
 					</Pressable>
-				)) : <Text style={styles.drawerRecentEmpty}>{recent ? 'まだ会話はありません' : '読み込み中…'}</Text>}
+				)) : recentFailed ? (
+					<View style={styles.drawerRecentError} accessibilityLiveRegion='polite'>
+						<Text style={styles.drawerRecentErrorText}>最近の会話を読み込めませんでした</Text>
+						<Pressable
+							accessibilityRole='button'
+							accessibilityLabel='最近の会話をもう一度読み込む'
+							onPress={() => setRecentReload(n => n + 1)}
+							style={({ pressed }) => [styles.drawerRetry, pressed && styles.sheetRowPressed]}
+						>
+							<Text style={styles.drawerRetryText}>再試行</Text>
+						</Pressable>
+					</View>
+				) : <Text style={styles.drawerRecentEmpty}>{recent ? 'まだ会話はありません' : '読み込み中…'}</Text>}
 			</ScrollView>
 			<Pressable
 				accessibilityRole='button'
@@ -295,10 +315,15 @@ const styles = StyleSheet.create({
 	drawerItemLabelLocked: { color: colors.fgFaint },
 	drawerItemCurrent: { backgroundColor: colors.bgHover },
 	drawerSection: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '600', paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xs },
-	drawerRecent: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm },
+	drawerRecent: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm },
 	drawerRecentText: { color: colors.fgMuted, fontSize: fontSize.sm },
 	drawerRecentEmpty: { color: colors.fgFaint, fontSize: fontSize.xs, paddingHorizontal: spacing.md },
-	drawerLogout: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, borderRadius: radius.sm },
+	// 見た目は小さい文字でも、操作枠は 44×44 を確保する (FR-011)
+	drawerLogout: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.sm, borderRadius: radius.sm },
+	drawerRecentError: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md },
+	drawerRecentErrorText: { flex: 1, color: colors.danger, fontSize: fontSize.xs },
+	drawerRetry: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.sm, borderRadius: radius.sm },
+	drawerRetryText: { color: colors.accentText, fontSize: fontSize.sm, fontWeight: '600' },
 	drawerLogoutText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600' },
 	drawerAccount: {
 		flexDirection: 'row',
