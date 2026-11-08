@@ -8,6 +8,8 @@ import React from 'react';
 import { Linking, Platform, ScrollView, StyleProp, StyleSheet, Text, TextStyle, View } from 'react-native';
 
 import { MdBlock, MdInline, parseMarkdown } from '../lib/markdown';
+import { decodeParallelLog, PARALLEL_LOG_LANG } from '../lib/parallelLog';
+import { ParallelLogView } from './ParallelLog';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
@@ -68,6 +70,11 @@ const Block = ({ block, textStyle }: { block: MdBlock; textStyle: StyleProp<Text
 				</View>
 			);
 		case 'code':
+			if (block.lang === PARALLEL_LOG_LANG) {
+				// ワークフローの並列の分岐: コードではなく、分岐ごとのレーンとして描く
+				const log = decodeParallelLog(block.text);
+				return log ? <ParallelLogView log={log} renderMarkdown={md => <Markdown text={md} textStyle={textStyle} />} /> : null;
+			}
 			return (
 				<ScrollView horizontal style={styles.codeBlock} contentContainerStyle={styles.codeContent}>
 					<Text selectable style={styles.codeText}>{block.text}</Text>
