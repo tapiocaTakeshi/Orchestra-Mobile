@@ -1873,6 +1873,23 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, onOpenD
 const sessionKey = (s: CloudSession): string =>
 	`${s.status}|${s.updatedAt}|${s.lastSeq}|${s.changedFiles}|${s.modelLabel}|${s.title}|${s.costUsd ?? ''}|${s.pullRequest?.number ?? ''}|${s.pullRequest?.updatedAt ?? ''}`;
 
+/** 失敗した送信操作。通常送信 (send) と目標ループの継続 (continueGoal) を区別して再試行する */
+export type PendingSendAction = { kind: 'send' | 'continueGoal'; message: string };
+
+/**
+ * ホームから PC へ新しいチャットとして送ったときの失敗。
+ * stage: どこで失敗したか。threadId: 作成済みのチャット (あれば再試行はここへ本文だけを送る)。
+ * client: 送った PC。別の PC に繋ぎ直したら同じ threadId は使えないので再試行しない。
+ */
+export type PendingPcSend = {
+	prompt: string;
+	stage: 'newThread' | 'sendPrompt';
+	client: NonNullable<ReturnType<typeof useApp>['client']>;
+	threadId?: string;
+};
+
+const pcErrorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, onArchived }: {
 	auth: DivisionSession;
 	initial: CloudSession;
@@ -1893,6 +1910,15 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const [tab, setTab] = useState<'log' | 'changes'>('log');
 	const [draft, setDraft] = useState('');
 	const [sending, setSending] = useState(false);
+	/** 送信に失敗した理由。入力欄の直上に再試行と一緒に残す (下書きは消さない。FR-003 / FR-005) */
+	const [sendError, setSendError] = useState<string | null>(null);
+	/** 失敗した操作の種類と引数。再試行は現在の入力欄ではなく、これを同じ形で送り直す (FR-003) */
+	const [pendingAction, setPendingAction] = useState<PendingSendAction | null>(null);
+	// 失敗表示と再試行対象は対で消す (入力の編集・別操作の成功で古い失敗を残さない。FR-004)
+	const clearSendError = useCallback(() => {
+		setSendError(null);
+		setPendingAction(null);
+	}, []);
 	const [stopping, setStopping] = useState(false);
 	const [archiving, setArchiving] = useState(false);
 	const [composingPr, setComposingPr] = useState(false);
@@ -1978,6 +2004,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		setStopping(true);
 		try {
 			applySession(await stopCloudSession(auth, id));
+			clearSendError();
 			toast.show('停止しました', 'success');
 			void loadEvents();
 		} catch (e) {
@@ -1985,7 +2012,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		} finally {
 			setStopping(false);
 		}
-	}, [auth, id, applySession, loadEvents, toast]);
+	}, [auth, id, applySession, loadEvents, toast, clearSendError]);
 
 	const archive = useCallback(async () => {
 		const ok = await confirmAction({
@@ -2006,37 +2033,47 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		}
 	}, [auth, id, onArchived, toast]);
 
-	const send = useCallback(async () => {
-		const message = draft.trim();
-		if (!message || sending) return;
-		setSending(true);
-		try {
-			applySession(await sendCloudMessage(auth, id, message));
-			setDraft('');
-			follow.current = true;
-			void loadEvents();
-		} catch (e) {
-			toast.show(cloudErrorText(e), 'error');
-		} finally {
-			setSending(false);
-		}
-	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
-
-	// 目標ループが「毎回確認」で止まっているとき、次のラウンドへ進める (入力欄の内容は追加の指示になる)
-	const continueGoal = useCallback(async () => {
+	// 通常送信と目標継続の共通処理。失敗したら種類と引数を pendingAction に残す
+	const runSend = useCallback(async (action: PendingSendAction) => {
 		if (sending) return;
 		setSending(true);
 		try {
-			applySession(await sendCloudMessage(auth, id, draft, { continueGoal: true }));
+			applySession(action.kind === 'continueGoal'
+				? await sendCloudMessage(auth, id, action.message, { continueGoal: true })
+				: await sendCloudMessage(auth, id, action.message));
 			setDraft('');
+			clearSendError();
 			follow.current = true;
 			void loadEvents();
 		} catch (e) {
-			toast.show(cloudErrorText(e), 'error');
+			setPendingAction(action);
+			setSendError(`${action.kind === 'continueGoal' ? '次のラウンドへ進めませんでした' : '送信できませんでした'}: ${cloudErrorText(e)}`);
 		} finally {
 			setSending(false);
 		}
-	}, [auth, id, draft, sending, applySession, loadEvents, toast]);
+	}, [auth, id, sending, applySession, loadEvents, clearSendError]);
+
+	const send = useCallback(async () => {
+		const message = draft.trim();
+		if (!message) return;
+		await runSend({ kind: 'send', message });
+	}, [draft, runSend]);
+
+	// 目標ループが「毎回確認」で止まっているとき、次のラウンドへ進める (入力欄の内容は追加の指示になる)
+	const continueGoal = useCallback(async () => {
+		await runSend({ kind: 'continueGoal', message: draft });
+	}, [draft, runSend]);
+
+	// 再試行は入力欄の状態に依存せず、失敗した操作を同じ種類・引数で実行し直す
+	const retrySend = useCallback(async () => {
+		if (!pendingAction) return;
+		await runSend(pendingAction);
+	}, [pendingAction, runSend]);
+
+	const onDraftChange = useCallback((text: string) => {
+		setDraft(text);
+		if (pendingAction) clearSendError();
+	}, [pendingAction, clearSendError]);
 
 	// エラーで止まったセッションを、止まったところから続ける (失敗したタスクを飛ばさず、その途中から)
 	const resume = useCallback(async () => {
@@ -2044,6 +2081,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		setSending(true);
 		try {
 			applySession(await resumeCloudSession(auth, id));
+			clearSendError();
 			follow.current = true;
 			void loadEvents();
 		} catch (e) {
@@ -2051,15 +2089,16 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 		} finally {
 			setSending(false);
 		}
-	}, [auth, id, sending, applySession, loadEvents, toast]);
+	}, [auth, id, sending, applySession, loadEvents, toast, clearSendError]);
 
 	// 承認モードで成果物の承認・差し戻しをしたら、セッションとログを取り直す
 	const onApprovalResolved = useCallback((next: CloudSession, action: 'approve' | 'revise' | 'deny') => {
 		applySession(next);
+		clearSendError();
 		toast.show(action === 'approve' ? '承認しました' : action === 'deny' ? '実行を拒否しました' : '差し戻しました', 'success');
 		follow.current = true;
 		void loadEvents();
-	}, [applySession, loadEvents, toast]);
+	}, [applySession, loadEvents, toast, clearSendError]);
 
 	const source = cloudSource(current);
 	const active = isActive(current.status);
@@ -2211,10 +2250,22 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 					</ScrollView>
 
 					<View style={styles.composerWrap}>
+						{sendError ? (
+							<ErrorBanner
+								message={pendingAction && !sendable
+									// 失敗後にポーリングで送れない状態へ変わったら、押せない再試行は出さず理由と次の操作を示す (FR-004 / ISS-12)
+									? `${sendError}\n${awaitingApproval
+										? '現在は再試行できません。承認待ちのため、上のカードで内容を確認して承認するか差し戻してください。失敗した操作と入力は保持しています。'
+										: '現在は再試行できません。セッションの準備ができるまでお待ちください。準備ができると再試行できます。失敗した操作と入力は保持しています。'}`
+									: sendError}
+								onRetry={pendingAction && sendable && !sending ? () => void retrySend() : undefined}
+								style={styles.inlineBanner}
+							/>
+						) : null}
 						<View style={styles.composerBox}>
 							<TextInput
 								value={draft}
-								onChangeText={setDraft}
+								onChangeText={onDraftChange}
 								editable={sendable}
 								placeholder={awaitingApproval
 									? '成果物の承認待ちです。上のカードで承認するか差し戻してください'
@@ -2294,7 +2345,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	onOpenPcChat?: () => void;
 } = {}) => {
 	const { session, refreshSession } = useDivisionAuth();
-	const { connection, connectionStatus, snapshot, client, connect, invalidate } = useApp();
+	const { connection, connectionStatus, snapshot, client, connect, invalidate, refresh } = useApp();
 	const unified = !!onOpenPcChat;
 	const toast = useToast();
 	const insets = useSafeAreaInsets();
@@ -2316,6 +2367,13 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	const [target, setTarget] = useState<LaunchTarget>('cloud');
 	const [targetSheetOpen, setTargetSheetOpen] = useState(false);
 	const [sendingToPc, setSendingToPc] = useState(false);
+	/** PC への送信に失敗した理由と再試行対象。入力欄の直上に出す (トーストだけにしない。FR-003 / FR-005) */
+	const [pcSendError, setPcSendError] = useState<string | null>(null);
+	const [pendingPcSend, setPendingPcSend] = useState<PendingPcSend | null>(null);
+	const clearPcSendError = useCallback(() => {
+		setPcSendError(null);
+		setPendingPcSend(null);
+	}, []);
 	const [connectingDeviceId, setConnectingDeviceId] = useState<string | null>(null);
 	/** 引っ張って更新した回数 (判断の受信箱も読み直す) */
 	const [pullCount, setPullCount] = useState(0);
@@ -2569,21 +2627,71 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 	}, [session, onOpenPcChat, connect, devices, toast, refreshSession]);
 
 	/** 送り先が PC のとき: PC で新しいチャットを開いて指示を送り、そのチャットを開く */
-	const sendToPc = useCallback(async (prompt: string) => {
-		if (!client || !onOpenPcChat) return;
+	// 失敗したら、どの段階で失敗したか・作成済みのチャット (threadId)・送った本文を覚えておく。
+	// 再試行はチャット作成後の失敗なら同じ threadId へ本文だけを送り、チャットを重複して作らない (FR-003 / ISS-09)
+	const runPcSend = useCallback(async (attempt: PendingPcSend) => {
+		if (!client || !onOpenPcChat || sendingToPc) return;
 		setSendingToPc(true);
+		let threadId = attempt.client === client ? attempt.threadId : undefined;
 		try {
-			await client.newThread();
-			await client.sendPrompt(prompt);
+			if (!threadId) {
+				try {
+					threadId = (await client.newThread())?.threadId || undefined;
+				} catch (e) {
+					setPendingPcSend({ prompt: attempt.prompt, stage: 'newThread', client });
+					setPcSendError(`PC にチャットを作れませんでした: ${pcErrorText(e)}`);
+					return;
+				}
+			}
+			try {
+				await client.sendPrompt(attempt.prompt, threadId ? { threadId } : undefined);
+			} catch (e) {
+				setPendingPcSend({ prompt: attempt.prompt, stage: 'sendPrompt', client, threadId });
+				setPcSendError(`PC への本文を送信できませんでした: ${pcErrorText(e)}${threadId ? '（チャットは作成済みです。再試行では同じチャットへ本文だけを送ります）' : ''}`);
+				return;
+			}
+			clearPcSendError();
 			setDraft(d => ({ ...d, prompt: '' }));
 			invalidate();
 			onOpenPcChat();
-		} catch (e) {
-			toast.show(`PC に送れませんでした: ${e instanceof Error ? e.message : String(e)}`, 'error');
 		} finally {
 			setSendingToPc(false);
 		}
-	}, [client, onOpenPcChat, invalidate, toast]);
+	}, [client, onOpenPcChat, sendingToPc, invalidate, clearPcSendError]);
+
+	const sendToPc = useCallback(async (prompt: string) => {
+		if (!client) return;
+		await runPcSend({ prompt, stage: 'newThread', client });
+	}, [client, runPcSend]);
+
+	// 入力欄の本文を書き換えたら、古い失敗表示と再試行対象を消す (FR-004)
+	useEffect(() => { clearPcSendError(); }, [draft.prompt, clearPcSendError]);
+
+	/** 失敗した PC 送信を今やり直せるか。やり直せないときは理由と次の操作を出す (ISS-12) */
+	const pcRetry = useMemo((): { kind: 'retry' } | { kind: 'blocked'; reason: string; actionLabel?: string; action?: () => void } | null => {
+		if (!pendingPcSend) return null;
+		if (connectionStatus === 'lost') {
+			return { kind: 'blocked', reason: '現在は再試行できません。PC との接続が切れています。本文は保持しています。再接続してから再試行できます。', actionLabel: 'PCに再接続', action: () => void refresh() };
+		}
+		if (connectionStatus === 'connecting') {
+			return { kind: 'blocked', reason: '現在は再試行できません。PC に接続しています…。接続が済むと再試行できます。本文は保持しています。' };
+		}
+		if (!pcAvailable || !client || pendingPcSend.client !== client) {
+			return { kind: 'blocked', reason: '現在は再試行できません。送信した PC に接続していません。本文は保持しています。一覧の PC を押して接続するか、送り先をクラウドに切り替えてください。' };
+		}
+		return { kind: 'retry' };
+	}, [pendingPcSend, connectionStatus, pcAvailable, client, refresh]);
+
+	const retryPcSend = useCallback(() => {
+		if (pendingPcSend) void runPcSend(pendingPcSend);
+	}, [pendingPcSend, runPcSend]);
+
+	/** 送り先を自分で選び直したら、PC への送信失敗は過去のものになる */
+	const chooseTarget = useCallback((next: LaunchTarget) => {
+		setTarget(next);
+		setTargetSheetOpen(false);
+		clearPcSendError();
+	}, [clearPcSendError]);
 	const filterOptions = useMemo(
 		() => CLOUD_SESSION_FILTERS.map(f => ({ value: f.value, label: filterCounts[f.value] > 0 ? `${f.label} ${filterCounts[f.value]}` : f.label })),
 		[filterCounts],
@@ -2681,7 +2789,8 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					{loading && items.length === 0 ? (
 						<Loading label='セッションを読み込んでいます…' />
 					) : items.length === 0 ? (
-						launching > 0 ? null : (
+						// 取得に失敗したときは空状態 (歓迎文) を出さない。失敗は上の ErrorBanner が再試行と一緒に示す (FR-004)
+						launching > 0 || error ? null : (
 							<View style={styles.welcome}>
 								<Text style={styles.welcomeMark}>✻</Text>
 								<Text style={styles.welcomeTitle}>{unified ? 'エージェントを動かす' : 'クラウドでエージェントを動かす'}</Text>
@@ -2755,6 +2864,16 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 					)}
 				</ScrollView>
 
+				{/* PC への送信失敗は入力欄の直上に 1 つだけ。再試行できないときは再試行を消し、理由と次の操作を出す (FR-004 / ISS-12) */}
+				{pcSendError && pcRetry ? (
+					<ErrorBanner
+						message={pcRetry.kind === 'blocked' ? `${pcSendError}\n${pcRetry.reason}` : pcSendError}
+						onRetry={pcRetry.kind === 'retry' ? (sendingToPc ? undefined : retryPcSend) : pcRetry.action}
+						retryLabel={pcRetry.kind === 'retry' ? (pendingPcSend?.threadId ? '同じチャットへ再試行' : '再試行') : pcRetry.actionLabel}
+						style={styles.pcSendBanner}
+					/>
+				) : null}
+
 				<LaunchComposer
 					auth={session}
 					projects={projects}
@@ -2777,7 +2896,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 							<Pressable
 								accessibilityRole='button'
 								accessibilityState={{ selected: target === 'cloud' }}
-								onPress={() => { setTarget('cloud'); setTargetSheetOpen(false); }}
+								onPress={() => chooseTarget('cloud')}
 								style={({ pressed }) => [styles.targetRow, pressed && styles.rowPressed]}
 							>
 								<Icon name='cloud' size={18} color={colors.fg} />
@@ -2791,7 +2910,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 								accessibilityRole='button'
 								accessibilityState={{ selected: target === 'pc', disabled: !pcAvailable }}
 								disabled={!pcAvailable}
-								onPress={() => { setTarget('pc'); setTargetSheetOpen(false); }}
+								onPress={() => chooseTarget('pc')}
 								style={({ pressed }) => [styles.targetRow, !pcAvailable && styles.targetRowDisabled, pressed && styles.rowPressed]}
 							>
 								<Icon name='monitor' size={18} color={pcAvailable ? colors.fg : colors.fgFaint} />
@@ -2930,9 +3049,10 @@ const styles = StyleSheet.create({
 	},
 	composerChipWarn: { borderColor: withAlpha(colors.warning, '66') },
 	composerChipText: { flexShrink: 1, color: colors.fgMuted, fontSize: fontSize.xs, fontFamily: MONO },
+	// 送信・停止は主要操作なので、hitSlop に頼らず実寸で 44×44 を確保する (FR-011)
 	sendButton: {
-		width: 34,
-		height: 34,
+		width: 44,
+		height: 44,
 		borderRadius: radius.sm,
 		alignItems: 'center',
 		justifyContent: 'center',
@@ -3144,6 +3264,8 @@ const styles = StyleSheet.create({
 		backgroundColor: colors.bgElevated,
 	},
 	inlineBanner: { marginHorizontal: 0 },
+	// ホームの PC 送信失敗。入力欄 (composerWrap) と同じ左右の余白で直上に置く
+	pcSendBanner: { marginHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: 0 },
 	changeItem: {
 		borderBottomWidth: StyleSheet.hairlineWidth,
 		borderBottomColor: colors.border,

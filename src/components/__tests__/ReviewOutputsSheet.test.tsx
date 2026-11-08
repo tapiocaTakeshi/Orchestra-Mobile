@@ -51,5 +51,7 @@ describe('ReviewOutputsSheet', () => {
 		await act(async () => { pressable(r.root, '編集して承認').props.onPress(); });
 		expect(client.approveTool).toHaveBeenCalledWith('t1', [{ mdFileName: 'specification.md', mdContent: '# 仕様 (スマホで直した)\n' }]);
 		expect(onClose).toHaveBeenCalled();
+		// ToastProvider の表示タイマーを残さない (残ると Jest が終了しない)。unmount で clearTimeout される
+		await act(async () => { r.unmount(); });
 	});
 });
