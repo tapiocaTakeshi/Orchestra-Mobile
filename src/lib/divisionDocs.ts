@@ -39,9 +39,19 @@ export const documentKindOf = (name: string): DocumentKind => {
 };
 
 /** 一覧の見出し (論文・仕様書はその名前、デザインはページ名) */
-export const documentTitle = (doc: Pick<RemoteDocument, 'kind' | 'name'>): string => {
-	if (doc.kind === 'workflow' || doc.kind === 'paper' || doc.kind === 'specification') return DOCUMENT_KIND_LABEL[doc.kind];
-	return doc.name.replace(/^design\//, '');
+export const documentTitle = (doc: Pick<RemoteDocument, 'kind' | 'name'> & { path?: string }): string => {
+	const base = doc.kind === 'workflow' || doc.kind === 'paper' || doc.kind === 'specification'
+		? DOCUMENT_KIND_LABEL[doc.kind]
+		: doc.name.replace(/^design\//, '');
+	// 複数リポジトリのクラウドセッションは、各リポジトリの .division (<repo>/.division/…) も一覧に載る
+	const repo = documentRepoOf(doc.path);
+	return repo ? `${repo} · ${base}` : base;
+};
+
+/** リポジトリのフォルダの .division の文書ならそのフォルダ名 ('Orchestra-Mobile/.division/CODER.md' → 'Orchestra-Mobile')。ワークスペース直下なら '' */
+export const documentRepoOf = (path: string | undefined): string => {
+	const m = path ? /^([^/.][^/]*)\/\.division\//.exec(path) : null;
+	return m ? m[1] : '';
 };
 
 /** 種類ごとにまとめる (ワークフロー → 論文 → 仕様書 → デザイン → 成果物) */
