@@ -66,9 +66,10 @@ export const providerTitle = (provider: string): string =>
 	PROVIDER_TITLES[provider] ?? provider;
 
 /**
- * Division のロール表示名。ロールは リーダー・サーチャー・リサーチャー・ライター・デザイナー・コーダー・レビュアー の 7 つだけ。
+ * Division のロール表示名。ロールは リーダー・サーチャー・ファイルサーチャー・リサーチャー・ライター・デザイナー・コーダー・レビュアー の 8 つだけ。
+ * ファイルサーチャーの出力は .division/FILE.md (ファイル MD)。
  * IDE 側の名前 (search / writing / review など) と Division API 側の名前 (searcher / writer / reviewer など) の両方を引ける。
- * 廃止したロール (planner / ideaman / image / file-searcher) は、古い記録用に引き継ぎ先のロール名で出す。
+ * 廃止したロール (planner / ideaman / image) は、古い記録用に引き継ぎ先のロール名で出す。
  */
 const ROLE_TITLES: Record<string, string> = {
 	leader: 'リーダー',
@@ -83,13 +84,13 @@ const ROLE_TITLES: Record<string, string> = {
 	coder: 'コーダー',
 	review: 'レビュアー',
 	reviewer: 'レビュアー',
+	filesearch: 'ファイルサーチャー',
+	'file-searcher': 'ファイルサーチャー',
 	// 廃止したロール
 	planner: 'ライター',
 	ideaman: 'リサーチャー',
 	image: 'デザイナー',
 	imager: 'デザイナー',
-	filesearch: 'サーチャー',
-	'file-searcher': 'サーチャー',
 	generate: '生成',
 };
 
