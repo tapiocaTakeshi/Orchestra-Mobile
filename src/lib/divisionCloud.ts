@@ -1976,7 +1976,7 @@ const toRemoteDocument = (raw: unknown): RemoteDocument | null => {
 	const kind = DOCUMENT_KINDS.includes(d.kind as DocumentKind) ? (d.kind as DocumentKind) : 'output';
 	return {
 		path: d.path,
-		name: typeof d.name === 'string' && d.name ? d.name : d.path.replace(/^\.division\//, ''),
+		name: typeof d.name === 'string' && d.name ? d.name : d.path.replace(/^(?:[^/.][^/]*\/)?\.division\//, ''),
 		kind,
 		size: typeof d.size === 'number' ? d.size : 0,
 		mtime: typeof d.mtime === 'number' ? d.mtime : 0,

@@ -13,6 +13,10 @@ describe('divisionDocs', () => {
 		expect(documentKindOf('REVIEW.md')).toBe('output');
 		expect(documentTitle({ kind: 'paper', name: 'paper.md' })).toBe('論文');
 		expect(documentTitle({ kind: 'design', name: 'design/login.html' })).toBe('login.html');
+		// 複数リポジトリのセッション: 各リポジトリの .division の文書はリポジトリ名つき
+		expect(documentTitle({ kind: 'output', name: 'CODER.md', path: 'Orchestra-Mobile/.division/CODER.md' })).toBe('Orchestra-Mobile · CODER.md');
+		expect(documentTitle({ kind: 'paper', name: 'paper.md', path: 'Division/.division/paper.md' })).toBe('Division · 論文');
+		expect(documentTitle({ kind: 'paper', name: 'paper.md', path: '.division/paper.md' })).toBe('論文');
 	});
 
 	it('groups documents in the order paper → specification → design → outputs', () => {
