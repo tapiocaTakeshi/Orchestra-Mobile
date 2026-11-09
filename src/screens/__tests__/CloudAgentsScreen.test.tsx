@@ -443,7 +443,6 @@ describe('CloudAgentsScreen 並列ノードの分岐', () => {
 
 		expect(hasText(root, '並列実行')).toBe(true);
 		expect(hasText(root, '2 分岐 · 1/2 完了')).toBe(true);
-		expect(hasText(root, 'クラウドではサンドボックスを共有するので')).toBe(true);
 		// 既定は最初の分岐 (動いている分岐がないので)。その返答がレーンの中に出る
 		expect(hasText(root, '調査の結論')).toBe(true);
 
@@ -452,6 +451,6 @@ describe('CloudAgentsScreen 並列ノードの分岐', () => {
 		expect(tabs).toHaveLength(2);
 		await press(tabs[1]);
 		expect(hasText(root, '画面を描く')).toBe(true);
-		expect(hasText(root, '前の分岐が終わると始まります。')).toBe(true);
+		expect(hasText(root, 'ほかの分岐のあとで始まります。')).toBe(true);
 	});
 });

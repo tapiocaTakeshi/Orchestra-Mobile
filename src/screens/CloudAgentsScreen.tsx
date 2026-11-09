@@ -2238,8 +2238,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 											<ParallelLogView
 												key={`p${item.key}`}
 												log={{ v: 1, lanes: item.lanes }}
-												note='クラウドではサンドボックスを共有するので、分岐は上から 1 つずつ実行します。'
-												waitingText='前の分岐が終わると始まります。'
+												waitingText='ほかの分岐のあとで始まります。'
 												renderLane={lane => {
 													// 分岐の見出し (task の start) はレーンの見出しと同じなので出さない
 													const shown = lane.items.filter(it => !(it.kind === 'event' && it.event.type === 'task' && it.event.data.status === 'start'));
