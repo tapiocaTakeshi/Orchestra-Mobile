@@ -1098,6 +1098,8 @@ export type CloudPlanTask = {
 	instruction: string;
 	/** "Provider · modelId" */
 	model: string;
+	/** ワークフローの並列ノードの分岐なら、そのノードの id (同じ id の続いたタスクが一緒に走る分岐) */
+	parallel?: string;
 };
 
 export type CloudPlan = { tasks: CloudPlanTask[]; leaderModel: string };
@@ -1127,6 +1129,7 @@ export const toCloudPlan = (data: Record<string, unknown>): CloudPlan => {
 			title: str(t.title),
 			instruction: str(t.instruction),
 			model: str(t.model),
+			...(str(t.parallel) ? { parallel: str(t.parallel) } : {}),
 		};
 	});
 	return { tasks, leaderModel: str(data.leaderModel) };

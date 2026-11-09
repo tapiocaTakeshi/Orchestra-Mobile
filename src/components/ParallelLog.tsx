@@ -56,15 +56,23 @@ const useNow = (active: boolean) => {
 
 const laneName = (lane: ParallelLane) => `${lane.step > 0 ? `${lane.step}. ` : ''}${lane.role}`;
 
-export const ParallelLogView = ({ log, renderMarkdown }: {
-	log: ParallelLog;
-	/** 分岐のログを Markdown として描く (Markdown 部品から渡す) */
-	renderMarkdown: (text: string) => React.ReactNode;
+export const ParallelLogView = <L extends ParallelLane>({ log, renderMarkdown, renderLane, waitingText, note }: {
+	log: { v: 1; lanes: L[] } | ParallelLog;
+	/** 分岐のログ (lane.text) を Markdown として描く (Markdown 部品から渡す) */
+	renderMarkdown?: (text: string) => React.ReactNode;
+	/** 分岐の中身を自分で描く (クラウドの会話)。null なら「出力を待っています」などを出す */
+	renderLane?: (lane: L) => React.ReactNode;
+	/** まだ始まっていない分岐に出す文 */
+	waitingText?: string;
+	/** 見出しの下の補足 */
+	note?: string;
 }) => {
+	const lanes = log.lanes as L[];
 	const counts = parallelLogCounts(log);
 	const now = useNow(counts.active > 0);
 	const [picked, setPicked] = useState<number | null>(null);
-	const selected = log.lanes.find(l => l.key === picked) ?? log.lanes.find(l => l.key === defaultLaneKey(log))!;
+	const selected = lanes.find(l => l.key === picked) ?? lanes.find(l => l.key === defaultLaneKey(log))!;
+	const body = renderLane ? renderLane(selected) : selected.text.trim() ? renderMarkdown?.(selected.text) : null;
 	const finished = counts.done + counts.error;
 	const summary = counts.active > 0
 		? `${finished}/${counts.total} 完了`
@@ -79,14 +87,16 @@ export const ParallelLogView = ({ log, renderMarkdown }: {
 				<Text style={styles.headerMeta}>{counts.total} 分岐 · {summary}</Text>
 			</View>
 
+			{note ? <Text style={styles.note}>{note}</Text> : null}
+
 			<View style={styles.progress}>
-				{log.lanes.map(l => (
+				{lanes.map(l => (
 					<View key={l.key} style={[styles.progressPart, !isParallelLaneActive(l.status) && { backgroundColor: STATUS_COLOR[l.status] }]} />
 				))}
 			</View>
 
 			<ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-				{log.lanes.map(lane => {
+				{lanes.map(lane => {
 					const isSel = lane.key === selected.key;
 					const ms = laneElapsedMs(lane, now);
 					return (
@@ -117,15 +127,15 @@ export const ParallelLogView = ({ log, renderMarkdown }: {
 						{STATUS_LABEL[selected.status]}{elapsed !== undefined ? ` · ${formatLaneElapsed(elapsed)}` : ''}
 					</Text>
 				</View>
-				{selected.text.trim()
-					? renderMarkdown(selected.text)
-					: <Text style={styles.empty}>
-						{selected.status === 'waiting' ? '他の準備が終わるのを待っています…' : selected.status === 'running' ? '出力を待っています…' : '(出力なし)'}
-					</Text>}
+				{body ?? (
+					<Text style={styles.empty}>
+						{selected.status === 'waiting' ? (waitingText ?? '他の準備が終わるのを待っています…') : selected.status === 'running' ? '出力を待っています…' : '(出力なし)'}
+					</Text>
+				)}
 			</View>
 
 			{/* ほかの分岐の今の 1 行 */}
-			{log.lanes.filter(l => l.key !== selected.key && laneLastLine(l)).map(l => (
+			{lanes.filter(l => l.key !== selected.key && laneLastLine(l)).map(l => (
 				<Pressable key={l.key} onPress={() => setPicked(l.key)} style={({ pressed }) => [styles.preview, pressed && styles.pressed]}>
 					<Text style={[styles.previewName, { color: STATUS_COLOR[l.status] }]}>{laneName(l)}</Text>
 					<Text style={styles.previewText} numberOfLines={1}>{laneLastLine(l)}</Text>
@@ -148,6 +158,7 @@ const styles = StyleSheet.create({
 	header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.sm + 2, paddingBottom: spacing.sm },
 	headerTitle: { fontSize: fontSize.xs + 1, fontWeight: '700', color: colors.fgStrong },
 	headerMeta: { fontSize: fontSize.xs, color: colors.fgFaint, flexShrink: 1 },
+	note: { fontSize: fontSize.xs - 1, color: colors.fgFaint, paddingHorizontal: spacing.md, paddingBottom: spacing.sm, marginTop: -spacing.xs },
 	progress: { flexDirection: 'row', height: 2, backgroundColor: colors.border },
 	progressPart: { flex: 1 },
 	tabs: { gap: spacing.xs + 2, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
