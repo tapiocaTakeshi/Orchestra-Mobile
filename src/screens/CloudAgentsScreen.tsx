@@ -87,6 +87,8 @@ import {
 	usePullRequestInfo,
 } from '../components/CloudPullRequest';
 import { Markdown } from '../components/Markdown';
+import { ParallelLogView } from '../components/ParallelLog';
+import { groupParallelBranches } from '../lib/cloudParallel';
 import { AiLoading } from '../components/AiLoading';
 import { DocumentView } from '../components/DocumentView';
 import { DocumentList } from '../components/DocumentList';
@@ -113,6 +115,7 @@ import {
 	archiveCloudSession,
 	canSendMessage,
 	chatBlocks,
+	ChatItem,
 	classifyPatchLines,
 	CloudGoalLoopMode,
 	DEFAULT_GOAL_LOOP,
@@ -2108,7 +2111,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const timeline = useMemo(() => divisionTimeline(events, active), [events, active]);
 	const canSend = sendable && !!draft.trim() && !sending;
 	// 「作業中」の経過時間の起点。最後の指示から、無ければ開始から数える
-	const blocks = useMemo(() => chatBlocks(events), [events]);
+	// ワークフローの並列ノードの分岐は、分岐ごとのレーンのカードにまとめる
+	const blocks = useMemo(() => groupParallelBranches(chatBlocks(events), events, active), [events, active]);
 	// 返答の頭に出す名前。Division Project ならそう出し、それ以外は「エージェント」
 	const agentName = isDivisionProjectModel(current.model) ? 'Division Project' : 'エージェント';
 	const workingSince = useMemo(() => {
@@ -2145,6 +2149,21 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 			onPress={() => setComposingPr(true)}
 		/>
 	) : null;
+
+	/** 返答の中の 1 つ (続けて実行したツールのまとまり、またはイベント)。並列の分岐のレーンの中でも使う */
+	const renderChatItem = (item: ChatItem) => (item.kind === 'tools' ? (
+		<ToolGroup key={`t${item.key}`} events={item.events} />
+	) : (
+		<EventView
+			key={item.event.seq}
+			event={item.event}
+			timeline={timeline}
+			onShowChanges={() => setTab('changes')}
+			doneAction={item.event.seq === lastDoneSeq ? prDoneAction : undefined}
+			onContinueGoal={sendable && item.event.seq === pausedSeq ? () => void continueGoal() : undefined}
+			continuing={sending}
+		/>
+	));
 
 	const showChanges = tab === 'changes';
 	// 動いていて何も書いていなければ、送信ボタンを停止ボタンにする (Claude Code と同じ)
@@ -2215,19 +2234,19 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 								const isLast = block === blocks[blocks.length - 1];
 								return (
 									<AgentTurn key={block.key} name={agentName}>
-										{block.items.map(item => (item.kind === 'tools' ? (
-											<ToolGroup key={`t${item.key}`} events={item.events} />
-										) : (
-											<EventView
-												key={item.event.seq}
-												event={item.event}
-												timeline={timeline}
-												onShowChanges={() => setTab('changes')}
-												doneAction={item.event.seq === lastDoneSeq ? prDoneAction : undefined}
-												onContinueGoal={sendable && item.event.seq === pausedSeq ? () => void continueGoal() : undefined}
-												continuing={sending}
+										{block.items.map(item => (item.kind === 'parallel' ? (
+											<ParallelLogView
+												key={`p${item.key}`}
+												log={{ v: 1, lanes: item.lanes }}
+												note='クラウドではサンドボックスを共有するので、分岐は上から 1 つずつ実行します。'
+												waitingText='前の分岐が終わると始まります。'
+												renderLane={lane => {
+													// 分岐の見出し (task の start) はレーンの見出しと同じなので出さない
+													const shown = lane.items.filter(it => !(it.kind === 'event' && it.event.type === 'task' && it.event.data.status === 'start'));
+													return shown.length ? <View style={styles.laneItems}>{shown.map(renderChatItem)}</View> : null;
+												}}
 											/>
-										)))}
+										) : renderChatItem(item)))}
 										{active && isLast ? <TypingBubble status={current.status} since={workingSince} /> : null}
 									</AgentTurn>
 								);
@@ -2935,6 +2954,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 };
 
 const styles = StyleSheet.create({
+	laneItems: { gap: spacing.sm },
 	flex: { flex: 1 },
 	spread: { justifyContent: 'space-between' },
 	wrapRow: { flexWrap: 'wrap' },

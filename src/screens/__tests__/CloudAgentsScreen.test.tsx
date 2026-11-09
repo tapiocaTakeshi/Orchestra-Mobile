@@ -419,3 +419,39 @@ describe('CloudAgentsScreen ホームから PC への新規送信の失敗と再
 		expect(homeComposer(root).props.value).toBe('最初の指示');
 	});
 });
+
+// --- ワークフローの並列ノードの分岐 ------------------------------------------------
+
+describe('CloudAgentsScreen 並列ノードの分岐', () => {
+	const at = (s: number) => new Date(Date.UTC(2026, 10, 8, 0, 0, s)).toISOString();
+	const events: CloudSessionEvent[] = [
+		{ seq: 1, type: 'user', data: { text: 'アプリを作って' }, createdAt: at(0) },
+		{ seq: 2, type: 'plan', data: { leaderModel: 'L', tasks: [
+			{ index: 0, role: 'searcher', roleName: '調査', title: '市場を調べる', parallel: 'p1' },
+			{ index: 1, role: 'designer', roleName: 'デザイン', title: '画面を描く', parallel: 'p1' },
+		] }, createdAt: at(1) },
+		{ seq: 3, type: 'task', data: { index: 0, role: 'searcher', roleName: '調査', title: '市場を調べる', status: 'start' }, createdAt: at(2) },
+		{ seq: 4, type: 'assistant', data: { text: '調査の結論', role: 'searcher' }, createdAt: at(3) },
+		{ seq: 5, type: 'task', data: { index: 0, role: 'searcher', roleName: '調査', status: 'done', summary: '調べた' }, createdAt: at(9) },
+	];
+
+	it('分岐ごとのタブにまとめ、まだ始まっていない分岐は待っていると出す', async () => {
+		const session = baseSession({ status: 'running', model: 'division-project' });
+		mockListCloudSessions.mockResolvedValue([session]);
+		mockFetchCloudEvents.mockResolvedValue({ events, session });
+		const root = await render({ initialSessionId: 's1' });
+
+		expect(hasText(root, '並列実行')).toBe(true);
+		expect(hasText(root, '2 分岐 · 1/2 完了')).toBe(true);
+		expect(hasText(root, 'クラウドではサンドボックスを共有するので')).toBe(true);
+		// 既定は最初の分岐 (動いている分岐がないので)。その返答がレーンの中に出る
+		expect(hasText(root, '調査の結論')).toBe(true);
+
+		const isTab = (n: ReactTestInstance | null) => n?.props?.accessibilityRole === 'tab' && typeof n.props?.onPress === 'function';
+		const tabs = root.findAll(n => isTab(n) && !isTab(n.parent));
+		expect(tabs).toHaveLength(2);
+		await press(tabs[1]);
+		expect(hasText(root, '画面を描く')).toBe(true);
+		expect(hasText(root, '前の分岐が終わると始まります。')).toBe(true);
+	});
+});
