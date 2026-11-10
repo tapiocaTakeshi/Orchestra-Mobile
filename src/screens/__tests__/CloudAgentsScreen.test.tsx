@@ -211,6 +211,81 @@ describe('CloudAgentsScreen 一覧の状態 (FR-004 / FR-008)', () => {
 	});
 });
 
+// --- デザイン改善の回帰 (FR-003 / FR-005 / FR-008 / FR-012) -------------------------
+
+describe('CloudAgentsScreen ホームの見た目と読み上げ (FR-003 / FR-005 / FR-008 / FR-012)', () => {
+	const homeProps = { onOpenPcChat: jest.fn(), headerTitle: 'ホーム' };
+
+	/** 題名から押せる行を辿る */
+	const rowOf = (root: ReactTestInstance, title: string): ReactTestInstance => {
+		let cur: ReactTestInstance | null = root.findAll(n => n.children.length > 0 && n.children.every(c => typeof c === 'string') && n.children.join('') === title)[0] ?? null;
+		while (cur && typeof cur.props?.onPress !== 'function') cur = cur.parent;
+		if (!cur) throw new Error(`「${title}」の行が見つかりません`);
+		return cur;
+	};
+	const iconNames = (node: ReactTestInstance): string[] =>
+		node.findAll(n => typeof n.props?.name === 'string' && typeof n.props?.size === 'number').map(n => n.props.name as string);
+
+	it('止まっている状態は、色だけでなく状態ごとに形の違うアイコンで示す', async () => {
+		mockListCloudSessions.mockResolvedValue([
+			baseSession({ id: 'a', title: '完了した作業', status: 'idle' }),
+			baseSession({ id: 'b', title: '承認を待つ作業', status: 'awaiting_approval' }),
+			baseSession({ id: 'c', title: '失敗した作業', status: 'failed' }),
+			baseSession({ id: 'd', title: '止めた作業', status: 'cancelled' }),
+		]);
+		const root = await render(homeProps);
+		expect(iconNames(rowOf(root, '完了した作業'))).toContain('check-circle');
+		expect(iconNames(rowOf(root, '承認を待つ作業'))).toContain('pause-circle');
+		expect(iconNames(rowOf(root, '失敗した作業'))).toContain('alert-circle');
+		expect(iconNames(rowOf(root, '止めた作業'))).toContain('slash');
+	});
+
+	it('一覧の絞り込みは、各ボタンの押せる枠を高さ 44 以上にする', async () => {
+		mockListCloudSessions.mockResolvedValue(
+			Array.from({ length: 6 }, (_, i) => baseSession({ id: `s${i}`, title: `作業 ${i}` })),
+		);
+		const root = await render(homeProps);
+		const isTab = (n: ReactTestInstance | null) => n?.props?.accessibilityRole === 'tab' && typeof n.props?.onPress === 'function';
+		const tabs = root.findAll(n => isTab(n) && !isTab(n.parent));
+		expect(tabs.length).toBeGreaterThanOrEqual(2);
+		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		const { StyleSheet } = require('react-native') as typeof import('react-native');
+		for (const tab of tabs) {
+			const style = StyleSheet.flatten(tab.props.style) as { minHeight?: number };
+			expect(style.minHeight).toBeGreaterThanOrEqual(44);
+		}
+	});
+
+	it('送信ボタンは、押せないあいだ理由を読み上げ、指示を書くとヒントが消える', async () => {
+		mockListCloudSessions.mockResolvedValue([]);
+		const root = await render(homeProps);
+		const send = () => findButtons(root, 'セッションを起動')[0];
+		expect(send().props.accessibilityHint).toBe('指示を書くと送信できます');
+		expect(send().props.accessibilityState?.disabled ?? send().props.disabled).toBe(true);
+
+		const input = root.findAll(n => n.type === ('input-stub' as unknown) && n.props.accessibilityLabel === 'エージェントへの指示')[0];
+		await act(async () => { input.props.onChangeText('README を直して'); });
+		expect(send().props.accessibilityHint).toBeUndefined();
+	});
+
+	it('設定の確認が要るチップだけ、警告を読み上げのヒントと「!」のアイコンでも示す', async () => {
+		mockListCloudSessions.mockResolvedValue([]);
+		const root = await render(homeProps);
+		const chip = (prefix: string) => {
+			const isChip = (n: ReactTestInstance | null) => n?.props?.accessibilityRole === 'button' && typeof n.props?.accessibilityLabel === 'string' && n.props.accessibilityLabel.startsWith(prefix) && typeof n.props?.onPress === 'function';
+			return root.findAll(n => isChip(n) && !isChip(n.parent))[0];
+		};
+		// GitHub 未連携・URL 未入力なので「始める場所」は確認が要る
+		const source = chip('始める場所: ');
+		expect(source.props.accessibilityHint).toBe('設定の確認が必要です');
+		expect(iconNames(source)).toContain('alert-circle');
+		// 既定のモデルは確認不要なのでヒントもアイコンも出さない
+		const model = chip('モデル: ');
+		expect(model.props.accessibilityHint).toBeUndefined();
+		expect(iconNames(model)).not.toContain('alert-circle');
+	});
+});
+
 // --- (b)〜(e) 詳細の送信・再試行 ---------------------------------------------
 
 describe('CloudAgentsScreen セッション詳細の送信失敗と再試行 (FR-003 / FR-005)', () => {

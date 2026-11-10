@@ -45,7 +45,11 @@ const DrawerItem = ({ icon, label, title, locked, current, onPress }: {
 		style={({ pressed }) => [styles.drawerItem, current && styles.drawerItemCurrent, pressed && styles.sheetRowPressed]}
 	>
 		<Icon name={icon} size={20} color={locked ? colors.fgFaint : colors.fg} />
-		<Text style={[styles.drawerItemLabel, locked && styles.drawerItemLabelLocked]} numberOfLines={1}>{label}</Text>
+		<View style={styles.flex}>
+			<Text style={[styles.drawerItemLabel, locked && styles.drawerItemLabelLocked]} numberOfLines={1}>{label}</Text>
+			{/* ロックは色だけに任せず、鍵と説明の文言でも示す (FR-016) */}
+			{locked ? <Text style={styles.drawerItemNote}>PC に接続すると使えます</Text> : null}
+		</View>
 		{locked ? <Icon name='lock' size={13} color={colors.fgFaint} /> : null}
 	</Pressable>
 );
@@ -311,19 +315,23 @@ const styles = StyleSheet.create({
 		paddingHorizontal: spacing.md,
 		borderRadius: radius.md,
 	},
-	drawerItemLabel: { flex: 1, color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
-	drawerItemLabelLocked: { color: colors.fgFaint },
+	drawerItemLabel: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
+	drawerItemLabelLocked: { color: colors.fgMuted },
+	// bgSidebar 上で 4.5:1 を満たすよう fgMuted (fgFaint は 4.09:1 で不足)
+	drawerItemNote: { color: colors.fgMuted, fontSize: fontSize.xs, lineHeight: 16 },
 	drawerItemCurrent: { backgroundColor: colors.bgHover },
-	drawerSection: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '600', paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xs },
+	drawerSection: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600', paddingHorizontal: spacing.md, paddingTop: spacing.lg, paddingBottom: spacing.xs },
 	drawerRecent: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.sm },
 	drawerRecentText: { color: colors.fgMuted, fontSize: fontSize.sm },
-	drawerRecentEmpty: { color: colors.fgFaint, fontSize: fontSize.xs, paddingHorizontal: spacing.md },
+	// bgSidebar 上で 4.5:1 を満たすよう fgMuted (fgFaint は 4.09:1 で不足)
+	drawerRecentEmpty: { color: colors.fgMuted, fontSize: fontSize.xs, paddingHorizontal: spacing.md },
 	// 見た目は小さい文字でも、操作枠は 44×44 を確保する (FR-011)
 	drawerLogout: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.sm, borderRadius: radius.sm },
 	drawerRecentError: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.md },
 	drawerRecentErrorText: { flex: 1, color: colors.danger, fontSize: fontSize.xs },
 	drawerRetry: { minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.sm, borderRadius: radius.sm },
-	drawerRetryText: { color: colors.accentText, fontSize: fontSize.sm, fontWeight: '600' },
+	// accentText は bgSidebar 上で約 4.26:1 で不足するため、承認帯 (R-03) と同じく fgStrong + 下線で操作を示す
+	drawerRetryText: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600', textDecorationLine: 'underline' },
 	drawerLogoutText: { color: colors.fgMuted, fontSize: fontSize.xs, fontWeight: '600' },
 	drawerAccount: {
 		flexDirection: 'row',

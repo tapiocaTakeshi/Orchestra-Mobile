@@ -13,12 +13,13 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { TermsAgreementGate } from './src/components/TermsSheet';
-import { BackProvider, Icon, Loading, ToastHost, ToastProvider } from './src/components/ui';
+import { ApprovalBar } from './src/components/ApprovalBar';
+import { BackProvider, Loading, ToastHost, ToastProvider } from './src/components/ui';
 import { OpenPage, PageKey, canOpenPage, pushPage } from './src/navigation';
 import { CloudAgentsScreen } from './src/screens/CloudAgentsScreen';
 import { DocumentsScreen } from './src/screens/DocumentsScreen';
@@ -33,7 +34,7 @@ import { SocialScreen } from './src/screens/SocialScreen';
 import { TuningScreen } from './src/screens/TuningScreen';
 import { AppProvider, useApp } from './src/state/AppContext';
 import { DivisionAuthProvider, useDivisionAuth } from './src/state/DivisionAuthContext';
-import { colors, fontSize, spacing } from './src/theme';
+import { colors } from './src/theme';
 
 const PageContent = ({ page, onOpenPage, cloudSessionId }: { page: PageKey; onOpenPage: OpenPage; cloudSessionId: string | null }) => {
 	switch (page) {
@@ -143,12 +144,7 @@ const Shell = () => {
 			<BackProvider value={popPage}>
 				{/* ページを見ているあいだに承認を求められても気づけるよう、上に細い帯を出す */}
 				{awaitingApproval ? (
-					<Pressable accessibilityRole='button' onPress={() => { setPcChatOpen(true); setPage(null); }} style={styles.approvalBar}>
-						<View style={styles.approvalDot} />
-						<Text style={styles.approvalText}>ツールの実行が確認待ちです</Text>
-						<Text style={styles.approvalLink}>チャットへ</Text>
-						<Icon name='chevron-right' size={14} color={colors.fg} />
-					</Pressable>
+					<ApprovalBar onPress={() => { setPcChatOpen(true); setPage(null); }} />
 				) : null}
 				{/* key: 重なりか開くセッションが変わったら作り直す (カンバンの「クラウドで開く」で、開くセッションを渡し直す) */}
 				<PageContent key={`${visibleStack.length}:${openPage}:${cloudSessionId ?? ''}`} page={openPage} onOpenPage={pushFromPage} cloudSessionId={cloudSessionId} />
@@ -191,17 +187,4 @@ const styles = StyleSheet.create({
 	body: {
 		flex: 1,
 	},
-	approvalBar: {
-		flexDirection: 'row',
-		alignItems: 'center',
-		gap: spacing.sm,
-		minHeight: 40,
-		paddingHorizontal: spacing.lg,
-		backgroundColor: colors.bgSidebar,
-		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.border,
-	},
-	approvalDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.warning },
-	approvalText: { flex: 1, color: colors.fg, fontSize: fontSize.xs + 1 },
-	approvalLink: { color: colors.accentText, fontSize: fontSize.xs + 1, fontWeight: '600' },
 });

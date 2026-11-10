@@ -305,12 +305,17 @@ export const ChipGroup = <T extends string>({ options, value, onChange }: {
 );
 
 
-/** 2〜4 択の切り替え。タブの中のタブ (表示モードなど) に使う。 */
-export const SegmentedControl = <T extends string>({ options, value, onChange, style }: {
+/**
+ * 2〜4 択の切り替え。タブの中のタブ (表示モードなど) に使う。
+ * itemMinHeight は各ボタンの押せる枠の最小高さ (既定 34)。主要な一覧の絞り込みなど、
+ * 押しやすさを優先する場所だけ 44 以上を渡す。
+ */
+export const SegmentedControl = <T extends string>({ options, value, onChange, style, itemMinHeight }: {
 	options: { value: T; label: string }[];
 	value: T;
 	onChange: (v: T) => void;
 	style?: ViewStyle;
+	itemMinHeight?: number;
 }) => (
 	<View accessibilityRole='tablist' style={[styles.segmented, style]}>
 		{options.map(opt => {
@@ -321,7 +326,7 @@ export const SegmentedControl = <T extends string>({ options, value, onChange, s
 					accessibilityRole='tab'
 					accessibilityState={{ selected }}
 					onPress={() => onChange(opt.value)}
-					style={[styles.segment, selected && styles.segmentActive]}
+					style={[styles.segment, itemMinHeight !== undefined && { minHeight: itemMinHeight }, selected && styles.segmentActive]}
 				>
 					<Text style={[styles.segmentText, selected && styles.segmentTextActive]} numberOfLines={1}>{opt.label}</Text>
 				</Pressable>

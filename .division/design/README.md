@@ -12,11 +12,11 @@
 | ファイル | 対象 | 主な改善 |
 |---|---|---|
 | `login.html` | LoginScreen | 実装済みのメール＋パスワードのみ、入力補助、認証中の重複防止、失敗時のメール保持とfocus |
-| `home.html` | HomeScreen / CloudAgentsScreen | 進行中・承認待ちの優先表示、PC新規チャットのthreadId保持・同一本文再送、loading/empty/errorの排他表示 |
+| `home.html` | HomeScreen / CloudAgentsScreen | Cloud／PC混在一覧、状態別meta、条件付きfilter、独立chip scroll＋固定送信、PC新規チャットのthreadId保持・同一本文再送、loading/empty/errorの排他表示 |
 | `cloud-detail.html` | クラウド会話詳細 | 承認・継続待ちの明示、pendingActionによる操作種別・引数保持、空入力の目標継続再試行、古いerror解除 |
 | `remote-chat.html` | RemoteScreen | 最終受信内容・draft保持、4種の接続状態・経路表示、inline error、同一本文の再試行 |
 | `projects.html` | ProjectsScreen | 検索・一覧状態、保存／削除の進行と失敗、projectId・name・agentsを保持した再保存、focus復帰 |
-| `navigation.html` | Drawer / page stack | Android戻る、Mobile／Webの違い、overlayの優先順位、focusとscroll位置の復帰 |
+| `navigation.html` | Drawer / account / approval / page stack | DRAWER_PAGES順、鍵＋説明のロック、最近の会話のloading／empty／error＋再試行、アカウントシート、条件付き承認帯、Android戻る、focusとscroll位置の復帰 |
 
 いずれも新しいAPI・機能を追加する仕様ではなく、既存画面・認証・接続・保存処理へ適用するUX設計です。詳細な受け入れ条件は `../specification.md`、実装対応は `src/design/screenMap.ts` を参照します。
 
@@ -29,12 +29,13 @@
 - 主タスクは「指示を送り、進行と承認を把握する」。成功指標は通常送信2操作、失敗後の再試行1操作。
 - 常設sidebar、重複banner、競合する主操作を増やさず、詳細設定・診断・危険操作は必要時に表示する。
 - 接続・実行・失敗は色だけでなく文字で示す。再試行可能な失敗はtoastで消さずinline errorを残す。
-- 色・spacing・radiusは既存 `src/design/tokens.ts` と一致するため維持。全新規ページは同じ `:root` とdark modeを持つ。
+- 色・spacing・radiusの値は維持し、対象画面の実装では既存 `src/theme.ts` と `useTheme` を優先する。`src/design/tokens.ts` 等との全体統合・一括改名は対象外。各HTMLページは同じ `:root` とdark modeを持つ。
 - タッチ目標はReact NativeのPressable自体を44×44pt以上、Webを44×44px以上にする。hitSlopだけで実寸を担保せず、隣接する操作枠を重ねない。
 - 上流の `paper.md` に実測所見はないため、実装確認と仕様要件を根拠にした設計であり、利用者テスト結果ではない。
 - レビューISS-04/07/08を反映し、再試行はcanSendや現在のdraftに依存させず、失敗した操作の種別・引数を保持する。draft編集・対象操作成功・別操作成功で古いerrorを解除し、pollingや再接続で自動再送しない。
 - タスク12ではレビューISS-09/10/12/14を反映。PC新規送信はnewThread成功後のthreadIdを保持し、sendPrompt失敗後は同じthreadId・本文だけを再送する。再試行・再接続は実寸44×44pt以上とし、sendable=falseや切断時は無効ボタンを置かず、不能理由と次の有効操作を示す。クラウド継続の回復はcomposer直上のinline errorに一本化する。
-- FR-008の文書・カンバン・共有・コストはloading/empty/success/errorと回復操作を共通表で設計した。既存画面構造・認証・API・配色・spacing・radius・7画面IDは、後方互換性と既存操作維持のため変更しない。
+- 過去の設計で文書・カンバン・共有・コストに定めたloading/empty/success/errorと回復操作は維持するが、今回の実装対象外。現行FR-008はCloud／PC混在一覧の階層を指す。既存画面構造・認証・API・配色・spacing・radius・7画面IDは、後方互換性と既存操作維持のため変更しない。
+- タスク5/11では、主一覧よりshortcutの階層を下げ、状態名を伴う15px title／12px・18px metaへ統一。chip scrollと固定送信を分離し、ループchipは追加しない。drawerは閉じたら非描画、全幅でoverlayと単一カラムを維持する。
 
 ## 検証
 

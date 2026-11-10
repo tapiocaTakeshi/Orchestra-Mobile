@@ -43,10 +43,12 @@ import {
 	Pressable,
 	RefreshControl,
 	ScrollView,
+	StyleProp,
 	StyleSheet,
 	Text,
 	TextInput,
 	View,
+	ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -235,12 +237,67 @@ const useForeground = (): boolean => {
 	return foreground;
 };
 
-/** 状態の印。動いているあいだはくるくる、止まっていれば色の点。 */
-const StatusMark = ({ status }: { status: CloudSessionStatus }) => (
-	isActive(status)
-		? <AiLoading size={20} />
-		: <View style={styles.statusDotWrap}><Dot color={cloudStatusColor(status)} /></View>
-);
+/** 止まっている状態の印。色だけで区別しないよう、状態ごとに形の違うアイコンを使う (FR-003 / FR-008) */
+const STATUS_ICONS: Partial<Record<CloudSessionStatus, IconName>> = {
+	idle: 'check-circle',
+	awaiting_approval: 'pause-circle',
+	failed: 'alert-circle',
+	cancelled: 'slash',
+};
+
+/** 状態の印。動いているあいだはくるくる、止まっていれば状態ごとの形のアイコン (色も併用)。 */
+const StatusMark = ({ status }: { status: CloudSessionStatus }) => {
+	if (isActive(status)) return <AiLoading size={20} />;
+	const icon = STATUS_ICONS[status];
+	return (
+		<View style={styles.statusDotWrap}>
+			{icon ? <Icon name={icon} size={14} color={cloudStatusColor(status)} /> : <Dot color={cloudStatusColor(status)} />}
+		</View>
+	);
+};
+
+/** 右端のフェードの段 (薄い → 濃い)。グラデーション用の依存は足さず、透明度を変えた帯を並べて表す */
+const SCROLL_FADE_ALPHAS = ['33', '77', 'bb'] as const;
+
+/**
+ * 横スクロールの列。右に続きがあるあいだだけ、右端に地の色へ溶けるフェードを重ねて
+ * 「横に続いている」ことを示す (FR-007 / FR-010)。フェードは操作・読み上げの対象にしない。
+ */
+const HorizontalScrollHint = ({ background, style, contentContainerStyle, accessibilityLabel, children }: {
+	/** 列の後ろの地の色 (フェードをこの色へ溶かす) */
+	background: string;
+	style?: StyleProp<ViewStyle>;
+	contentContainerStyle?: StyleProp<ViewStyle>;
+	accessibilityLabel?: string;
+	children: React.ReactNode;
+}) => {
+	const [viewport, setViewport] = useState(0);
+	const [content, setContent] = useState(0);
+	const [offset, setOffset] = useState(0);
+	const more = viewport > 0 && content - viewport - offset > 1;
+	return (
+		<View style={[styles.scrollHintZone, style]}>
+			<ScrollView
+				horizontal
+				showsHorizontalScrollIndicator={false}
+				keyboardShouldPersistTaps='handled'
+				accessibilityLabel={accessibilityLabel}
+				onLayout={e => setViewport(e.nativeEvent.layout.width)}
+				onContentSizeChange={width => setContent(width)}
+				onScroll={e => setOffset(e.nativeEvent.contentOffset.x)}
+				scrollEventThrottle={32}
+				contentContainerStyle={contentContainerStyle}
+			>
+				{children}
+			</ScrollView>
+			{more ? (
+				<View accessibilityElementsHidden importantForAccessibility='no-hide-descendants' style={styles.scrollFade}>
+					{SCROLL_FADE_ALPHAS.map(alpha => <View key={alpha} style={[styles.scrollFadeStep, { backgroundColor: withAlpha(background, alpha) }]} />)}
+				</View>
+			) : null}
+		</View>
+	);
+};
 
 // ---------------------------------------------------------------------------
 // ショートカット (プロジェクト / コスト / カンバン)
@@ -256,7 +313,7 @@ const ShortcutRow = ({ items, connected, onOpen }: {
 }) => {
 	const toast = useToast();
 	return (
-		<ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.noGrow} contentContainerStyle={styles.shortcutRow}>
+		<HorizontalScrollHint background={colors.bg} accessibilityLabel='ショートカット。横にスクロールできます' contentContainerStyle={styles.shortcutRow}>
 			{items.map(item => {
 				const enabled = canOpenPage(item.page, connected);
 				return (
@@ -268,13 +325,13 @@ const ShortcutRow = ({ items, connected, onOpen }: {
 						onPress={() => (enabled ? onOpen(item.page) : toast.show(`${item.label}は PC に接続すると使えます`, 'info'))}
 						style={({ pressed }) => [styles.shortcut, !enabled && styles.shortcutDisabled, pressed && enabled && styles.rowPressed]}
 					>
-						<Icon name={enabled ? item.icon : 'lock'} size={14} color={enabled ? colors.fgMuted : colors.fgFaint} />
-						<Text style={[styles.shortcutLabel, !enabled && { color: colors.fgFaint }]} numberOfLines={1}>{item.label}</Text>
+						<Icon name={enabled ? item.icon : 'lock'} size={14} color={colors.fgMuted} />
+						<Text style={[styles.shortcutLabel, !enabled && styles.shortcutLabelLocked]} numberOfLines={1}>{item.label}</Text>
 						{enabled && item.detail ? <Text style={styles.shortcutDetail} numberOfLines={1}>{item.detail}</Text> : null}
 					</Pressable>
 				);
 			})}
-		</ScrollView>
+		</HorizontalScrollHint>
 	);
 };
 
@@ -856,7 +913,8 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 					style={styles.composerInput}
 				/>
 				<View style={styles.composerBar}>
-					<ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps='handled' style={styles.flex} contentContainerStyle={styles.composerChips}>
+					{/* チップだけが横にスクロールする。送信ボタンはスクロールの外に固定して常に見せる (FR-010) */}
+					<HorizontalScrollHint background={colors.bgElevated} accessibilityLabel='起動の設定。横にスクロールできます' style={styles.flex} contentContainerStyle={styles.composerChips}>
 						{onTargetPress ? (
 							<ComposerChip
 								icon={toPc ? 'monitor' : 'cloud'}
@@ -899,12 +957,13 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 							accessibilityLabel='コスト調整を開く'
 							onPress={() => setCostOpen(true)}
 						/>
-					</ScrollView>
+					</HorizontalScrollHint>
 					<SendButton
 						icon='arrow-up'
 						disabled={!prompt || sendingToPc}
 						loading={sendingToPc}
 						accessibilityLabel={toPc ? `PC ${pcLabel} に送る` : count > 1 ? `${count} 個のセッションを起動` : 'セッションを起動'}
+						accessibilityHint={sendingToPc ? 'PC に送信しています' : !prompt ? '指示を書くと送信できます' : undefined}
 						onPress={submit}
 					/>
 				</View>
@@ -929,7 +988,10 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	);
 };
 
-/** 入力欄の下の設定チップ。 */
+/**
+ * 入力欄の下の設定チップ。見た目は小さな丸い札のまま、押せる枠は高さ 44 を実寸で確保する (FR-011)。
+ * 確認が要るときは警告色に加えて「!」のアイコンと破線の枠、読み上げのヒントでも示す。
+ */
 const ComposerChip = ({ icon, label, warn, accessibilityLabel, onPress }: {
 	icon: IconName;
 	label: string;
@@ -940,27 +1002,32 @@ const ComposerChip = ({ icon, label, warn, accessibilityLabel, onPress }: {
 	<Pressable
 		accessibilityRole='button'
 		accessibilityLabel={accessibilityLabel}
-		hitSlop={{ top: 6, bottom: 6 }}
+		accessibilityHint={warn ? '設定の確認が必要です' : undefined}
 		onPress={onPress}
-		style={({ pressed }) => [styles.composerChip, warn && styles.composerChipWarn, pressed && styles.rowPressed]}
+		style={({ pressed }) => [styles.composerChipHit, pressed && styles.rowPressed]}
 	>
-		<Icon name={icon} size={13} color={warn ? colors.warning : colors.fgMuted} />
-		<Text style={[styles.composerChipText, warn && { color: colors.warning }]} numberOfLines={1}>{label}</Text>
-		<Icon name='chevron-down' size={12} color={colors.fgFaint} />
+		<View style={[styles.composerChip, warn && styles.composerChipWarn]}>
+			<Icon name={warn ? 'alert-circle' : icon} size={13} color={warn ? colors.warning : colors.fgMuted} />
+			<Text style={[styles.composerChipText, warn && styles.composerChipTextWarn]} numberOfLines={1}>{label}</Text>
+			<Icon name='chevron-down' size={12} color={colors.fgFaint} />
+		</View>
 	</Pressable>
 );
 
 /** 入力欄の右下の丸いボタン (送信 / 停止)。 */
-const SendButton = ({ icon, disabled, loading, accessibilityLabel, onPress }: {
+const SendButton = ({ icon, disabled, loading, accessibilityLabel, accessibilityHint, onPress }: {
 	icon: IconName;
 	disabled?: boolean;
 	loading?: boolean;
 	accessibilityLabel: string;
+	/** 押せない理由・処理中であることを読み上げで補う */
+	accessibilityHint?: string;
 	onPress: () => void;
 }) => (
 	<Pressable
 		accessibilityRole='button'
 		accessibilityLabel={accessibilityLabel}
+		accessibilityHint={accessibilityHint}
 		accessibilityState={{ disabled: !!disabled || !!loading, busy: !!loading }}
 		disabled={!!disabled || !!loading}
 		hitSlop={8}
@@ -2345,6 +2412,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 
 /** これ以上の項目があるときだけ、一覧の上に絞り込み (全て / 稼働中 / 承認待ち / エラー) を出す */
 const FILTER_MIN_ITEMS = 6;
+/** 絞り込みの各ボタンの押せる枠の高さ (iOS 44pt に合わせる。他画面の SegmentedControl は既定のまま) */
+const FILTER_TAB_MIN_HEIGHT = 44;
 
 export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, onOpenPcChat }: {
 	/** 「プロジェクト」「コスト」「カンバン」を開く (App のページの重なりに積む) */
@@ -2849,6 +2918,7 @@ export const CloudAgentsScreen = ({ onOpenPage, initialSessionId, headerTitle, o
 									value={listFilter}
 									onChange={setListFilter}
 									style={styles.filterTabs}
+									itemMinHeight={FILTER_TAB_MIN_HEIGHT}
 								/>
 							) : null}
 							<View>
@@ -2960,8 +3030,6 @@ const styles = StyleSheet.create({
 	wrapRow: { flexWrap: 'wrap' },
 	alignStart: { alignSelf: 'flex-start' },
 	rowPressed: { opacity: 0.6 },
-	noGrow: { flexGrow: 0 },
-
 	// 一覧
 	content: {
 		flexGrow: 1,
@@ -2969,19 +3037,26 @@ const styles = StyleSheet.create({
 		paddingBottom: spacing.lg,
 	},
 	shortcutRow: { gap: spacing.sm, paddingVertical: spacing.md },
+	// ショートカットは一覧より一段低い階層。文字拡大で切れないよう固定高にせず、押せる枠は 44 を確保する (FR-004 / FR-007)
 	shortcut: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.xs + 2,
-		height: 32,
+		minHeight: 44,
 		paddingHorizontal: spacing.md,
 		borderRadius: 999,
 		borderWidth: 1,
 		borderColor: colors.border,
 	},
-	shortcutDisabled: { opacity: 0.6 },
+	// ロック中は透明度で薄めず (コントラストを落とさない)、鍵のアイコンと破線の枠で区別する (FR-003 / FR-007)
+	shortcutDisabled: { borderStyle: 'dashed', borderColor: colors.borderStrong },
 	shortcutLabel: { color: colors.fg, fontSize: fontSize.xs + 1, fontWeight: '500' },
+	shortcutLabelLocked: { color: colors.fgMuted },
 	shortcutDetail: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
+	// 横スクロールの右端フェード (HorizontalScrollHint)
+	scrollHintZone: { position: 'relative' },
+	scrollFade: { position: 'absolute', top: 0, bottom: 0, right: 0, width: 24, flexDirection: 'row', pointerEvents: 'none' },
+	scrollFadeStep: { flex: 1 },
 	launching: {
 		flexDirection: 'row',
 		alignItems: 'center',
@@ -3016,9 +3091,10 @@ const styles = StyleSheet.create({
 		borderBottomColor: colors.border,
 	},
 	rowTop: { gap: spacing.sm },
-	rowTitle: { color: colors.fg, fontSize: fontSize.sm, fontWeight: '500' },
+	// 題名が第一階層、状態・接続先・料金などは第二階層 (FR-008)
+	rowTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '500' },
 	rowTime: { color: colors.fgFaint, fontSize: fontSize.xs, fontVariant: ['tabular-nums'] },
-	rowMeta: { color: colors.fgFaint, fontSize: fontSize.xs, fontFamily: MONO, marginTop: 3 },
+	rowMeta: { color: colors.fgMuted, fontSize: fontSize.xs, lineHeight: 18, fontFamily: MONO, marginTop: 2 },
 	statusDotWrap: { width: 20, alignItems: 'center' },
 
 	// 入力欄 (一覧・詳細で共通)
@@ -3054,21 +3130,25 @@ const styles = StyleSheet.create({
 		textAlignVertical: 'top',
 	},
 	composerBar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-	composerChips: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2 },
+	composerChips: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingRight: spacing.lg },
+	// 押せる枠 (実寸で高さ 44)。見た目の札 (composerChip) はこの中に置く (FR-011)
+	composerChipHit: { minHeight: 44, justifyContent: 'center' },
 	composerChip: {
 		flexDirection: 'row',
 		alignItems: 'center',
 		gap: spacing.xs,
 		maxWidth: 220,
-		height: 28,
+		minHeight: 28,
 		paddingHorizontal: spacing.sm + 2,
+		paddingVertical: spacing.xs,
 		borderRadius: 999,
 		borderWidth: 1,
 		borderColor: colors.border,
 		backgroundColor: colors.bg,
 	},
-	composerChipWarn: { borderColor: withAlpha(colors.warning, '66') },
+	composerChipWarn: { borderColor: colors.warning, borderStyle: 'dashed' },
 	composerChipText: { flexShrink: 1, color: colors.fgMuted, fontSize: fontSize.xs, fontFamily: MONO },
+	composerChipTextWarn: { color: colors.warning, fontWeight: '600' },
 	// 送信・停止は主要操作なので、hitSlop に頼らず実寸で 44×44 を確保する (FR-011)
 	sendButton: {
 		width: 44,
@@ -3078,7 +3158,7 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		backgroundColor: colors.accent,
 	},
-	sendButtonDisabled: { backgroundColor: colors.accent, opacity: 0.4 },
+	sendButtonDisabled: { backgroundColor: colors.accent, opacity: 0.45 },
 
 	// 起動の設定
 	sheetContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
