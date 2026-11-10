@@ -1,0 +1,226 @@
+{
+  "version": 1,
+  "enabled": true,
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "data": {},
+      "position": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": "step-1",
+      "type": "role",
+      "data": {
+        "role": "file-searcher",
+        "title": "既存画面とデザイン資産の調査",
+        "instruction": "/home/daytona/workspace を読み取り専用で調査する。.division/goal.md は変更しない。既存の .division/paper.md、.division/specification.md、.division/design/ の有無と内容を確認し、App.tsx、src/screens、src/components、src/design、src/theme.ts、package.json、docs/design-claude-style.md、既存レビューを調べる。現在の画面構成、デザイン方針、再利用可能な部品、視認性・余白・操作性の課題、実行可能な検証方法を、根拠となるファイルとともに調査メモとして返す。Web調査やファイル変更は行わない。"
+      },
+      "position": {
+        "x": 270,
+        "y": -75
+      }
+    },
+    {
+      "id": "step-2",
+      "type": "role",
+      "data": {
+        "role": "searcher",
+        "title": "UI改善の外部根拠を収集",
+        "instruction": "既存機能を維持したアプリのデザイン改善を前提に、React Native・Expoの公式ドキュメント、Apple・Googleのデザインガイド、アクセシビリティの一次資料を調査する。文字の読みやすさ、配色とコントラスト、タップ領域、画面の情報階層、状態表示について、適用条件と出典付きの短い調査メモを返す。ワークスペースの探索は行わず、実際の採用技術やバージョンは未確認として扱う。"
+      },
+      "position": {
+        "x": 270,
+        "y": 75
+      }
+    },
+    {
+      "id": "step-3",
+      "type": "role",
+      "data": {
+        "role": "researcher",
+        "title": "改善方針と優先順位を整理",
+        "instruction": "両調査メモを統合し、.division/goal.md の『デザインを改善して』を判断基準として .division/paper.md を更新する。更新前に既存内容を確認し、存在する場合は保持して必要箇所だけ差分更新する。既存のブランドと主要操作を尊重し、情報階層、文字組み、余白、配色、共通部品、各操作状態の改善を優先順位付きで整理する。確認できた事実と仮定を区別し、機能追加や不要な依存導入は対象外とする。"
+      },
+      "position": {
+        "x": 540,
+        "y": 0
+      }
+    },
+    {
+      "id": "step-4",
+      "type": "role",
+      "data": {
+        "role": "writer",
+        "title": "デザイン改善の仕様を定義",
+        "instruction": "更新後の .division/paper.md と既存実装を基に、.division/specification.md を確認して差分更新する。対象画面と共通部品、維持する機能・遷移、具体的な見た目の変更、画面幅やセーフエリアへの対応、アクセシビリティ、読み込み・空・エラー・無効状態を定義する。受け入れ条件は対象画面ごとに検証可能な形で記載し、変更対象外も明示する。.division/goal.md は変更しない。"
+      },
+      "position": {
+        "x": 810,
+        "y": 0
+      }
+    },
+    {
+      "id": "approval-4",
+      "type": "approval",
+      "data": {
+        "title": "デザイン改善の仕様を定義 を確認"
+      },
+      "position": {
+        "x": 1080,
+        "y": 0
+      }
+    },
+    {
+      "id": "step-5",
+      "type": "role",
+      "data": {
+        "role": "designer",
+        "title": "統一感のある画面デザインを作成",
+        "instruction": "更新後の論文・仕様書と既存の .division/design/、docs/design-claude-style.md、実際の画面構造を確認する。既存デザイン成果物を保持しながら .division/design/ 内を差分更新し、対象画面の具体的なレイアウトと共通部品の見た目を示す。色、文字サイズ、行間、余白、角丸、アイコン、操作状態を実装できる値で指定する。ブランドと使い慣れた操作を維持しつつ、視線誘導と読みやすさを改善する。画像生成は必要な場合のみ行う。"
+      },
+      "position": {
+        "x": 1350,
+        "y": 0
+      }
+    },
+    {
+      "id": "approval-5",
+      "type": "approval",
+      "data": {
+        "title": "統一感のある画面デザインを作成 を確認"
+      },
+      "position": {
+        "x": 1620,
+        "y": 0
+      }
+    },
+    {
+      "id": "step-6",
+      "type": "role",
+      "data": {
+        "role": "coder",
+        "title": "仕様とデザインに沿って実装",
+        "instruction": "更新後の .division/specification.md と .division/design/ に準拠してソースコードを修正する。既存テーマと共通部品を優先的に活用し、画面間の配色・余白・文字組み・操作状態を統一する。既存の機能、API接続、状態管理、画面遷移を維持し、無関係な改修や不要な依存追加を避ける。利用可能な型チェック、テスト、ビルド確認を実行し、可能なら対象画面を表示して確認する。変更ファイル、実行結果、環境制約による未検証事項を報告する。再実行時はレビュー指摘を是正する。"
+      },
+      "position": {
+        "x": 2160,
+        "y": 0
+      }
+    },
+    {
+      "id": "step-7",
+      "type": "role",
+      "data": {
+        "role": "reviewer",
+        "title": "見た目と既存機能の品質確認",
+        "instruction": ".division/goal.md、更新後の論文・仕様書・デザインと実装を照合する。対象画面の情報階層、余白、文字の読みやすさ、配色、操作領域、各状態表示、小さい画面での崩れ、既存機能と画面遷移の回帰を確認する。実行可能な検証は実施し、実施できない項目は未検証として明記する。仕様の受け入れ条件ごとに合否と根拠を示し、修正が必要な場合は担当ロールと具体的な是正内容を返す。最終結果に変更概要と残課題をまとめる。"
+      },
+      "position": {
+        "x": 2430,
+        "y": 0
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "data": {},
+      "position": {
+        "x": 2970,
+        "y": 0
+      }
+    },
+    {
+      "id": "loop-1",
+      "type": "loop",
+      "data": {
+        "loop": "while",
+        "goal": "実装が仕様書とデザインの受け入れ条件を満たし、実行可能な検証が成功し、重大な表示崩れ・操作不良・既存機能の回帰に関するレビュー指摘が解消されていること。環境上検証できない項目は明示されていること。",
+        "maxIterations": 3
+      },
+      "position": {
+        "x": 1890,
+        "y": 0
+      }
+    },
+    {
+      "id": "loop-end-1",
+      "type": "loopEnd",
+      "data": {},
+      "position": {
+        "x": 2700,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e-start-step-1",
+      "source": "start",
+      "target": "step-1"
+    },
+    {
+      "id": "e-start-step-2",
+      "source": "start",
+      "target": "step-2"
+    },
+    {
+      "id": "e-step-1-step-3",
+      "source": "step-1",
+      "target": "step-3"
+    },
+    {
+      "id": "e-step-2-step-3",
+      "source": "step-2",
+      "target": "step-3"
+    },
+    {
+      "id": "e-step-3-step-4",
+      "source": "step-3",
+      "target": "step-4"
+    },
+    {
+      "id": "e-step-4-approval-4",
+      "source": "step-4",
+      "target": "approval-4"
+    },
+    {
+      "id": "e-approval-4-step-5",
+      "source": "approval-4",
+      "target": "step-5"
+    },
+    {
+      "id": "e-step-5-approval-5",
+      "source": "step-5",
+      "target": "approval-5"
+    },
+    {
+      "id": "e-approval-5-loop-1",
+      "source": "approval-5",
+      "target": "loop-1"
+    },
+    {
+      "id": "e-step-6-step-7",
+      "source": "step-6",
+      "target": "step-7"
+    },
+    {
+      "id": "e-loop-end-1-end",
+      "source": "loop-end-1",
+      "target": "end"
+    },
+    {
+      "id": "e-loop-1-step-6",
+      "source": "loop-1",
+      "target": "step-6"
+    },
+    {
+      "id": "e-step-7-loop-end-1",
+      "source": "step-7",
+      "target": "loop-end-1"
+    }
+  ]
+}

@@ -223,6 +223,22 @@ describe('HomeScreen のナビゲーションドロワー', () => {
 		// ドロワーは開いたまま (案内を見て別の項目を選べる)
 		expect(findTextNode(r.root, DRAWER_ONLY_TEXT)).toBeTruthy();
 	});
+
+	it('PC 接続が要る項目には、押す前から「PC に接続すると使えます」の説明文を出す (FR-016)', async () => {
+		const r = await render();
+		await press(findButtonsByLabel(r.root, 'ナビゲーションドロワーを開く')[0]);
+
+		// 未接続なのでロック項目 (カンバンなど) の数だけ説明文が出る。開ける項目 (ソーシャル) には出ない
+		const notes = r.root.findAll(
+			node => node.children.length > 0 && node.children.every(c => typeof c === 'string') && node.children.join('') === 'PC に接続すると使えます',
+			{ deep: true },
+		);
+		expect(notes.length).toBeGreaterThanOrEqual(1);
+		const socialRow = findRowByTitle(r.root, 'ソーシャル (共有)');
+		expect(findTextNode(socialRow, 'PC に接続すると使えます')).toBeUndefined();
+		const kanbanRow = findRowByTitle(r.root, 'カンバン');
+		expect(findTextNode(kanbanRow, 'PC に接続すると使えます')).toBeTruthy();
+	});
 });
 
 describe('HomeScreen のドロワー「最近の会話」の状態 (FR-004 / FR-008)', () => {
