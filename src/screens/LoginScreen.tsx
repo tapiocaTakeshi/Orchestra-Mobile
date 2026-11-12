@@ -101,13 +101,16 @@ export const LoginScreen = () => {
 									textContentType='password'
 									returnKeyType='go'
 									onSubmitEditing={() => { void onSubmit(); }}
-										style={styles.flex}
+									style={styles.passwordInput}
 								/>
-								<IconButton
-									icon={showPassword ? 'eye-off' : 'eye'}
-									accessibilityLabel={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
-									onPress={() => setShowPassword(v => !v)}
-								/>
+								{/* 目のボタンは入力欄の中の右端に置く (メールアドレスの欄と幅を揃える) */}
+								<View style={styles.passwordToggle}>
+									<IconButton
+										icon={showPassword ? 'eye-off' : 'eye'}
+										accessibilityLabel={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+										onPress={() => setShowPassword(v => !v)}
+									/>
+								</View>
 							</View>
 							<TermsCheckbox
 								checked={agreed}
@@ -166,10 +169,12 @@ const styles = StyleSheet.create({
 	},
 	heroMarkText: { color: colors.accent, fontSize: 28, lineHeight: 32 },
 	headline: { color: colors.fgStrong, fontSize: fontSize.xl, lineHeight: 40, fontWeight: '400', fontFamily: SERIF },
-	heroDetail: { color: colors.fgFaint, fontSize: fontSize.xs + 1, lineHeight: 21 },
+	heroDetail: { color: colors.fgMuted, fontSize: fontSize.xs + 1, lineHeight: 21 },
 	form: { gap: spacing.sm },
 	label: { color: colors.fgMuted, fontSize: fontSize.xs, marginTop: spacing.xs },
-	passwordRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+	passwordRow: { justifyContent: 'center' },
+	passwordInput: { paddingRight: 48 },
+	passwordToggle: { position: 'absolute', right: 1, top: 0, bottom: 0, justifyContent: 'center' },
 	bannerFlush: { margin: 0 },
 	loginButton: {
 		marginTop: spacing.md,
@@ -183,7 +188,7 @@ const styles = StyleSheet.create({
 	},
 	loginButtonPressed: { backgroundColor: colors.accentPressed },
 	loginButtonBusy: { opacity: 0.6 },
-	loginText: { color: colors.onAccent, fontSize: fontSize.sm - 1, fontWeight: '600' },
+	loginText: { color: colors.onAccent, fontSize: fontSize.sm, fontWeight: '600' },
 	legalLinks: { alignItems: 'center', marginTop: spacing.sm },
 	noteText: { color: colors.fgFaint, fontSize: fontSize.xs, textAlign: 'center', marginTop: spacing.sm },
 });

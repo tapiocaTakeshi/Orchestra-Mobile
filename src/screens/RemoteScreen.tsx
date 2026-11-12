@@ -49,7 +49,9 @@ import {
 	Screen,
 	SectionTitle,
 	Sheet,
+	useAutoGrow,
 	useToast,
+	webNoOutline,
 } from '../components/ui';
 import { oneLine, relativeTimeFromIso } from '../lib/format';
 import { ChatConnectionBadge, REMOTE_CONNECTION_LABELS, RemoteConnectionStatus, chatConnectionBadge } from '../lib/remoteSession';
@@ -213,6 +215,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 
 	const toast = useToast();
 	const [draft, setDraft] = useState('');
+	const grow = useAutoGrow(44, 160);
 	const [sheet, setSheet] = useState<'menu' | 'cost' | 'documents' | 'review' | null>(null);
 	const [sending, setSending] = useState(false);
 	/** 送信に失敗した本文と理由。再試行は現在の入力欄ではなく、この本文を同じ sendPrompt で送り直す (FR-003 / FR-005) */
@@ -525,7 +528,8 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 							selectionColor={colors.accentText}
 							accessibilityLabel='エージェントへの指示'
 							multiline
-							style={styles.composerInput}
+							onContentSizeChange={grow.onContentSizeChange}
+							style={[styles.composerInput, webNoOutline, grow.style]}
 						/>
 						<View style={styles.composerBar}>
 							<Pressable
@@ -635,9 +639,10 @@ const styles = StyleSheet.create({
 		paddingHorizontal: spacing.xs,
 		paddingVertical: spacing.sm,
 		borderBottomWidth: StyleSheet.hairlineWidth,
-		borderBottomColor: colors.borderStrong,
+		borderBottomColor: colors.border,
 	},
-	headerInHome: { paddingLeft: spacing.lg, minHeight: 56 },
+	// 見出しの先頭 (戻る / ☰) は、ページやクラウドのチャットの「戻る」と同じ位置に置く
+	headerInHome: { paddingLeft: spacing.xs, minHeight: 56 },
 	headerStatus: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, paddingHorizontal: spacing.xs },
 	workspaceName: { color: colors.fgStrong, fontSize: fontSize.sm + 1, fontWeight: '600' },
 	statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs + 2, marginTop: 2 },
@@ -745,7 +750,7 @@ const styles = StyleSheet.create({
 		borderColor: withAlpha(colors.warning, '66'),
 		backgroundColor: colors.bgElevated,
 	},
-	approvalKicker: { color: colors.warning, fontSize: fontSize.xs, fontWeight: '700' },
+	approvalKicker: { color: colors.warningText, fontSize: fontSize.xs, fontWeight: '700' },
 	approvalTitle: { color: colors.fgStrong, fontSize: fontSize.sm, fontWeight: '600' },
 	approvalBody: { maxHeight: 180 },
 	approvalText: { color: colors.fg, fontSize: fontSize.xs + 1, lineHeight: 20 },

@@ -86,7 +86,7 @@ import { OpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
 import { loadLastCloudRepo, saveLastCloudRepo } from '../state/cloudStorage';
-import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
+import { colors, fontSize, inkOf, radius, spacing, withAlpha } from '../theme';
 
 const COLUMN_ROLES: { value: KanbanColumnRole; label: string }[] = [
 	{ value: 'none', label: '指定なし' },
@@ -172,9 +172,9 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 			</View>
 
 			<View style={styles.taskMetaRow}>
-				<Text style={[styles.metaText, styles.metaStrong, { color: priorityColor(task.priority) }]}>{priorityLabel(task.priority)}</Text>
-				{task.labels.map(l => <Text key={l} style={[styles.metaText, { color: labelColor(l) }]}>#{l}</Text>)}
-				{task.dueDate ? <Meta icon='clock' label={task.dueDate} color={overdue ? '#ef4444' : undefined} /> : null}
+				<Text style={[styles.metaText, styles.metaStrong, { color: inkOf(priorityColor(task.priority)) }]}>{priorityLabel(task.priority)}</Text>
+				{task.labels.map(l => <Text key={l} style={[styles.metaText, { color: inkOf(labelColor(l)) }]}>#{l}</Text>)}
+				{task.dueDate ? <Meta icon='clock' label={task.dueDate} color={overdue ? colors.danger : undefined} /> : null}
 				{progress.total > 0 ? (
 					<Meta icon='check-square' label={`${progress.done}/${progress.total}`} color={progress.done === progress.total ? '#10b981' : undefined} />
 				) : null}
@@ -182,7 +182,7 @@ const TaskCard = ({ task, isRunning, onPress }: { task: KanbanTask; isRunning: b
 				{task.assignee ? <Meta label={`@${task.assignee}`} /> : null}
 				{!task.agentEnabled ? <Meta icon='slash' label='自動実行しない' /> : null}
 				{run ? (
-					<Text style={[styles.metaText, styles.metaStrong, styles.metaEnd, { color: runStatusColor(run.status) }]}>
+					<Text style={[styles.metaText, styles.metaStrong, styles.metaEnd, { color: inkOf(runStatusColor(run.status)) }]}>
 						{runStatusLabel(run.status)}
 					</Text>
 				) : null}
@@ -466,7 +466,7 @@ const TaskDetail = ({ taskId, onClose, onRunInCloud }: {
 							{task.runs.map((run, i) => (
 								<View key={`${run.startedAt}-${i}`} style={styles.runRow}>
 									<Row style={styles.spread}>
-										<Badge label={runStatusLabel(run.status)} color={runStatusColor(run.status)} />
+										<Badge label={runStatusLabel(run.status)} color={inkOf(runStatusColor(run.status))} />
 										<Muted>{relativeTime(run.startedAt)}</Muted>
 									</Row>
 									{run.error ? <Text style={styles.errorText}>{run.error}</Text> : null}
@@ -1206,7 +1206,7 @@ const styles = StyleSheet.create({
 	taskCardPressed: { backgroundColor: colors.bgHover },
 	taskTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
 	meta: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-	metaText: { color: colors.fgFaint, fontSize: fontSize.xs - 1 },
+	metaText: { color: colors.fgFaint, fontSize: fontSize.xs },
 	metaStrong: { fontWeight: '600' },
 	metaEnd: { marginLeft: 'auto' },
 	columnHeader: {
@@ -1221,7 +1221,7 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 		fontVariant: ['tabular-nums'],
 	},
-	columnCountOver: { color: '#ef4444' },
+	columnCountOver: { color: colors.danger },
 	taskCardRunning: {
 		borderWidth: 1,
 		borderColor: withAlpha(colors.running, '80'),

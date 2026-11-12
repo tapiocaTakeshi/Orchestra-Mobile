@@ -378,7 +378,8 @@ const ProjectSearch = ({ value, onChange }: { value: string; onChange: (v: strin
 const ProjectCardActions = ({ onOpenPage, connected }: { onOpenPage?: OpenPage; connected: boolean }) => (
 	onOpenPage ? (
 		<Row style={styles.cardActions}>
-			<Button title='セッションを起動' size='sm' onPress={() => onOpenPage('cloud')} />
+			{/* 一覧の行ごとに並ぶ操作。塗りの主ボタンを何個も並べず、枠のボタンにする (アクセントは画面の主操作だけに使う) */}
+			<Button title='セッションを起動' icon='play' size='sm' variant='secondary' onPress={() => onOpenPage('cloud')} />
 			{connected ? <Button title='カンバン' size='sm' variant='secondary' onPress={() => onOpenPage('kanban')} /> : null}
 		</Row>
 	) : null
@@ -664,6 +665,8 @@ const styles = StyleSheet.create({
 	},
 	content: {
 		paddingHorizontal: spacing.lg,
+		// 検索欄が見出しの線に張り付かないように、上にも余白を取る
+		paddingTop: spacing.md,
 		paddingBottom: spacing.xl,
 		gap: spacing.md,
 	},

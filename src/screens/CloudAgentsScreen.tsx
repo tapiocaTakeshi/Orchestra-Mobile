@@ -75,7 +75,9 @@ import {
 	Toggle,
 	confirmAction,
 	useBack,
+	useAutoGrow,
 	useToast,
+	webNoOutline,
 } from '../components/ui';
 import { TuningScreen } from './TuningScreen';
 import { CloudModelPicker } from '../components/CloudModelPicker';
@@ -863,6 +865,7 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 	sendingToPc?: boolean;
 }) => {
 	const [costOpen, setCostOpen] = useState(false);
+	const grow = useAutoGrow(44, 160);
 	const toast = useToast();
 	const github = useGitHubConnection(auth);
 	const mode = repoModeOf(draft, github);
@@ -910,7 +913,8 @@ const LaunchComposer = ({ auth, projects, draft, onChange, onGoalLoopTouched, on
 					selectionColor={colors.accentText}
 					accessibilityLabel='エージェントへの指示'
 					multiline
-					style={styles.composerInput}
+					onContentSizeChange={grow.onContentSizeChange}
+					style={[styles.composerInput, webNoOutline, grow.style]}
 				/>
 				<View style={styles.composerBar}>
 					{/* チップだけが横にスクロールする。送信ボタンはスクロールの外に固定して常に見せる (FR-010) */}
@@ -1464,9 +1468,10 @@ const CommandApprovalView = ({ command, busy, error, onAnswer, onReload, loading
 				style={styles.approvalFeedback}
 			/>
 			{error ? <ErrorBanner message={error} style={styles.inlineBanner} /> : null}
-			<Row style={styles.doneActions}>
-				<Button title='許可して実行' icon='check' size='sm' loading={busy === 'approve'} disabled={!!busy} onPress={() => onAnswer('approve', '')} />
-				<Button title='拒否' icon='x' variant='secondary' size='sm' loading={busy === 'deny'} disabled={!!busy} onPress={() => onAnswer('deny', feedback)} />
+			{/* PC のチャットの承認と同じ並び: 左に拒否、右に主ボタン。どちらも実寸 44pt 以上 */}
+			<Row style={styles.approvalActions}>
+				<Button title='拒否' icon='x' variant='secondary' loading={busy === 'deny'} disabled={!!busy} onPress={() => onAnswer('deny', feedback)} style={styles.flex} />
+				<Button title='許可して実行' icon='check' loading={busy === 'approve'} disabled={!!busy} onPress={() => onAnswer('approve', '')} style={styles.flex} />
 			</Row>
 		</View>
 	);
@@ -1645,23 +1650,23 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						style={styles.approvalFeedback}
 					/>
 					{error ? <ErrorBanner message={error} style={styles.inlineBanner} /> : null}
-					<Row style={styles.doneActions}>
-						<Button
-							title='承認して続行'
-							icon='check'
-							size='sm'
-							loading={busy === 'approve'}
-							disabled={!!busy}
-							onPress={() => void submit('approve')}
-						/>
+					<Row style={styles.approvalActions}>
 						<Button
 							title='差し戻す'
 							icon='corner-up-left'
 							variant='secondary'
-							size='sm'
 							loading={busy === 'revise'}
 							disabled={!!busy || !feedback.trim()}
 							onPress={() => void submit('revise')}
+							style={styles.flex}
+						/>
+						<Button
+							title='承認して続行'
+							icon='check'
+							loading={busy === 'approve'}
+							disabled={!!busy}
+							onPress={() => void submit('approve')}
+							style={styles.flex}
 						/>
 					</Row>
 				</>
@@ -1980,6 +1985,7 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 	const [tab, setTab] = useState<'log' | 'changes'>('log');
 	const [draft, setDraft] = useState('');
 	const [sending, setSending] = useState(false);
+	const grow = useAutoGrow(44, 160);
 	/** 送信に失敗した理由。入力欄の直上に再試行と一緒に残す (下書きは消さない。FR-003 / FR-005) */
 	const [sendError, setSendError] = useState<string | null>(null);
 	/** 失敗した操作の種類と引数。再試行は現在の入力欄ではなく、これを同じ形で送り直す (FR-003) */
@@ -2360,7 +2366,8 @@ const SessionDetail = ({ auth, initial, projects, foreground, onSessionChange, o
 								selectionColor={colors.accentText}
 								accessibilityLabel='追加の指示'
 								multiline
-								style={styles.composerInput}
+								onContentSizeChange={grow.onContentSizeChange}
+					style={[styles.composerInput, webNoOutline, grow.style]}
 							/>
 							<View style={styles.composerBar}>
 								<View style={styles.composerChips}>
@@ -3158,7 +3165,7 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		backgroundColor: colors.accent,
 	},
-	sendButtonDisabled: { backgroundColor: colors.accent, opacity: 0.45 },
+	sendButtonDisabled: { backgroundColor: colors.accent, opacity: 0.4 },
 
 	// 起動の設定
 	sheetContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: spacing.xl * 2 },
@@ -3327,7 +3334,9 @@ const styles = StyleSheet.create({
 	doneCount: { color: colors.fgFaint, fontSize: fontSize.xs, fontWeight: '400' },
 	doneText: { color: colors.fg, fontSize: fontSize.sm, lineHeight: 22 },
 	doneActions: { flexWrap: 'wrap' },
-	approval: { borderColor: withAlpha(colors.warning, '66') },
+	// 止まったままになる重要な確認。PC のチャットと同じく、確認待ちの色の枠と一段明るい地で目立たせる
+	approval: { borderColor: withAlpha(colors.warning, '66'), backgroundColor: colors.bgElevated },
+	approvalActions: { gap: spacing.sm, marginTop: spacing.xs },
 	approvalFile: { color: colors.fgMuted, fontFamily: MONO, fontSize: fontSize.xs },
 	approvalFeedback: { minHeight: 64, textAlignVertical: 'top' },
 	approvalEventText: { fontSize: fontSize.xs + 1, lineHeight: 20, flexShrink: 1 },
