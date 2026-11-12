@@ -21,7 +21,8 @@ export const colors = {
 	fg: '#3d3929', // 本文
 	fgStrong: '#1f1e1b', // 見出し
 	fgMuted: '#5e5a4c',
-	fgFaint: '#78735f', // プレースホルダ・補足。地の上で 4.5:1 を保つ
+	// プレースホルダ・補足。地 (bg) だけでなく、ドロワー (bgSidebar)・押したとき (bgHover) の上でも 4.5:1 を保つ
+	fgFaint: '#6b6654',
 
 	// 控えめなテラコッタ。主な操作の塗りと、リンク・印の文字色に使う
 	accent: '#b95a3a', // 白文字を載せて 4.5:1 以上
@@ -32,6 +33,8 @@ export const colors = {
 
 	success: '#2f7d4f',
 	warning: '#9c610c', // 「確認待ち」のドット (淡い地でも読める濃さ)
+	/** warning の薄い地 (注意の帯・札) の上に置く文字。warning のままだと 4.5:1 に届かない */
+	warningText: '#85530a',
 	danger: '#b3261e',
 	running: '#3b6db3', // 「作業中」の印
 
@@ -44,6 +47,46 @@ export const colors = {
 /** `#rrggbb` に透明度を足す (デスクトップの `${color}22` と同じ書き方)。 */
 export const withAlpha = (hex: string, alpha: string): string =>
 	/^#[0-9a-f]{6}$/i.test(hex) ? `${hex}${alpha}` : hex;
+
+const channels = (hex: string): [number, number, number] =>
+	[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) as [number, number, number];
+
+const luminance = (hex: string): number => {
+	const [r, g, b] = channels(hex).map(v => {
+		const c = v / 255;
+		return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+	});
+	return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+
+/** WCAG のコントラスト比 (`#rrggbb` どうし)。 */
+export const contrastRatio = (a: string, b: string): number => {
+	const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+	return (hi + 0.05) / (lo + 0.05);
+};
+
+const inkCache = new Map<string, string>();
+
+/**
+ * 鮮やかな色 (カンバンの優先度・ラベルなど、デスクトップと揃えた色) を小さな文字に使うための濃い色。
+ * 色みは残したまま、淡い地の上で 4.5:1 に届くまで見出しの色 (fgStrong) へ寄せる。
+ * 点や薄い地には元の色をそのまま使い、文字にだけこれを使う。
+ */
+export const inkOf = (hex: string, background: string = colors.bg): string => {
+	if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+	const key = `${hex}|${background}`;
+	const cached = inkCache.get(key);
+	if (cached) return cached;
+	const from = channels(hex);
+	const to = channels(colors.fgStrong);
+	let ink = hex;
+	for (let step = 0; step <= 20 && contrastRatio(ink, background) < 4.5; step++) {
+		const t = step / 20;
+		ink = `#${from.map((v, i) => Math.round(v + (to[i] - v) * t).toString(16).padStart(2, '0')).join('')}`;
+	}
+	inkCache.set(key, ink);
+	return ink;
+};
 
 export const spacing = {
 	xs: 4,

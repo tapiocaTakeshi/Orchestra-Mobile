@@ -15,12 +15,13 @@ import {
 	Text,
 	TextInput,
 	TextInputProps,
+	TextStyle,
 	View,
 	ViewStyle,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, fontSize, radius, spacing, withAlpha } from '../theme';
+import { colors, fontSize, inkOf, radius, spacing, withAlpha } from '../theme';
 
 export type IconName = React.ComponentProps<typeof Feather>['name'];
 
@@ -40,8 +41,8 @@ export const useBack = () => useContext(BackContext);
 export const ScreenHeader = ({ title, right }: { title: React.ReactNode; right?: React.ReactNode }) => {
 	const back = useBack();
 	return (
-		<View style={[styles.screenHeader, back && styles.screenHeaderWithBack]}>
-			{back ? <IconButton icon='arrow-left' accessibilityLabel='戻る' onPress={back} /> : null}
+		<View style={[styles.screenHeader, typeof title !== 'string' && styles.screenHeaderLeading, back && styles.screenHeaderWithBack]}>
+			{back ? <IconButton icon='chevron-left' accessibilityLabel='戻る' onPress={back} /> : null}
 			{typeof title === 'string'
 				? <Text accessibilityRole='header' style={[styles.title, styles.screenHeaderTitle]} numberOfLines={1}>{title}</Text>
 				: <View style={styles.screenHeaderTitle}>{title}</View>}
@@ -173,6 +174,30 @@ export const IconButton = ({ icon, onPress, accessibilityLabel, color = colors.f
 	</Pressable>
 );
 
+/**
+ * Web では入力欄にブラウザ既定の黒いフォーカス枠が重なる。フォーカスは枠線の色 (inputFocused) や
+ * 入力欄の箱で示すので、既定の枠は消す。自前の TextInput にもこれを足す。
+ */
+export const webNoOutline: TextStyle | null = Platform.OS === 'web' ? { outlineStyle: 'none' } as unknown as TextStyle : null;
+
+/**
+ * 複数行の入力欄を、書いた行数に合わせて伸ばす (Web 用)。ネイティブの TextInput は自分で伸びるが、
+ * Web の textarea は高さが変わらず、2 行目から上が隠れてしまう。
+ * 返した style と onContentSizeChange を TextInput に渡す。ネイティブでは何もしない。
+ */
+export const useAutoGrow = (minHeight: number, maxHeight: number): {
+	style: TextStyle | null;
+	onContentSizeChange: TextInputProps['onContentSizeChange'];
+} => {
+	const [height, setHeight] = useState(minHeight);
+	const onContentSizeChange = useCallback<NonNullable<TextInputProps['onContentSizeChange']>>(event => {
+		const next = Math.min(maxHeight, Math.max(minHeight, Math.ceil(event.nativeEvent.contentSize.height)));
+		setHeight(prev => (prev === next ? prev : next));
+	}, [minHeight, maxHeight]);
+	if (Platform.OS !== 'web') return { style: null, onContentSizeChange: undefined };
+	return { style: { height }, onContentSizeChange };
+};
+
 export const Input = forwardRef<TextInput, TextInputProps>((props, ref) => {
 	const [focused, setFocused] = useState(false);
 	return (
@@ -186,6 +211,7 @@ export const Input = forwardRef<TextInput, TextInputProps>((props, ref) => {
 			onBlur={event => { setFocused(false); props.onBlur?.(event); }}
 			style={[
 				styles.input,
+				webNoOutline,
 				props.multiline && styles.inputMultiline,
 				props.style,
 				focused && styles.inputFocused,
@@ -297,7 +323,7 @@ export const ChipGroup = <T extends string>({ options, value, onChange }: {
 							: styles.chipSelected),
 					]}
 				>
-					<Text style={[styles.chipText, selected && (opt.color ? { color: opt.color } : styles.chipTextSelected)]}>{opt.label}</Text>
+					<Text style={[styles.chipText, selected && (opt.color ? { color: inkOf(opt.color) } : styles.chipTextSelected)]}>{opt.label}</Text>
 				</Pressable>
 			);
 		})}
@@ -572,6 +598,8 @@ const styles = StyleSheet.create({
 		borderBottomColor: colors.border,
 	},
 	screenHeaderWithBack: { paddingLeft: spacing.xs, paddingRight: spacing.sm },
+	// 見出しが自前のボタン (ホームの ☰ など) から始まるとき。ページの「戻る」と同じ位置に揃える
+	screenHeaderLeading: { paddingLeft: spacing.xs },
 	screenHeaderTitle: { flex: 1 },
 	inputFocused: { borderColor: colors.accent },
 	emptyIcon: { marginBottom: spacing.xs },
@@ -747,7 +775,7 @@ const styles = StyleSheet.create({
 	// ErrorBanner の再試行 / 再接続ボタン。汎用の buttonSmall (38) は変えず、ここだけ 44pt にする
 	retryButton: { minHeight: 44, minWidth: 44 },
 	warningBanner: { backgroundColor: withAlpha(colors.warning, '1a'), borderColor: withAlpha(colors.warning, '4d') },
-	warningText: { color: colors.warning },
+	warningText: { color: colors.warningText },
 	segmented: {
 		flexDirection: 'row',
 		backgroundColor: colors.bgHover,
@@ -859,7 +887,8 @@ const styles = StyleSheet.create({
 		fontSize: fontSize.xs,
 		fontWeight: '600',
 	},
-	chipTextSelected: { color: colors.accentText },
+	// 薄いアクセントの地の上では accentText が 4.5:1 に届かないので、一段濃い色にする
+	chipTextSelected: { color: colors.accentPressed },
 	loading: {
 		padding: spacing.xl,
 		alignItems: 'center',

@@ -131,14 +131,8 @@ export const WorkflowReviewCard = ({ workflow: initial, leader, roleOptions, bus
 			/>
 			{error ? <ErrorBanner message={error} /> : null}
 			<Row style={styles.actions}>
-				<Button
-					title={edited ? '編集して承認' : '承認して実行'}
-					icon='check'
-					size='sm'
-					loading={busy === 'approve'}
-					disabled={!!busy || errors.length > 0}
-					onPress={() => onApprove(edited ? workflow : undefined)}
-				/>
+				{/* ほかの承認と同じ並び: 取りやめる操作が左、主ボタンが右端 */}
+				{onReject ? <Button title='中止' icon='x' variant='ghost' size='sm' loading={busy === 'reject'} disabled={!!busy} onPress={onReject} style={styles.action} /> : null}
 				<Button
 					title='差し戻す'
 					icon='corner-up-left'
@@ -147,8 +141,17 @@ export const WorkflowReviewCard = ({ workflow: initial, leader, roleOptions, bus
 					loading={busy === 'revise'}
 					disabled={!!busy || !feedback.trim()}
 					onPress={() => onRevise(feedback.trim())}
+					style={styles.action}
 				/>
-				{onReject ? <Button title='中止' icon='x' variant='ghost' size='sm' loading={busy === 'reject'} disabled={!!busy} onPress={onReject} /> : null}
+				<Button
+					title={edited ? '編集して承認' : '承認して実行'}
+					icon='check'
+					size='sm'
+					loading={busy === 'approve'}
+					disabled={!!busy || errors.length > 0}
+					onPress={() => onApprove(edited ? workflow : undefined)}
+					style={styles.actionPrimary}
+				/>
 			</Row>
 			{canvasOpen ? (
 				<WorkflowCanvasEditor
@@ -173,8 +176,8 @@ const styles = StyleSheet.create({
 		padding: spacing.md,
 		borderRadius: radius.md,
 		borderWidth: 1,
-		borderColor: withAlpha(colors.warning, '55'),
-		backgroundColor: withAlpha(colors.warning, '0d'),
+		borderColor: withAlpha(colors.warning, '66'),
+		backgroundColor: colors.bgElevated,
 	},
 	header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
 	flex: { flex: 1 },
@@ -199,4 +202,7 @@ const styles = StyleSheet.create({
 	nodeSub: { fontSize: 11, color: colors.fgFaint },
 	multi: { minHeight: 72, textAlignVertical: 'top' },
 	actions: { flexWrap: 'wrap', gap: spacing.sm },
+	// 実寸で 44pt 以上 (承認は取り消せない操作なので、hitSlop に頼らない)
+	action: { minHeight: 44 },
+	actionPrimary: { minHeight: 44, flexGrow: 1 },
 });

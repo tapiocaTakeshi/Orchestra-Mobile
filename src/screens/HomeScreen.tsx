@@ -257,7 +257,8 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 			<IconButton icon='chevron-left' accessibilityLabel='一覧に戻る' onPress={() => onPcChatOpenChange(false)} />
 			<View style={styles.switcher}>
 				<Text accessibilityRole='header' style={styles.switcherTitle} numberOfLines={1}>{pcName}</Text>
-				<Text style={styles.switcherSubtitle} numberOfLines={1}>リモートコントロール · {statusLabel}</Text>
+				{/* 見出しの右に並ぶ操作で幅が足りないので、接続の状態だけを出す (長いと状態が省略されて読めない) */}
+				<Text style={styles.switcherSubtitle} numberOfLines={1}>{statusLabel}</Text>
 			</View>
 		</View>
 	);
