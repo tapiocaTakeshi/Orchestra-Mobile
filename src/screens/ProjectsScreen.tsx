@@ -1,7 +1,8 @@
 /**
  * Division プロジェクト管理のタブ。
  *
- * ワークスペースの .division/projects.json をそのまま編集する。プロジェクトを
+ * PC に接続中はワークスペースの .division/projects.json をそのまま編集する。
+ * 未接続のときは Division API のプロジェクト (クラウドエージェントが使う割り当て) を直接編集する。プロジェクトを
  * 有効にすると IDE 側の roleAssignments (どの役割をどのモデルに振るか) が
  * 切り替わるので、外出先から「今日はコーダーを Opus にする」といった調整ができる。
  */
@@ -41,13 +42,13 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
-import { useCloudProjects } from '../components/CloudProjectPicker';
 import { KNOWN_ROLES, providerTitle, roleTitle } from '../lib/format';
 import { publishAssignmentPost } from '../lib/divisionSocial';
 import { defaultPostTitle, toPostAssignments } from '../lib/social';
 import type { OpenPage } from '../navigation';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
+import { useServerProjects } from '../state/useServerProjects';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 /** 役割ごとの編集行。モデル一覧はプロバイダーごとに畳んで出す。 */
@@ -93,7 +94,7 @@ const AgentRow = ({
 
 			{open ? (
 				<View style={styles.modelList}>
-					{providers.length === 0 ? <Muted>選択できるモデルがありません。IDE 側でプロバイダーを設定してください。</Muted> : null}
+					{providers.length === 0 ? <Muted>選択できるモデルがありません。モデルの一覧を読み込めていないか、プロバイダーが設定されていません。</Muted> : null}
 					{providers.map(p => (
 						<View key={p.provider} style={styles.providerBlock}>
 							<Muted>{providerTitle(p.provider)}</Muted>
@@ -107,7 +108,8 @@ const AgentRow = ({
 											accessibilityState={{ selected, disabled }}
 											disabled={disabled}
 											onPress={() => {
-												onChange({ ...assignment, provider: p.provider, model });
+												// 推論の深さはモデルごとに使えるかが違うので、別のモデルにしたら外す
+												onChange(selected ? assignment : { role: assignment.role, provider: p.provider, model });
 												setOpen(false);
 											}}
 											style={[styles.modelChip, selected && styles.modelChipSelected]}
@@ -355,6 +357,21 @@ const ShareSheet = ({
 	);
 };
 
+/** カードに出す割り当ての抜粋 (先頭 4 件) と役割の数。 */
+const AgentPreview = ({ agents }: { agents: RoleAssignment[] }) => (
+	<>
+		<View style={styles.agentPreview}>
+			{agents.slice(0, 4).map((a, i) => (
+				<Text key={`${a.role}-${i}`} style={styles.agentPreviewText} numberOfLines={1}>
+					{roleTitle(a.role)} → {a.model || '(未設定)'}
+				</Text>
+			))}
+			{agents.length > 4 ? <Muted>他 {agents.length - 4} 件</Muted> : null}
+		</View>
+		<Text style={styles.metaLine} numberOfLines={1}>{agents.length} 役割</Text>
+	</>
+);
+
 /** 検索欄の文字で名前・ID を絞り込む (大文字小文字は区別しない)。 */
 const matchesQuery = (query: string, ...fields: (string | undefined)[]) => {
 	const q = query.trim().toLowerCase();
@@ -399,11 +416,19 @@ export const ProjectsScreen = ({ onOpenPage }: { onOpenPage?: OpenPage } = {}) =
 	const [newId, setNewId] = useState('');
 	const [syncing, setSyncing] = useState<'pull' | 'push' | null>(null);
 
-	// PC に繋いでいなくても、Division API (Web のディビジョンプロジェクトと同じ一覧) を読んで閲覧できるようにする。
-	const cloudProjects = useCloudProjects(session);
-
 	const division = snapshot?.division ?? null;
 	const connected = !!client && !!snapshot && !!division;
+
+	// PC に繋いでいないときは、Division API (Web のディビジョンプロジェクトと同じ一覧) を読み書きする。
+	const server = useServerProjects(session, !connected);
+	const serverEditing = useMemo(
+		() => (connected ? null : server.projects.find(p => p.projectId === editingId) ?? null),
+		[connected, server.projects, editingId],
+	);
+	const serverSharing = useMemo(
+		() => (connected ? null : server.projects.find(p => p.projectId === sharingId) ?? null),
+		[connected, server.projects, sharingId],
+	);
 	const editing = useMemo(
 		() => division?.projects.find(p => p.projectId === editingId) ?? null,
 		[division, editingId],
@@ -440,14 +465,25 @@ export const ProjectsScreen = ({ onOpenPage }: { onOpenPage?: OpenPage } = {}) =
 		}
 	}, [invalidate, toast]);
 
-	// PC 未接続: Division API の一覧を読むだけで表示する (編集・同期は PC 接続が必要)。
+	const serverAct = useCallback(async (fn: () => Promise<unknown>, successNote: string): Promise<boolean> => {
+		try {
+			await fn();
+			toast.show(successNote, 'success');
+			return true;
+		} catch (e) {
+			toast.show(e instanceof Error ? e.message : String(e), 'error');
+			return false;
+		}
+	}, [toast]);
+
+	// PC 未接続: Division API のプロジェクト (Web のディビジョンプロジェクトと同じ一覧) をその場で編集する。
 	if (!connected) {
 		return (
 			<Screen>
 				<ScreenHeader title='プロジェクト' />
 				<ScrollView
 					contentContainerStyle={styles.content}
-					refreshControl={<RefreshControl refreshing={cloudProjects.loading} onRefresh={cloudProjects.reload} tintColor={colors.fgMuted} />}
+					refreshControl={<RefreshControl refreshing={server.loading} onRefresh={server.reload} tintColor={colors.fgMuted} />}
 				>
 					<ProjectSearch value={query} onChange={setQuery} />
 					<Card>
@@ -455,31 +491,91 @@ export const ProjectsScreen = ({ onOpenPage }: { onOpenPage?: OpenPage } = {}) =
 							<Icon name='cloud' size={16} color={colors.accentText} />
 							<Body>クラウドのプロジェクト</Body>
 						</Row>
-						<Muted>Web のディビジョンプロジェクトと同じ一覧です。PC に接続しなくても見られます。役割の編集やクラウドとの同期は PC に接続すると使えます。</Muted>
+						<Muted>Web のディビジョンプロジェクトと同じ一覧です。PC に接続しなくても、役割とモデルの割り当ての編集・追加・削除・共有ができます。クラウドエージェントはここの割り当てで動きます。</Muted>
 					</Card>
 
-					{cloudProjects.error ? <ErrorBanner message={cloudProjects.error} onRetry={cloudProjects.reload} style={styles.bannerFlush} /> : null}
-					{cloudProjects.loading && cloudProjects.projects.length === 0 ? (
+					{!session ? (
+						<EmptyState icon='log-in' title='Division にログインしてください' detail='ログインすると、クラウドのプロジェクトを編集できます。' />
+					) : null}
+					{server.error ? <ErrorBanner message={server.error} onRetry={server.reload} style={styles.bannerFlush} /> : null}
+					{server.loading && server.projects.length === 0 ? (
 						<Loading label='プロジェクトを読み込んでいます…' />
 					) : null}
-					{!cloudProjects.loading && !cloudProjects.error && cloudProjects.projects.length === 0 ? (
-						<EmptyState icon='layers' title='プロジェクトがありません' detail='PC の Orchestra か Web で作って保存すると、ここに表示されます。' />
+					{session && !server.loading && !server.error && server.projects.length === 0 ? (
+						<EmptyState icon='layers' title='プロジェクトがありません' detail='下の「プロジェクトを追加」から作れます。' />
 					) : null}
 
-					{cloudProjects.projects.filter(p => matchesQuery(query, p.name, p.id)).map(project => (
-						<Card key={project.id}>
+					{server.projects.filter(p => matchesQuery(query, p.name, p.projectId)).map(project => (
+						<Card key={project.projectId}>
 							<Row style={styles.spread}>
 								<View style={styles.flex}>
 									<Body numberOfLines={1}>{project.name}</Body>
-									<Muted numberOfLines={1}>{project.id}</Muted>
+									<Muted numberOfLines={1}>{project.projectId}</Muted>
 								</View>
-								<StatusBadge label={project.active ? 'PC で有効' : '待機中'} color={project.active ? colors.success : colors.fgFaint} />
+								<IconButton
+									icon='share-2'
+									accessibilityLabel={`${project.name} の割り当てを共有`}
+									disabled={project.agents.length === 0}
+									onPress={() => setSharingId(project.projectId)}
+								/>
+								<IconButton icon='edit-2' accessibilityLabel={`${project.name} を編集`} onPress={() => setEditingId(project.projectId)} />
 							</Row>
+							<AgentPreview agents={project.agents} />
 							<ProjectCardActions onOpenPage={onOpenPage} connected={false} />
 						</Card>
 					))}
+
+					{session ? (
+						adding ? (
+							<Card>
+								<SectionTitle>プロジェクトを追加</SectionTitle>
+								<Input value={newName} onChangeText={setNewName} placeholder='プロジェクト名' autoFocus />
+								<Muted>役割の割り当ては、一覧の先頭のプロジェクトのものから始まります。追加したあとに「編集」で変えられます。</Muted>
+								<Row>
+									<Button
+										title='追加'
+										style={styles.flex}
+										disabled={!newName.trim()}
+										onPress={() => {
+											const agents = server.projects[0]?.agents ?? [];
+											void serverAct(() => server.create({ name: newName.trim(), agents }), 'プロジェクトを追加しました').then(ok => {
+												if (!ok) return;
+												setNewName('');
+												setAdding(false);
+											});
+										}}
+									/>
+									<Button title='やめる' variant='secondary' onPress={() => setAdding(false)} />
+								</Row>
+							</Card>
+						) : (
+							<Button title='プロジェクトを追加' icon='plus' variant='secondary' onPress={() => setAdding(true)} />
+						)
+					) : null}
 					{onOpenPage ? <Button title='＋ リポジトリを追加' variant='secondary' onPress={() => onOpenPage('cloud')} /> : null}
 				</ScrollView>
+
+				{serverEditing ? (
+					<ProjectEditor
+						project={serverEditing}
+						providers={server.providers}
+						onClose={() => setEditingId(null)}
+						onSave={async (name, agents) => {
+							if (await serverAct(() => server.save(serverEditing.projectId, { name, agents }), '保存しました')) setEditingId(null);
+						}}
+						onDelete={async () => {
+							if (await serverAct(() => server.remove(serverEditing.projectId), 'プロジェクトを削除しました')) setEditingId(null);
+						}}
+					/>
+				) : null}
+
+				{serverSharing ? (
+					<ShareSheet
+						project={serverSharing}
+						onClose={() => setSharingId(null)}
+						onDone={message => toast.show(message, 'success')}
+					/>
+				) : null}
 			</Screen>
 		);
 	}
@@ -548,15 +644,7 @@ export const ProjectsScreen = ({ onOpenPage }: { onOpenPage?: OpenPage } = {}) =
 							<IconButton icon='edit-2' accessibilityLabel={`${project.name} を編集`} onPress={() => setEditingId(project.projectId)} />
 						</Row>
 
-						<View style={styles.agentPreview}>
-							{project.agents.slice(0, 4).map((a, i) => (
-								<Text key={`${a.role}-${i}`} style={styles.agentPreviewText} numberOfLines={1}>
-									{roleTitle(a.role)} → {a.model || '(未設定)'}
-								</Text>
-							))}
-							{project.agents.length > 4 ? <Muted>他 {project.agents.length - 4} 件</Muted> : null}
-						</View>
-						<Text style={styles.metaLine} numberOfLines={1}>{project.agents.length} 役割</Text>
+						<AgentPreview agents={project.agents} />
 
 						<Row>
 							<Button

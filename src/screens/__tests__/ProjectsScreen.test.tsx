@@ -2,12 +2,12 @@
  * ProjectsScreen (Division プロジェクト管理) の回帰テスト。
  *
  * PC に接続していなくても、Division API (Web のディビジョンプロジェクトと同じ一覧) を
- * 読んでプロジェクトを表示できることを確認する。
+ * 読んでプロジェクトを表示し、その場で編集して保存できることを確認する。
  *
  * 外部依存はモックで切り離す:
  *  - `useApp` … 未接続 (client / snapshot が null) を注入。
  *  - `useDivisionAuth` … ログイン済みセッションを注入。
- *  - `useCloudProjects` … Division API の一覧を返すスタブ (ネットワークを伴わない)。
+ *  - `useServerProjects` … Division API の一覧と保存を返すスタブ (ネットワークを伴わない)。
  *  - Feather アイコン / SafeAreaView: ESM 依存で ts-jest 変換できないため軽量スタブ (jest の moduleNameMapper)。
  */
 
@@ -50,16 +50,20 @@ jest.mock('../../state/DivisionAuthContext', () => ({
 }));
 
 const mockReload = jest.fn();
-jest.mock('../../components/CloudProjectPicker', () => ({
-	useCloudProjects: () => ({
+const mockSave = jest.fn(async () => ({}));
+jest.mock('../../state/useServerProjects', () => ({
+	useServerProjects: () => ({
 		projects: [
-			{ id: 'proj-1', name: 'Web アプリ', active: true },
-			{ id: 'proj-2', name: '社内ツール' },
+			{ projectId: 'proj-1', name: 'Web アプリ', isActive: false, agents: [{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5' }] },
+			{ projectId: 'proj-2', name: '社内ツール', isActive: false, agents: [] },
 		],
-		source: 'division',
+		providers: [{ provider: 'anthropic', models: ['claude-opus-5-5', 'claude-sonnet-5-5'] }],
 		loading: false,
 		error: null,
 		reload: mockReload,
+		save: mockSave,
+		create: jest.fn(),
+		remove: jest.fn(),
 	}),
 }));
 
@@ -75,6 +79,9 @@ jest.mock('../../components/ui', () => {
 		...actual,
 		useToast: () => ({ show: jest.fn() }),
 		confirmAction: jest.fn(async () => true),
+		// Modal はテストレンダラーのツリーに出ないので、シートの中身をその場に描く
+		Sheet: ({ title, headerRight, children }: { title: string; headerRight?: React.ReactNode; children: React.ReactNode }) =>
+			React.createElement(React.Fragment, null, React.createElement(actual.Muted, null, title), headerRight, children),
 	};
 });
 
@@ -121,6 +128,23 @@ describe('ProjectsScreen (PC 未接続)', () => {
 		expect(findTextNode(tree.root, 'クラウドのプロジェクト')).toBeTruthy();
 		expect(findTextNode(tree.root, 'Web アプリ')).toBeTruthy();
 		expect(findTextNode(tree.root, '社内ツール')).toBeTruthy();
+	});
+
+	it('edits a project\'s role → model lines and saves them to the Division API', async () => {
+		const tree = await render();
+		const edit = tree.root.findAll(n => n.props.accessibilityLabel === 'Web アプリ を編集' && typeof n.props.onPress === 'function')[0];
+		await act(async () => { edit.props.onPress(); });
+		// コーダーのモデルを Sonnet に変える
+		const open = tree.root.findAll(n => typeof n.props.accessibilityLabel === 'string' && n.props.accessibilityLabel.endsWith('モデルを変更') && typeof n.props.onPress === 'function')[0];
+		await act(async () => { open.props.onPress(); });
+		const chip = tree.root.findAll(n => typeof n.props.onPress === 'function' && n.findAll(c => c.children.includes('claude-sonnet-5-5')).length > 0)[0];
+		await act(async () => { chip.props.onPress(); });
+		const save = tree.root.findAll(n => n.props.title === '保存' && typeof n.props.onPress === 'function')[0];
+		await act(async () => { save.props.onPress(); });
+		expect(mockSave).toHaveBeenCalledWith('proj-1', {
+			name: 'Web アプリ',
+			agents: [{ role: 'coder', provider: 'anthropic', model: 'claude-sonnet-5-5' }],
+		});
 	});
 
 	it('does not ask for a PC connection or show the loading state forever', async () => {

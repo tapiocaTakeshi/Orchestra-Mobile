@@ -6,7 +6,8 @@
  * 取り込んだり、自分のプロジェクトを公開したりできる。
  *
  * 投稿の読み書きは Supabase 直結なので、PC に接続していなくても閲覧できる。
- * 取り込み・公開だけは IDE のプロジェクトを触るので接続が要る。
+ * 取り込み・公開は、PC に接続中なら PC の Orchestra のプロジェクト、未接続なら Division API の
+ * プロジェクト (クラウドエージェントが使うもの) が相手になる。どちらでも PC 無しで完結する。
  *
  * 不適切コンテンツ対策 (App Store Guideline 1.2):
  *   - 他の人の投稿の「…」から「通報」「このユーザーをブロック」ができる。
@@ -29,7 +30,7 @@ import {
 } from 'react-native';
 
 import { OrchestraApiError } from '../api/client';
-import { DivisionProject } from '../api/types';
+import { DivisionProject, RoleAssignment } from '../api/types';
 import {
 	Badge,
 	Body,
@@ -83,6 +84,7 @@ import {
 } from '../lib/social';
 import { useApp } from '../state/AppContext';
 import { useDivisionAuth } from '../state/DivisionAuthContext';
+import { useServerProjects } from '../state/useServerProjects';
 import { colors, fontSize, radius, spacing } from '../theme';
 
 const errorText = (e: unknown): string =>
@@ -104,19 +106,28 @@ const ModerationNote = ({ children }: { children: React.ReactNode }) => (
 
 type ImportMode = 'merge' | 'replace' | 'new';
 
+/** 取り込み先。PC の Orchestra (接続中) か Division API のプロジェクト (未接続) のどちらか。 */
+export type ProjectTarget = {
+	/** 'pc' | 'cloud' — 画面の文言を変えるだけ */
+	kind: 'pc' | 'cloud';
+	projects: DivisionProject[];
+	create: (project: { name: string; agents: RoleAssignment[] }) => Promise<unknown>;
+	save: (projectId: string, agents: RoleAssignment[]) => Promise<unknown>;
+};
+
 const ImportSheet = ({
 	post,
-	projects,
+	target: dest,
 	onClose,
 	onDone,
 }: {
 	post: AssignmentPost;
-	projects: DivisionProject[];
+	target: ProjectTarget;
 	onClose: () => void;
 	onDone: (message: string) => void;
 }) => {
-	const { client, invalidate } = useApp();
 	const { session } = useDivisionAuth();
+	const projects = dest.projects;
 
 	const [targetId, setTargetId] = useState<string | null>(projects[0]?.projectId ?? null);
 	const [mode, setMode] = useState<ImportMode>(projects.length === 0 ? 'new' : 'merge');
@@ -127,7 +138,7 @@ const ImportSheet = ({
 	const target = projects.find(p => p.projectId === targetId) ?? null;
 
 	const run = useCallback(async () => {
-		if (!client || !session) return;
+		if (!session) return;
 		setBusy(true);
 		setError(null);
 		try {
@@ -137,26 +148,21 @@ const ImportSheet = ({
 
 			if (mode === 'new') {
 				const name = newName.trim() || post.title;
-				await client.addProject({
-					projectId: `${name.replace(/\s+/g, '-').toLowerCase()}-${Date.now().toString(36)}`,
-					name,
-					agents: assignments,
-				});
+				await dest.create({ name, agents: assignments });
 				onDone(`「${name}」として取り込みました。`);
 			} else {
 				if (!target) throw new Error('取り込み先のプロジェクトを選んでください。');
 				const next = mode === 'replace' ? assignments : mergeAssignments(target.agents, assignments);
-				await client.saveProject(target.projectId, { agents: next });
+				await dest.save(target.projectId, next);
 				onDone(`「${target.name}」に取り込みました。`);
 			}
-			invalidate();
 			onClose();
 		} catch (e) {
 			setError(errorText(e));
 		} finally {
 			setBusy(false);
 		}
-	}, [client, session, post, mode, target, newName, invalidate, onClose, onDone]);
+	}, [dest, session, post, mode, target, newName, onClose, onDone]);
 
 	return (
 		<Sheet title={post.title} eyebrow='取り込み' onClose={onClose}>
@@ -658,7 +664,7 @@ const BlockedUsersSheet = ({ onClose, onChanged }: { onClose: () => void; onChan
 
 export const SocialScreen = () => {
 	const { session } = useDivisionAuth();
-	const { snapshot, client } = useApp();
+	const { snapshot, client, invalidate } = useApp();
 	const toast = useToast();
 
 	const [posts, setPosts] = useState<AssignmentPost[] | null>(null);
@@ -675,8 +681,33 @@ export const SocialScreen = () => {
 	const [reporting, setReporting] = useState<AssignmentPost | null>(null);
 	const [showBlocked, setShowBlocked] = useState(false);
 
-	const projects = snapshot?.division.projects ?? [];
-	const canUseProjects = !!client && !!snapshot;
+	// PC に接続中は PC の Orchestra のプロジェクト、未接続なら Division API のプロジェクトに取り込む / から共有する。
+	const pcConnected = !!client && !!snapshot;
+	const server = useServerProjects(session, !pcConnected);
+	const target = useMemo<ProjectTarget>(() => (client && snapshot
+		? {
+			kind: 'pc',
+			projects: snapshot.division.projects,
+			create: async ({ name, agents }) => {
+				await client.addProject({
+					projectId: `${name.replace(/\s+/g, '-').toLowerCase()}-${Date.now().toString(36)}`,
+					name,
+					agents,
+				});
+				invalidate();
+			},
+			save: async (projectId, agents) => {
+				await client.saveProject(projectId, { agents });
+				invalidate();
+			},
+		}
+		: {
+			kind: 'cloud',
+			projects: server.projects,
+			create: server.create,
+			save: (projectId, agents) => server.save(projectId, { agents }),
+		}), [client, snapshot, invalidate, server.projects, server.create, server.save]);
+	const projects = target.projects;
 
 	const load = useCallback(async () => {
 		if (!session) return;
@@ -801,7 +832,7 @@ export const SocialScreen = () => {
 						<IconButton
 							icon='plus'
 							accessibilityLabel='自分のプロジェクトを共有する'
-							disabled={!canUseProjects || projects.length === 0}
+							disabled={projects.length === 0}
 							onPress={() => setPublishing(true)}
 						/>
 					</Row>
@@ -835,10 +866,10 @@ export const SocialScreen = () => {
 					contentContainerStyle={styles.content}
 					refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 				>
-					{!canUseProjects ? (
+					{target.kind === 'cloud' ? (
 						<View style={styles.hint}>
-							<Icon name='info' size={16} color={colors.fgMuted} />
-							<Muted style={styles.flex}>PC に接続すると、自分のプロジェクトの共有と取り込みができます。</Muted>
+							<Icon name='cloud' size={16} color={colors.fgMuted} />
+							<Muted style={styles.flex}>PC に接続していないので、取り込みと共有はクラウドのプロジェクト (クラウドエージェントが使う割り当て) が相手です。</Muted>
 						</View>
 					) : null}
 
@@ -858,7 +889,7 @@ export const SocialScreen = () => {
 						<PostCard
 							key={post.id}
 							post={post}
-							canImport={canUseProjects}
+							canImport
 							onLike={() => void toggleLike(post)}
 							onImport={() => setImporting(post)}
 							onEdit={() => setEditing(post)}
@@ -873,7 +904,7 @@ export const SocialScreen = () => {
 			{importing ? (
 				<ImportSheet
 					post={importing}
-					projects={projects}
+					target={target}
 					onClose={() => setImporting(null)}
 					onDone={message => { toast.show(message, 'success'); void load(); }}
 				/>

@@ -10,6 +10,11 @@ jest.mock('../divisionAuth', () => ({
 
 import { DivisionProject } from '../../api/types';
 import {
+	createServerProject,
+	deleteServerProject,
+	listServerDivisionProjects,
+	listServerProviderModels,
+	saveServerProject,
 	listServerProjects,
 	mergeProjectOptions,
 	projectLabel,
@@ -106,5 +111,66 @@ describe('project options', () => {
 	it('reads a row defensively', () => {
 		expect(toProjectOption({ id: ' x ', name: 'N', updatedAt: 5 })).toEqual({ id: 'x', name: 'N' });
 		expect(toProjectOption({ id: 3 })).toBeNull();
+	});
+});
+
+describe('editing Division API projects without a PC', () => {
+	it('reads each project with its role → model lines', async () => {
+		respond(200, [
+			{ id: 'p1', name: 'A', updatedAt: '2026-10-01T00:00:00.000Z', agents: [
+				{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5', effort: 'max' },
+				{ role: '', provider: 'openai', model: 'x' },
+				{ role: 'writer', provider: 'openai', model: 'gpt-6-luna' },
+			] },
+			{ id: 'p2', name: 'B', updatedAt: '2026-10-02T00:00:00.000Z' },
+		]);
+		const projects = await listServerDivisionProjects(auth);
+		expect(projects.map(p => p.projectId)).toEqual(['p2', 'p1']);
+		expect(projects[0].agents).toEqual([]);
+		expect(projects[1]).toMatchObject({ name: 'A', isActive: false, agents: [
+			{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5', effort: 'max' },
+			{ role: 'writer', provider: 'openai', model: 'gpt-6-luna' },
+		] });
+	});
+
+	it('saves the lines with PUT /api/projects/:id/agents and returns the saved project', async () => {
+		respond(200, { id: 'p 1', name: 'Renamed', agents: [{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5' }] });
+		const saved = await saveServerProject(auth, 'p 1', {
+			name: ' Renamed ',
+			agents: [{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5' }, { role: 'writer', provider: 'openai', model: '' }],
+		});
+		expect(calls[0].url).toMatch(/\/api\/projects\/p%201\/agents$/);
+		expect(calls[0].init.method).toBe('PUT');
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({
+			name: 'Renamed',
+			agents: [{ role: 'coder', provider: 'anthropic', model: 'claude-opus-5-5' }, { role: 'writer', provider: 'openai' }],
+		});
+		expect(saved).toMatchObject({ projectId: 'p 1', name: 'Renamed' });
+	});
+
+	it('creates a project with its agents in one POST', async () => {
+		respond(201, { id: 'new', name: 'Imported', agents: [{ role: 'coder', provider: 'anthropic', model: 'm' }] });
+		const created = await createServerProject(auth, { name: 'Imported', agents: [{ role: 'coder', provider: 'anthropic', model: 'm' }] });
+		expect(calls[0].init.method).toBe('POST');
+		expect(created.agents).toHaveLength(1);
+	});
+
+	it('explains a refused save', async () => {
+		respond(400, { error: 'Unknown provider: nope' });
+		await expect(saveServerProject(auth, 'p1', { agents: [] })).rejects.toThrow('プロジェクトを保存できませんでした: Unknown provider: nope');
+	});
+
+	it('deletes a project', async () => {
+		respond(204, {});
+		await deleteServerProject(auth, 'p1');
+		expect(calls[0].init.method).toBe('DELETE');
+	});
+
+	it('lists models per provider from /api/models', async () => {
+		respond(200, { providers: [
+			{ id: 'anthropic', models: [{ modelId: 'claude-opus-5-5' }, { modelId: '' }] },
+			{ id: 'empty', models: [] },
+		] });
+		expect(await listServerProviderModels(auth)).toEqual([{ provider: 'anthropic', models: ['claude-opus-5-5'] }]);
 	});
 });

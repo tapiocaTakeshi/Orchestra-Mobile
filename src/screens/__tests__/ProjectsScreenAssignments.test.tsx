@@ -52,8 +52,9 @@ jest.mock('../../state/DivisionAuthContext', () => ({
 	useDivisionAuth: () => ({ session: { userId: 'u1', email: 'a@b.c', accessToken: 't', refreshToken: 'r' } }),
 }));
 
-jest.mock('../../components/CloudProjectPicker', () => ({
-	useCloudProjects: () => ({ projects: [], source: 'division', loading: false, error: null, reload: jest.fn() }),
+// PC 接続中は Division API の一覧を使わない
+jest.mock('../../state/useServerProjects', () => ({
+	useServerProjects: () => ({ projects: [], providers: [], loading: false, error: null, reload: jest.fn(), save: jest.fn(), create: jest.fn(), remove: jest.fn() }),
 }));
 
 jest.mock('../../lib/divisionSocial', () => ({ publishAssignmentPost: jest.fn() }));

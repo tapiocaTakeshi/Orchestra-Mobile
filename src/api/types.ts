@@ -101,6 +101,8 @@ export type RoleAssignment = {
 	role: string;
 	provider: string;
 	model: string;
+	/** 推論の深さ (Division API のプロジェクトにだけ入る。編集しても保ったまま保存する) */
+	effort?: string;
 };
 
 export type DivisionProject = {

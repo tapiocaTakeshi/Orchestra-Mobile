@@ -290,7 +290,7 @@ const accessTokenFor = async (session: DivisionSession): Promise<string> => {
 };
 
 export type RequestOptions = {
-	method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+	method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	body?: unknown;
 	timeoutMs?: number;
 	endpoint?: string;
