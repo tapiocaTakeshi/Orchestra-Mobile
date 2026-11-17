@@ -130,3 +130,22 @@ test('失敗したら理由を出す', async () => {
 	await act(async () => { pressable(root, 'Jev に送って作る').props.onPress(); });
 	expect(texts(root)).toContain('クレジットが不足しています。管理タブからクレジットを確認してください。');
 });
+
+test('ロールは最初は標準ロール全部 (roles を送らない)。外すと残したロールだけを送る', async () => {
+	const root = renderer.root;
+	const chip = (label: string) => root.findAll(n => n.props?.accessibilityRole === 'checkbox' && n.props?.accessibilityLabel === label && typeof n.props?.onPress === 'function', { deep: true })[0];
+	// リーダーは外せない
+	expect(chip('リーダー').props.disabled).toBe(true);
+	expect(chip('コーダー').props.accessibilityState.checked).toBe(true);
+
+	await act(async () => { byLabel(root, 'プロンプト', 'onChangeText').props.onChangeText('webサイトを作る'); });
+	await act(async () => { pressable(root, 'Jev に送って作る').props.onPress(); });
+	expect(mockCreate.mock.calls[0][1].roles).toBeUndefined();
+	expect(texts(root)).toContain('標準のロールを全部入れます。動画制作などの追加ロールは、目的に要れば Jev が足します。');
+
+	await act(async () => { chip('ファイルサーチャー').props.onPress(); });
+	await act(async () => { chip('リーダー').props.onPress(); }); // 押しても外れない
+	expect(texts(root)).toContain('選んだロールだけで作ります。');
+	await act(async () => { pressable(root, 'もう一度 Jev に送って作る').props.onPress(); });
+	expect(mockCreate.mock.calls[1][1].roles).toEqual(['leader', 'searcher', 'researcher', 'writer', 'designer', 'coder', 'reviewer']);
+});

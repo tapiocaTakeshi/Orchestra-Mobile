@@ -18,6 +18,7 @@ import {
 	JEV_COST_STEPS,
 	JEV_EFFORTS,
 	JEV_EFFORT_LABELS,
+	JEV_STANDARD_ROLES,
 	JevProjectResult,
 	JevSliders,
 	createProjectWithJev,
@@ -138,6 +139,12 @@ export const JevProjectCreator = ({ session }: { session: DivisionSession }) => 
 	const [goal, setGoal] = useState('');
 	const [name, setName] = useState('');
 	const [sliders, setSliders] = useState<JevSliders>(DEFAULT_JEV_SLIDERS);
+	const [roles, setRoles] = useState<string[]>([...JEV_STANDARD_ROLES]);
+	const allRoles = roles.length === JEV_STANDARD_ROLES.length;
+	const toggleRole = (slug: string) => {
+		if (slug === 'leader') return;
+		setRoles(rs => JEV_STANDARD_ROLES.filter(r => (r === slug ? !rs.includes(r) : rs.includes(r))));
+	};
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [result, setResult] = useState<JevProjectResult | null>(null);
@@ -149,7 +156,8 @@ export const JevProjectCreator = ({ session }: { session: DivisionSession }) => 
 	const send = async () => {
 		setBusy(true); setError(null); setShared('idle');
 		try {
-			const created = await createProjectWithJev(session, { goal, sliders, name });
+			// 全部のままなら roles を送らない (Division が標準ロールを全部入れ、追加ロールを Jev が足す)
+			const created = await createProjectWithJev(session, { goal, sliders, name, ...(allRoles ? {} : { roles }) });
 			setResult(created);
 			toast.show(`「${created.projectName}」を作成しました`);
 		} catch (e) {
@@ -239,6 +247,36 @@ export const JevProjectCreator = ({ session }: { session: DivisionSession }) => 
 				/>
 
 				<View style={styles.field}>
+					<Muted>ロール</Muted>
+					<View style={styles.chips} accessibilityLabel='プロジェクトに入れるロール'>
+						{JEV_STANDARD_ROLES.map(slug => {
+							const on = roles.includes(slug);
+							const locked = slug === 'leader';
+							return (
+								<Pressable
+									key={slug}
+									accessibilityRole='checkbox'
+									accessibilityLabel={roleTitle(slug)}
+									accessibilityHint={locked ? 'リーダーは常に入ります' : undefined}
+									accessibilityState={{ checked: on, disabled: locked }}
+									disabled={locked}
+									onPress={() => toggleRole(slug)}
+									style={[styles.chip, on && styles.chipOn]}
+								>
+									{on ? <Icon name='check' size={14} color={colors.accentText} /> : null}
+									<Text style={[styles.chipText, on && styles.chipTextOn]}>{roleTitle(slug)}</Text>
+								</Pressable>
+							);
+						})}
+					</View>
+					<Muted>
+						{allRoles
+							? '標準のロールを全部入れます。動画制作などの追加ロールは、目的に要れば Jev が足します。'
+							: '選んだロールだけで作ります。'}
+					</Muted>
+				</View>
+
+				<View style={styles.field}>
 					<Muted>プロジェクト名 (空ならプロンプトの 1 行目)</Muted>
 					<Input
 						value={name}
@@ -309,6 +347,14 @@ const THUMB = 24;
 
 const styles = StyleSheet.create({
 	field: { gap: spacing.xs },
+	chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+	chip: {
+		flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 36,
+		paddingHorizontal: spacing.md, borderRadius: 999, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgElevated,
+	},
+	chipOn: { borderColor: colors.accent, backgroundColor: withAlpha(colors.accent, '14') },
+	chipText: { color: colors.fgMuted, fontSize: fontSize.sm },
+	chipTextOn: { color: colors.fgStrong, fontWeight: '600' },
 	prompt: { minHeight: 96, textAlignVertical: 'top' },
 	spread: { justifyContent: 'space-between', alignItems: 'center', gap: spacing.sm },
 	slider: { gap: spacing.xs },

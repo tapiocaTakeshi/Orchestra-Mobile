@@ -260,6 +260,12 @@ export const JEV_EFFORT_LABELS: Record<JevEffort, string> = { low: '低い', med
 export const JEV_COST_STEPS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5] as const;
 
 export type JevSliders = { effort: JevEffort; maxCostUsd: number; minPerformance: number };
+
+/**
+ * Division の標準ロール。roles を送らなければ Division はこれを全部入れ、目的に要る追加ロール
+ * (動画制作など) を Jev に足させる。外したいときだけ、残すロールを roles で送る。リーダーは常に入れる。
+ */
+export const JEV_STANDARD_ROLES = ['leader', 'searcher', 'file-searcher', 'researcher', 'writer', 'designer', 'coder', 'reviewer'] as const;
 export const DEFAULT_JEV_SLIDERS: JevSliders = { effort: 'medium', maxCostUsd: 0.05, minPerformance: 70 };
 
 export type JevAssignmentStatus = 'ok' | 'below-performance' | 'over-budget';
@@ -344,14 +350,14 @@ export const parseJevProjectResult = (data: unknown, fallback: { name: string; s
 /** プロンプトと 3 つの値を Jev に送り、Division プロジェクトを作る。 */
 export const createProjectWithJev = async (
 	session: DivisionSession,
-	input: { goal: string; sliders: JevSliders; name?: string; endpoint?: string },
+	input: { goal: string; sliders: JevSliders; name?: string; roles?: readonly string[]; endpoint?: string },
 ): Promise<JevProjectResult> => {
 	const goal = input.goal.trim();
 	if (!goal) throw new DivisionRoutingError(400, 'プロンプトを入力してください。');
 	const name = input.name?.trim() || defaultJevProjectName(goal);
 	const data = await request<Record<string, unknown>>(session, 'project', {
 		endpoint: input.endpoint,
-		body: { goal, sliders: input.sliders, ...(name ? { name } : {}) },
+		body: { goal, sliders: input.sliders, ...(input.roles?.length ? { roles: [...input.roles] } : {}), ...(name ? { name } : {}) },
 		// Jev の判断とプロジェクトの作成を 1 回で行うので、見積もりより長く待つ
 		timeoutMs: 60_000,
 	});
