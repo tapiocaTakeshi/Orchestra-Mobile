@@ -66,6 +66,15 @@ test('プロンプトと 3 つの値を Bearer で送り、応答を読み取る
 	]);
 });
 
+test('roles は指定したときだけ送る', async () => {
+	respond(201, planResponse);
+	await routing.createProjectWithJev(session, { goal: 'x', sliders });
+	expect('roles' in JSON.parse(String(calls[0].init.body))).toBe(false);
+	await routing.createProjectWithJev(session, { goal: 'x', sliders, roles: ['leader', 'coder'] });
+	expect(JSON.parse(String(calls[1].init.body)).roles).toEqual(['leader', 'coder']);
+	expect(routing.JEV_STANDARD_ROLES).toEqual(['leader', 'searcher', 'file-searcher', 'researcher', 'writer', 'designer', 'coder', 'reviewer']);
+});
+
 test('名前を指定したらそれを送る。空のプロンプトは送らない', async () => {
 	respond(201, planResponse);
 	await routing.createProjectWithJev(session, { goal: 'x', sliders, name: ' 勉強会 ' });
