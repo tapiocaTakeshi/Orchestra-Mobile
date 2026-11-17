@@ -2,6 +2,8 @@
  * チューニングのタブ。
  *
  * 「チャットでどのモデルが選ばれるか」を、コストと性能の条件で調整する場所。
+ *   - 作成      … プロンプトとエフォート・コスト・性能を Jev に送り、Division プロジェクトを作る
+ *                 (components/JevProjectCreator.tsx。デスクトップのコスト管理・Web のダッシュボードと同じ)
  *   - 方針      … 最低性能スコア / 1 回あたりの上限 / 出力トークンの上限
  *   - 見積もり  … 依頼文を Jev に判定させ、役割ごとの想定コストを出す
  *   - 利用履歴  … 実測のトークン数と料金 (日別・役割別・モデル別の集計つき)。
@@ -41,6 +43,7 @@ import {
 	confirmAction,
 	useToast,
 } from '../components/ui';
+import { JevProjectCreator } from '../components/JevProjectCreator';
 import { CloudSession, cloudErrorText, listCloudSessions, recentCostedSessions, sumCloudCosts } from '../lib/divisionCloud';
 import { relativeTimeFromIso, roleTitle } from '../lib/format';
 import {
@@ -94,9 +97,10 @@ const openUrl = (url: string) => { void Linking.openURL(url).catch(() => undefin
 const errorText = (e: unknown): string =>
 	e instanceof DivisionRoutingError ? e.userMessage : e instanceof Error ? e.message : String(e);
 
-type Section = 'policy' | 'estimate' | 'history' | 'account';
+type Section = 'create' | 'policy' | 'estimate' | 'history' | 'account';
 
 const SECTIONS: { value: Section; label: string }[] = [
+	{ value: 'create', label: '作成' },
 	{ value: 'policy', label: '方針' },
 	{ value: 'estimate', label: '見積もり' },
 	{ value: 'history', label: '利用履歴' },
@@ -201,7 +205,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 	// チャットの入力欄から開いたときはシートの中に出すので、見出しはシート側に任せる。
 	const embedded = composerPrompt !== undefined;
 
-	const [section, setSection] = useState<Section>(embedded ? 'estimate' : 'policy');
+	const [section, setSection] = useState<Section>(embedded ? 'estimate' : 'create');
 	const [error, setError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 
@@ -431,6 +435,9 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 				contentContainerStyle={styles.content}
 				refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={colors.fgMuted} />}
 			>
+				{/* ------------------------------------------------------------- 作成 (Jev) */}
+				{section === 'create' ? <JevProjectCreator session={session} /> : null}
+
 				{/* ------------------------------------------------------------- 方針 */}
 				{section === 'policy' ? (
 					<>
