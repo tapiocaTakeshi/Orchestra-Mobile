@@ -18,6 +18,10 @@ export type PostAssignment = {
 	model: string;
 	modelDisplayName: string;
 	priority: number;
+	/** Division の Provider id (Web 版の取り込みは id を先に試す)。古い投稿には無い */
+	providerId?: string;
+	/** 投稿時の推論エフォート。無ければモデルの既定 */
+	effort?: string;
 };
 
 export type AssignmentPost = {
@@ -74,6 +78,8 @@ export const parseAssignments = (raw: unknown): PostAssignment[] => {
 			model,
 			modelDisplayName: asString(a.modelDisplayName) || model,
 			priority: asNumber(a.priority, index),
+			...(asString(a.providerId) ? { providerId: asString(a.providerId) } : {}),
+			...(asString(a.effort) ? { effort: asString(a.effort) } : {}),
 		};
 	}).filter(a => !!a.roleSlug);
 };

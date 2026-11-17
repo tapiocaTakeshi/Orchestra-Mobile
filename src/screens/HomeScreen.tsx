@@ -289,7 +289,7 @@ export const HomeScreen = ({ pcChatOpen, onPcChatOpenChange, onOpenPage }: {
 								<SheetRow icon='x-circle' title='PC との接続を切る' onPress={() => { setSheet(null); void disconnect(); }} />
 							</>
 						) : null}
-						<SheetRow icon='bar-chart-2' title='コストの方針と残高' detail='入力欄の「コスト」からも開けます' onPress={() => { setSheet(null); onOpenPage('tuning'); }} />
+						<SheetRow icon='bar-chart-2' title='Jev でプロジェクト作成・コスト' detail='プロンプトとエフォート・コスト・性能を Jev に送って作れます' onPress={() => { setSheet(null); onOpenPage('tuning'); }} />
 						<SheetRow icon='log-out' title='ログアウト' tone='danger' onPress={() => { void onLogout(); }} />
 					</View>
 				</Sheet>

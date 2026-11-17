@@ -4,6 +4,7 @@
  * IDE 側の AutoRouting.tsx と同じエンドポイントを叩く。
  *   POST /api/routing/quote   … Jev に出力トークン予算を判定させ、条件を満たす最安モデルを見積もる
  *   GET  /api/routing/history … モデル実行ごとの実測トークン数と料金
+ *   POST /api/routing/project … プロンプトとエフォート・コスト・性能を Jev に送り、Division プロジェクトを作る
  * 認証はDivisionアカウントのSupabase JWTをBearerで渡す。
  */
 
@@ -101,6 +102,7 @@ export class DivisionRoutingError extends Error {
 			case 0: return 'Division API に接続できません。通信環境を確認してください。';
 			case 401:
 				return 'DivisionのJWTが無効です。もう一度ログインしてください。';
+			case 402: return 'クレジットが不足しています。管理タブからクレジットを確認してください。';
 			case 403:
 				return this.message.toLowerCase().includes('plus') || this.message.includes('有料')
 					? 'この機能は有料プラン（Plus）が必要です。管理タブからプランを確認してください。'
@@ -241,4 +243,117 @@ export const fetchRoutingHistory = async (
 	for (const [key, value] of Object.entries(data.groupTotals ?? {})) groupTotals[key] = num(value);
 
 	return { items, nextCursor: data.nextCursor ?? null, groupTotals };
+};
+
+// ---------------------------------------------------------------------------
+// Jev で Division プロジェクトを作る (デスクトップのコスト管理・Web のダッシュボードと同じ)
+//
+//   POST /api/routing/project … プロンプトとエフォート・コスト・性能を Jev に送る。Jev は 3 つの値を
+//   そのまま使い、ロール別ランキング (RoleRanking) を読んでロールとロールごとのモデルを選び、
+//   Division がそのプロジェクトを作る (所有者はログイン中のユーザー)。Jev の料金がかかる (Plus)。
+// ---------------------------------------------------------------------------
+
+export const JEV_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type JevEffort = typeof JEV_EFFORTS[number];
+export const JEV_EFFORT_LABELS: Record<JevEffort, string> = { low: '低い', medium: 'ふつう', high: '高い', xhigh: 'とても高い', max: '最大' };
+/** 1 ロール 1 回あたりの上限 (USD)。Division の PLAN_COST_STEPS と同じ刻み。 */
+export const JEV_COST_STEPS = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5] as const;
+
+export type JevSliders = { effort: JevEffort; maxCostUsd: number; minPerformance: number };
+export const DEFAULT_JEV_SLIDERS: JevSliders = { effort: 'medium', maxCostUsd: 0.05, minPerformance: 70 };
+
+export type JevAssignmentStatus = 'ok' | 'below-performance' | 'over-budget';
+export type JevAssignment = {
+	roleSlug: string;
+	roleName: string;
+	providerId: string;
+	providerName: string;
+	modelId: string;
+	modelName: string;
+	rank: number;
+	score: number;
+	effort: JevEffort | null;
+	costUsd: number;
+	status: JevAssignmentStatus;
+	/** Jev が (いちばん安いもの以外から) 選んだモデルか */
+	pickedByJev: boolean;
+};
+export type JevProjectResult = {
+	projectId: string;
+	projectName: string;
+	sliders: JevSliders;
+	assignments: JevAssignment[];
+	totalCostUsd: number;
+	averageScore: number;
+	jevCostUsd: number;
+};
+
+const isEffort = (v: unknown): v is JevEffort => typeof v === 'string' && (JEV_EFFORTS as readonly string[]).includes(v);
+const STATUSES: readonly JevAssignmentStatus[] = ['ok', 'below-performance', 'over-budget'];
+
+/** 空ならプロンプトの 1 行目をプロジェクト名にする (Division 側と同じ)。 */
+export const defaultJevProjectName = (goal: string): string => {
+	const line = goal.split('\n').map(s => s.trim()).find(Boolean) ?? '';
+	return line.length > 60 ? `${line.slice(0, 60)}…` : line;
+};
+
+/** POST /api/routing/project の応答を画面で使う形にする。 */
+export const parseJevProjectResult = (data: unknown, fallback: { name: string; sliders: JevSliders }): JevProjectResult => {
+	const root = (data ?? {}) as Record<string, unknown>;
+	const project = (root.project ?? {}) as Record<string, unknown>;
+	const plan = (root.plan ?? {}) as Record<string, unknown>;
+	const picks = (plan.picks && typeof plan.picks === 'object' ? plan.picks : {}) as Record<string, unknown>;
+	const sliders = (plan.sliders ?? {}) as Record<string, unknown>;
+	const totals = (plan.totals ?? {}) as Record<string, unknown>;
+	const jev = (plan.jev ?? {}) as Record<string, unknown>;
+	const assignments = ((plan.assignments as unknown[]) ?? []).map(raw => {
+		const a = (raw ?? {}) as Record<string, unknown>;
+		const providerId = String(a.providerId ?? '');
+		const modelId = String(a.modelId ?? '');
+		const roleSlug = String(a.roleSlug ?? '');
+		return {
+			roleSlug,
+			roleName: String(a.roleName ?? roleSlug),
+			providerId,
+			providerName: String(a.providerName ?? providerId),
+			modelId,
+			modelName: String(a.modelName ?? modelId),
+			rank: num(a.rank),
+			score: num(a.score),
+			effort: isEffort(a.effort) ? a.effort : null,
+			costUsd: num(a.costUsd),
+			status: STATUSES.includes(a.status as JevAssignmentStatus) ? a.status as JevAssignmentStatus : 'ok',
+			pickedByJev: picks[roleSlug] === `${providerId}/${modelId}`,
+		};
+	});
+	return {
+		projectId: String(project.id ?? ''),
+		projectName: String(project.name ?? fallback.name),
+		sliders: {
+			effort: isEffort(sliders.effort) ? sliders.effort : fallback.sliders.effort,
+			maxCostUsd: num(sliders.maxCostUsd, fallback.sliders.maxCostUsd),
+			minPerformance: num(sliders.minPerformance, fallback.sliders.minPerformance),
+		},
+		assignments,
+		totalCostUsd: num(totals.costUsd, assignments.reduce((sum, a) => sum + a.costUsd, 0)),
+		averageScore: num(totals.performance),
+		jevCostUsd: num(jev.costUsd),
+	};
+};
+
+/** プロンプトと 3 つの値を Jev に送り、Division プロジェクトを作る。 */
+export const createProjectWithJev = async (
+	session: DivisionSession,
+	input: { goal: string; sliders: JevSliders; name?: string; endpoint?: string },
+): Promise<JevProjectResult> => {
+	const goal = input.goal.trim();
+	if (!goal) throw new DivisionRoutingError(400, 'プロンプトを入力してください。');
+	const name = input.name?.trim() || defaultJevProjectName(goal);
+	const data = await request<Record<string, unknown>>(session, 'project', {
+		endpoint: input.endpoint,
+		body: { goal, sliders: input.sliders, ...(name ? { name } : {}) },
+		// Jev の判断とプロジェクトの作成を 1 回で行うので、見積もりより長く待つ
+		timeoutMs: 60_000,
+	});
+	return parseJevProjectResult(data, { name, sliders: input.sliders });
 };
