@@ -4,7 +4,8 @@
  * plan イベントのタスクには、並列ノードの分岐なら `parallel` (ノードの id) が付く。同じ id が続くタスクが
  * 1 つの並列グループで、会話ではそれらの task / assistant / tool などをグループのカード 1 枚にまとめ、
  * 分岐ごとのレーンに振り分ける (PC の ```division-parallel ブロックと同じ見た目: components/ParallelLog.tsx)。
- * サーバーはサンドボックスを共有するので分岐を順に実行するが、どの分岐がどこまで進んだかを並べて見られる。
+ * サーバー (Division) は分岐を同時に実行し、分岐のイベントには taskIndex が付く。会話のイベントは時刻順に混ざって届くので、
+ * task の start のあとのイベントは taskIndex で分岐に振り分ける (taskIndex の無い古いセッションは直前の start の分岐)。
  */
 
 import { ChatBlock, ChatItem, CloudPlanTask, CloudSessionEvent, toCloudPlan, toCloudTaskEvent } from './divisionCloud';
@@ -120,8 +121,26 @@ export const groupParallelBranches = (blocks: ChatBlock[], events: CloudSessionE
 				open = null;
 				lane = null;
 			}
-			if (lane) lane.items.push(item);
-			else items.push(item);
+			if (!open || !lane) {
+				items.push(item);
+				continue;
+			}
+			// 分岐は同時に動くので、イベントは taskIndex の分岐へ (無ければ直前に始まった分岐へ)
+			const laneOf = (e: CloudSessionEvent): CloudParallelLane => {
+				const index = e.data.taskIndex;
+				return (typeof index === 'number' && open!.item.lanes.find(l => l.key === index)) || lane!;
+			};
+			if (item.kind === 'event') {
+				laneOf(item.event).items.push(item);
+				continue;
+			}
+			// 続けて実行したツールのまとまりも、分岐ごとに分けて、その分岐の直前のまとまりに足す
+			for (const e of item.events) {
+				const target = laneOf(e);
+				const last = target.items[target.items.length - 1];
+				if (last?.kind === 'tools') last.events.push(e);
+				else target.items.push({ kind: 'tools', key: e.seq, events: [e] });
+			}
 		}
 		// レーンの下見の 1 行: その分岐の返答 (なければ最後のツール名)
 		for (const it of items) {
