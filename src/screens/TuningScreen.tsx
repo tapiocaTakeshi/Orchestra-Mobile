@@ -54,6 +54,7 @@ import {
 	allowsPurchases,
 	fetchDivisionProfile,
 	listCreditTransactions,
+	divisionPlanName,
 } from '../lib/divisionBilling';
 import {
 	DEFAULT_ROUTING_POLICY,
@@ -688,7 +689,7 @@ export const TuningScreen = ({ composerPrompt, onOpenPage }: { composerPrompt?: 
 								<Row style={styles.spread}>
 									<SectionTitle>クレジット残高</SectionTitle>
 									<Badge
-										label={profile.isPaid ? '有料プラン' : '無料プラン'}
+										label={profile.isPaid ? divisionPlanName(profile.plan) : '無料プラン'}
 										color={profile.isPaid ? colors.accentText : colors.fgMuted}
 									/>
 								</Row>

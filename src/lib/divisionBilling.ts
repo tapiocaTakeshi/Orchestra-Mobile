@@ -27,9 +27,19 @@ export const allowsPurchases = (): boolean => Platform.OS === 'web';
  * profiles.plan の値。Web サイト (division-hp) の Stripe Webhook が `orchestra_plus` を書く。
  * `plus` は古い Edge Function が書いていた値で、残っていても有料として扱う。
  */
-export type DivisionPlanId = 'free' | 'orchestra_plus' | 'plus';
+export type DivisionPlanId = 'free' | 'orchestra_plus' | 'orchestra_pro' | 'orchestra_max' | 'plus';
 
-const PAID_PLANS: string[] = ['orchestra_plus', 'plus'];
+const PAID_PLANS: string[] = ['orchestra_plus', 'orchestra_pro', 'orchestra_max', 'plus'];
+
+const PLAN_NAMES: Record<string, string> = {
+	orchestra_plus: 'Orchestra Plus',
+	plus: 'Orchestra Plus',
+	orchestra_pro: 'Orchestra Pro',
+	orchestra_max: 'Orchestra Max',
+};
+
+/** 画面表示用のプラン名。無料・不明な値は Free。 */
+export const divisionPlanName = (plan: string | null): string => (plan && PLAN_NAMES[plan]) || 'Free';
 
 export const isPaidDivisionPlan = (
 	plan: string | null,
