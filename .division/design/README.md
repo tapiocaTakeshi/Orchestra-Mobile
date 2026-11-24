@@ -31,7 +31,7 @@
 - 接続・実行・失敗は色だけでなく文字で示す。再試行可能な失敗はtoastで消さずinline errorを残す。
 - 色・spacing・radiusの値は維持し、対象画面の実装では既存 `src/theme.ts` と `useTheme` を優先する。`src/design/tokens.ts` 等との全体統合・一括改名は対象外。各HTMLページは同じ `:root` とdark modeを持つ。
 - タッチ目標はReact NativeのPressable自体を44×44pt以上、Webを44×44px以上にする。hitSlopだけで実寸を担保せず、隣接する操作枠を重ねない。
-- 上流の `paper.md` に実測所見はないため、実装確認と仕様要件を根拠にした設計であり、利用者テスト結果ではない。
+- 上流の `market-research.md` に実測所見はないため、実装確認と仕様要件を根拠にした設計であり、利用者テスト結果ではない。
 - レビューISS-04/07/08を反映し、再試行はcanSendや現在のdraftに依存させず、失敗した操作の種別・引数を保持する。draft編集・対象操作成功・別操作成功で古いerrorを解除し、pollingや再接続で自動再送しない。
 - タスク12ではレビューISS-09/10/12/14を反映。PC新規送信はnewThread成功後のthreadIdを保持し、sendPrompt失敗後は同じthreadId・本文だけを再送する。再試行・再接続は実寸44×44pt以上とし、sendable=falseや切断時は無効ボタンを置かず、不能理由と次の有効操作を示す。クラウド継続の回復はcomposer直上のinline errorに一本化する。
 - 過去の設計で文書・カンバン・共有・コストに定めたloading/empty/success/errorと回復操作は維持するが、今回の実装対象外。現行FR-008はCloud／PC混在一覧の階層を指す。既存画面構造・認証・API・配色・spacing・radius・7画面IDは、後方互換性と既存操作維持のため変更しない。

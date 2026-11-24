@@ -9,7 +9,7 @@
 | 成果物 | 状態 | 根拠 |
 |---|---|---|
 | `.division/goal.md` | あり（最初の依頼「デザインを改善して」） | `.division/goal.md` 6-8 行 |
-| `.division/paper.md` | 該当なし（検索した範囲: `.division/` 直下の一覧） | list_dir の結果に無し |
+| `.division/market-research.md` | 該当なし（検索した範囲: `.division/` 直下の一覧） | list_dir の結果に無し |
 | `.division/specification.md` | 該当なし（同上） | list_dir の結果に無し |
 | `.division/design/` | あり（`check-mockup.cjs`、`cloud-detail.html`、`home.html`、`index.html`、`login.html`、`navigation.html`、`orchestra-mobile-mockup.html`、`projects.html`、`remote-chat.html`、`screens.html`、`README.md`） | list_dir の結果 |
 | `.division/DESIGN.html` | あり（`.division/` 直下） | list_dir の結果 |

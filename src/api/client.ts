@@ -31,6 +31,7 @@ import {
 	WorkflowAnswer,
 } from './types';
 import { RelayError, relayForToken } from './relay';
+import { normalizeDocumentKind } from '../lib/divisionDocs';
 
 export class OrchestraApiError extends Error {
 	readonly status: number;
@@ -463,7 +464,7 @@ export class OrchestraClient {
 		return this.request(`/api/chat/threads/${encodeURIComponent(threadId)}`, { method: 'POST' });
 	}
 
-	/** editedOutputs: 成果物 (論文・仕様書・デザインなど) を編集した内容で承認する */
+	/** editedOutputs: 成果物 (マーケットリサーチ・仕様書・デザインなど) を編集した内容で承認する */
 	async approveTool(threadId?: string, editedOutputs?: EditedOutput[]): Promise<ChatState> {
 		return this.request('/api/chat/approve', { method: 'POST', body: { threadId, ...(editedOutputs?.length ? { editedOutputs } : {}) } });
 	}
@@ -474,10 +475,12 @@ export class OrchestraClient {
 	}
 
 	// -----------------------------------------------------------------------
-	// 文書 (.division の論文・仕様書・デザイン・成果物)
+	// 文書 (.division のマーケットリサーチ・仕様書・デザイン・成果物)
 
 	async listDocuments(): Promise<{ documents: RemoteDocument[]; revision: number }> {
-		return this.request('/api/documents');
+		const res = await this.request<{ documents: RemoteDocument[]; revision: number }>('/api/documents');
+		// 古い PC は market-research を旧名の "paper" (.division/paper.md) で返す
+		return { ...res, documents: (res.documents ?? []).map(d => ({ ...d, kind: normalizeDocumentKind(d.kind, d.name) })) };
 	}
 
 	async getDocument(path: string): Promise<RemoteDocumentContent> {

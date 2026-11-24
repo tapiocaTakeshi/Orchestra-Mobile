@@ -1,5 +1,5 @@
 /**
- * .division の文書の一覧 (ワークフロー → 論文 → 仕様書 → デザイン → 成果物)。押すと DocumentSheet で開く。
+ * .division の文書の一覧 (ワークフロー → マーケットリサーチ → 仕様書 → デザイン → 成果物)。押すと DocumentSheet で開く。
  * 既定は PC の文書。source を渡すとそこ (クラウドのセッションのサンドボックス) の文書になる。
  * 文書が増えたり変わったりしたら (source.revision) 読み直す。
  */
@@ -42,7 +42,7 @@ export const DocumentList = ({ source: given }: { source?: DocumentSource } = {}
 			<EmptyState
 				icon='file-text'
 				title='まだ文書がありません'
-				detail={`Division Project で${source?.where === 'クラウド' ? 'このセッションが' : ''}作業すると、ワークフロー (.division/workflow.json)・論文 (.division/paper.md)・仕様書 (.division/specification.md)・デザイン (.division/design/) ができ、ここで見て直せます。`}
+				detail={`Division Project で${source?.where === 'クラウド' ? 'このセッションが' : ''}作業すると、ワークフロー (.division/workflow.json)・マーケットリサーチ (.division/market-research.md)・仕様書 (.division/specification.md)・デザイン (.division/design/) ができ、ここで見て直せます。`}
 			/>
 		);
 	}

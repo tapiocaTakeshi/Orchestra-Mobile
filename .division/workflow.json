@@ -17,7 +17,7 @@
       "data": {
         "role": "file-searcher",
         "title": "既存画面とデザイン資産の調査",
-        "instruction": "/home/daytona/workspace を読み取り専用で調査する。.division/goal.md は変更しない。既存の .division/paper.md、.division/specification.md、.division/design/ の有無と内容を確認し、App.tsx、src/screens、src/components、src/design、src/theme.ts、package.json、docs/design-claude-style.md、既存レビューを調べる。現在の画面構成、デザイン方針、再利用可能な部品、視認性・余白・操作性の課題、実行可能な検証方法を、根拠となるファイルとともに調査メモとして返す。Web調査やファイル変更は行わない。"
+        "instruction": "/home/daytona/workspace を読み取り専用で調査する。.division/goal.md は変更しない。既存の .division/market-research.md、.division/specification.md、.division/design/ の有無と内容を確認し、App.tsx、src/screens、src/components、src/design、src/theme.ts、package.json、docs/design-claude-style.md、既存レビューを調べる。現在の画面構成、デザイン方針、再利用可能な部品、視認性・余白・操作性の課題、実行可能な検証方法を、根拠となるファイルとともに調査メモとして返す。Web調査やファイル変更は行わない。"
       },
       "position": {
         "x": 270,
@@ -43,7 +43,7 @@
       "data": {
         "role": "researcher",
         "title": "改善方針と優先順位を整理",
-        "instruction": "両調査メモを統合し、.division/goal.md の『デザインを改善して』を判断基準として .division/paper.md を更新する。更新前に既存内容を確認し、存在する場合は保持して必要箇所だけ差分更新する。既存のブランドと主要操作を尊重し、情報階層、文字組み、余白、配色、共通部品、各操作状態の改善を優先順位付きで整理する。確認できた事実と仮定を区別し、機能追加や不要な依存導入は対象外とする。"
+        "instruction": "両調査メモを統合し、.division/goal.md の『デザインを改善して』を判断基準として .division/market-research.md を更新する。更新前に既存内容を確認し、存在する場合は保持して必要箇所だけ差分更新する。既存のブランドと主要操作を尊重し、情報階層、文字組み、余白、配色、共通部品、各操作状態の改善を優先順位付きで整理する。確認できた事実と仮定を区別し、機能追加や不要な依存導入は対象外とする。"
       },
       "position": {
         "x": 540,
@@ -56,7 +56,7 @@
       "data": {
         "role": "writer",
         "title": "デザイン改善の仕様を定義",
-        "instruction": "更新後の .division/paper.md と既存実装を基に、.division/specification.md を確認して差分更新する。対象画面と共通部品、維持する機能・遷移、具体的な見た目の変更、画面幅やセーフエリアへの対応、アクセシビリティ、読み込み・空・エラー・無効状態を定義する。受け入れ条件は対象画面ごとに検証可能な形で記載し、変更対象外も明示する。.division/goal.md は変更しない。"
+        "instruction": "更新後の .division/market-research.md と既存実装を基に、.division/specification.md を確認して差分更新する。対象画面と共通部品、維持する機能・遷移、具体的な見た目の変更、画面幅やセーフエリアへの対応、アクセシビリティ、読み込み・空・エラー・無効状態を定義する。受け入れ条件は対象画面ごとに検証可能な形で記載し、変更対象外も明示する。.division/goal.md は変更しない。"
       },
       "position": {
         "x": 810,
@@ -80,7 +80,7 @@
       "data": {
         "role": "designer",
         "title": "統一感のある画面デザインを作成",
-        "instruction": "更新後の論文・仕様書と既存の .division/design/、docs/design-claude-style.md、実際の画面構造を確認する。既存デザイン成果物を保持しながら .division/design/ 内を差分更新し、対象画面の具体的なレイアウトと共通部品の見た目を示す。色、文字サイズ、行間、余白、角丸、アイコン、操作状態を実装できる値で指定する。ブランドと使い慣れた操作を維持しつつ、視線誘導と読みやすさを改善する。画像生成は必要な場合のみ行う。"
+        "instruction": "更新後のマーケットリサーチ・仕様書と既存の .division/design/、docs/design-claude-style.md、実際の画面構造を確認する。既存デザイン成果物を保持しながら .division/design/ 内を差分更新し、対象画面の具体的なレイアウトと共通部品の見た目を示す。色、文字サイズ、行間、余白、角丸、アイコン、操作状態を実装できる値で指定する。ブランドと使い慣れた操作を維持しつつ、視線誘導と読みやすさを改善する。画像生成は必要な場合のみ行う。"
       },
       "position": {
         "x": 1350,
@@ -117,7 +117,7 @@
       "data": {
         "role": "reviewer",
         "title": "見た目と既存機能の品質確認",
-        "instruction": ".division/goal.md、更新後の論文・仕様書・デザインと実装を照合する。対象画面の情報階層、余白、文字の読みやすさ、配色、操作領域、各状態表示、小さい画面での崩れ、既存機能と画面遷移の回帰を確認する。実行可能な検証は実施し、実施できない項目は未検証として明記する。仕様の受け入れ条件ごとに合否と根拠を示し、修正が必要な場合は担当ロールと具体的な是正内容を返す。最終結果に変更概要と残課題をまとめる。"
+        "instruction": ".division/goal.md、更新後のマーケットリサーチ・仕様書・デザインと実装を照合する。対象画面の情報階層、余白、文字の読みやすさ、配色、操作領域、各状態表示、小さい画面での崩れ、既存機能と画面遷移の回帰を確認する。実行可能な検証は実施し、実施できない項目は未検証として明記する。仕様の受け入れ条件ごとに合否と根拠を示し、修正が必要な場合は担当ロールと具体的な是正内容を返す。最終結果に変更概要と残課題をまとめる。"
       },
       "position": {
         "x": 2430,

@@ -1,5 +1,5 @@
 /**
- * 文書のページ: PC の .division にある論文・仕様書・デザイン・各ロールの成果物を見て、直して保存する。
+ * 文書のページ: PC の .division にあるマーケットリサーチ・仕様書・デザイン・各ロールの成果物を見て、直して保存する。
  */
 
 import React from 'react';
@@ -10,7 +10,7 @@ import { colors, fontSize, spacing } from '../theme';
 
 export const DocumentsScreen = () => (
 	<Screen>
-		<ScreenHeader title='論文・仕様書・デザイン' />
+		<ScreenHeader title='マーケットリサーチ・仕様書・デザイン' />
 		<ScrollView contentContainerStyle={styles.content}>
 			<Text style={styles.intro}>PC のワークスペースの .division にある文書です。押すと開き、「編集」で直して保存すると PC のファイルに書き込みます。PC 側で更新されるとここにも反映されます。</Text>
 			<DocumentList />

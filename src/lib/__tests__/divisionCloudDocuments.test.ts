@@ -1,5 +1,5 @@
 /**
- * A cloud session's .division documents (workflow, paper, specification, design): the client for
+ * A cloud session's .division documents (workflow, market research, specification, design): the client for
  * GET/POST /api/cloud-sessions/:id/documents… and the source the document screens use.
  * Supabase (JWT) is faked and fetch is replaced per test, like the other divisionCloud tests.
  */
@@ -33,7 +33,9 @@ describe('cloud documents', () => {
 		const calls = respond(200, {
 			documents: [
 				{ path: '.division/workflow.json', name: 'workflow.json', kind: 'workflow', size: 10, mtime: 5 },
-				{ path: '.division/paper.md', name: 'paper.md', kind: 'paper', size: 3, mtime: 6 },
+				{ path: '.division/market-research.md', name: 'market-research.md', kind: 'market-research', size: 3, mtime: 6 },
+				// 旧名の "paper" はマーケットリサーチとして扱う
+				{ path: 'Legacy/.division/paper.md', name: 'paper.md', kind: 'paper', size: 2, mtime: 4 },
 				{ path: '.division/odd.md', kind: 'mystery' },
 				{ nope: true },
 			],
@@ -44,10 +46,11 @@ describe('cloud documents', () => {
 		expect(res.revision).toBe(42);
 		expect(res.documents.map(d => [d.path, d.kind, d.name])).toEqual([
 			['.division/workflow.json', 'workflow', 'workflow.json'],
-			['.division/paper.md', 'paper', 'paper.md'],
+			['.division/market-research.md', 'market-research', 'market-research.md'],
+			['Legacy/.division/paper.md', 'market-research', 'paper.md'],
 			['.division/odd.md', 'output', 'odd.md'],
 		]);
-		expect(groupDocuments(res.documents).map(g => g.kind)).toEqual(['workflow', 'paper', 'output']);
+		expect(groupDocuments(res.documents).map(g => g.kind)).toEqual(['workflow', 'market-research', 'output']);
 	});
 
 	it('reads and saves one document with the mtime it was opened at', async () => {
@@ -63,8 +66,8 @@ describe('cloud documents', () => {
 		expect(saved.mtime).toBe(9);
 
 		calls = respond(200, {});
-		await saveCloudDocument(auth, 's1', '.division/paper.md', 'x');
-		expect(JSON.parse(String(calls[0].init.body))).toEqual({ path: '.division/paper.md', content: 'x' });
+		await saveCloudDocument(auth, 's1', '.division/market-research.md', 'x');
+		expect(JSON.parse(String(calls[0].init.body))).toEqual({ path: '.division/market-research.md', content: 'x' });
 	});
 
 	it('tells a conflict (the agent wrote it since) from other errors, with the server message for document errors', async () => {
@@ -73,7 +76,7 @@ describe('cloud documents', () => {
 		expect(source.revision).toBe(3);
 
 		respond(409, { error: '書き換えました', code: 'document_changed' });
-		const conflict = await source.save('.division/paper.md', 'x', 1).catch(e => e);
+		const conflict = await source.save('.division/market-research.md', 'x', 1).catch(e => e);
 		expect(source.isConflict(conflict)).toBe(true);
 
 		respond(400, { error: '「終了」ノードを追加してください。', code: 'invalid_workflow' });
@@ -82,7 +85,7 @@ describe('cloud documents', () => {
 		expect(source.errorText(invalid)).toBe('「終了」ノードを追加してください。');
 
 		respond(409, { error: 'Session is running' });
-		expect(source.isConflict(await source.save('.division/paper.md', 'x').catch(e => e))).toBe(false);
+		expect(source.isConflict(await source.save('.division/market-research.md', 'x').catch(e => e))).toBe(false);
 	});
 
 	it('names the workflow document', () => {
