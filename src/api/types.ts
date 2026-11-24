@@ -154,7 +154,7 @@ export type PendingReview = {
 	content: string;
 	completed: number;
 	total: number;
-	/** レビューする成果物 (論文・仕様書・デザインなど)。全文は getReviewOutputs、編集して承認は approveTool の editedOutputs。古い IDE は返さない */
+	/** レビューする成果物 (マーケットリサーチ・仕様書・デザインなど)。全文は getReviewOutputs、編集して承認は approveTool の editedOutputs。古い IDE は返さない */
 	outputs?: { role: string; mdFileName: string }[];
 	/** content が長くて途中で切ってある */
 	contentTruncated?: boolean;
@@ -167,9 +167,10 @@ export type EditedOutput = { mdFileName: string; mdContent: string };
 
 /**
  * .division の下の文書 (PC: GET /api/documents、クラウド: GET /api/cloud-sessions/:id/documents)。path はワークスペースからの相対パス。
- * workflow (.division/workflow.json) はクラウドのセッションだけが一覧に載せる
+ * workflow (.division/workflow.json) はクラウドのセッションだけが一覧に載せる。
+ * market-research (.division/market-research.md) は旧名 paper (.division/paper.md) で返ってきても normalizeDocumentKind で揃える
  */
-export type DocumentKind = 'workflow' | 'paper' | 'specification' | 'design' | 'output';
+export type DocumentKind = 'workflow' | 'market-research' | 'specification' | 'design' | 'output';
 export type RemoteDocument = { path: string; name: string; kind: DocumentKind; size: number; mtime: number };
 export type RemoteDocumentContent = { path: string; content: string; size: number; mtime: number };
 

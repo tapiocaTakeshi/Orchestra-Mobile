@@ -1,6 +1,7 @@
 /**
- * PC の .division の文書 (論文・仕様書・デザイン・各ロールの成果物) をスマホで見る・直すための小さな道具。
- *   - 論文 … .division/paper.md (searcher / researcher が書く)
+ * PC の .division の文書 (マーケットリサーチ・仕様書・デザイン・各ロールの成果物) をスマホで見る・直すための小さな道具。
+ *   - マーケットリサーチ … .division/market-research.md (searcher / researcher が書く。市場規模・競合・ターゲットユーザー・価格・トレンドを出典つきで)
+ *     旧名の .division/paper.md (種類 "paper") もマーケットリサーチとして扱う
  *   - 仕様書 … .division/specification.md (writer が書く)
  *   - デザイン … .division/design/<画面>.html (designer が書く。index.html が先頭)
  *   - ワークフロー … .division/workflow.json (leader の計画の図。クラウドのセッションの文書に載る)
@@ -12,7 +13,7 @@ import type { IconName } from '../components/ui';
 
 export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
 	workflow: 'ワークフロー',
-	paper: '論文',
+	'market-research': 'マーケットリサーチ',
 	specification: '仕様書',
 	design: 'デザイン',
 	output: '成果物',
@@ -20,7 +21,7 @@ export const DOCUMENT_KIND_LABEL: Record<DocumentKind, string> = {
 
 export const DOCUMENT_KIND_ICON: Record<DocumentKind, IconName> = {
 	workflow: 'git-branch',
-	paper: 'book-open',
+	'market-research': 'book-open',
 	specification: 'file-text',
 	design: 'layout',
 	output: 'file',
@@ -28,19 +29,35 @@ export const DOCUMENT_KIND_ICON: Record<DocumentKind, IconName> = {
 
 export const isHtmlPath = (path: string): boolean => /\.html?$/i.test(path);
 
-/** 成果物のファイル名 (例: paper.md, design/index.html) から文書の種類 */
+/** マーケットリサーチのファイル名。旧名の paper.md も受け付ける */
+export const MARKET_RESEARCH_FILES = ['market-research.md', 'paper.md'];
+
+/** 成果物のファイル名 (例: market-research.md, design/index.html) から文書の種類 */
 export const documentKindOf = (name: string): DocumentKind => {
 	const base = name.replace(/^\.division\//, '');
 	if (base === 'workflow.json') return 'workflow';
-	if (base === 'paper.md') return 'paper';
+	if (MARKET_RESEARCH_FILES.includes(base)) return 'market-research';
 	if (base === 'specification.md') return 'specification';
 	if (base.startsWith('design/') || /^DESIGN\.html?$/i.test(base)) return 'design';
 	return 'output';
 };
 
-/** 一覧の見出し (論文・仕様書はその名前、デザインはページ名) */
+const DOCUMENT_KINDS: DocumentKind[] = ['workflow', 'market-research', 'specification', 'design', 'output'];
+
+/**
+ * PC / クラウドが返す文書の種類を揃える。旧名の "paper" はマーケットリサーチ。知らない種類は名前から決め、
+ * それでも分からなければ成果物 (output)。古いサーバーが market-research.md を output と返しても拾う
+ */
+export const normalizeDocumentKind = (kind: unknown, name?: string): DocumentKind => {
+	if (kind === 'paper') return 'market-research';
+	if (DOCUMENT_KINDS.includes(kind as DocumentKind) && kind !== 'output') return kind as DocumentKind;
+	const byName = name ? documentKindOf(name) : 'output';
+	return byName === 'market-research' ? byName : DOCUMENT_KINDS.includes(kind as DocumentKind) ? (kind as DocumentKind) : 'output';
+};
+
+/** 一覧の見出し (マーケットリサーチ・仕様書はその名前、デザインはページ名) */
 export const documentTitle = (doc: Pick<RemoteDocument, 'kind' | 'name'> & { path?: string }): string => {
-	const base = doc.kind === 'workflow' || doc.kind === 'paper' || doc.kind === 'specification'
+	const base = doc.kind === 'workflow' || doc.kind === 'market-research' || doc.kind === 'specification'
 		? DOCUMENT_KIND_LABEL[doc.kind]
 		: doc.name.replace(/^design\//, '');
 	// 複数リポジトリのクラウドセッションは、各リポジトリの .division (<repo>/.division/…) も一覧に載る
@@ -54,9 +71,9 @@ export const documentRepoOf = (path: string | undefined): string => {
 	return m ? m[1] : '';
 };
 
-/** 種類ごとにまとめる (ワークフロー → 論文 → 仕様書 → デザイン → 成果物) */
+/** 種類ごとにまとめる (ワークフロー → マーケットリサーチ → 仕様書 → デザイン → 成果物) */
 export const groupDocuments = (docs: RemoteDocument[]): { kind: DocumentKind; docs: RemoteDocument[] }[] =>
-	(['workflow', 'paper', 'specification', 'design', 'output'] as DocumentKind[])
+	DOCUMENT_KINDS
 		.map(kind => ({ kind, docs: docs.filter(d => d.kind === kind) }))
 		.filter(g => g.docs.length > 0);
 

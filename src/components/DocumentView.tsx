@@ -1,6 +1,6 @@
 /**
- * 論文・仕様書・デザイン・成果物を「プレビュー / 編集」で見せる。
- *   - Markdown (論文・仕様書・成果物) … Markdown で描く
+ * マーケットリサーチ・仕様書・デザイン・成果物を「プレビュー / 編集」で見せる。
+ *   - Markdown (マーケットリサーチ・仕様書・成果物) … Markdown で描く
  *   - デザインの HTML ページ … そのまま描く (HtmlPreview)
  *   - Designer の出力 (```html <ページ名> のブロックが並んだもの) … ページに分けて、ページごとに描く
  * 編集は全文をそのまま直す。デザインの HTML ページは「見た目」でタップして直すこともできる (DesignVisualEditor)。
@@ -22,7 +22,7 @@ import { documentFormat, inlineStylesheets, withViewport } from '../lib/division
 export type DocumentMode = 'preview' | 'visual' | 'edit';
 
 export const DocumentView = ({ name, value, onChangeText, editable = true, mode: modeProp, onModeChange, css, height = 420, aiEdit, aiEditErrorText }: {
-	/** ファイル名 (例: paper.md, design/index.html)。描き方を決める */
+	/** ファイル名 (例: market-research.md, design/index.html)。描き方を決める */
 	name: string;
 	value: string;
 	onChangeText?: (text: string) => void;

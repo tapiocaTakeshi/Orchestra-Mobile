@@ -122,7 +122,7 @@
 
 ### 成果物の継続性
 
-- `.division/specification.md` と `.division/paper.md` は既存の内容を引き継いでいる。この REVIEW.md も過去のレビューを削除せず残した。
+- `.division/specification.md` と `.division/market-research.md` は既存の内容を引き継いでいる。この REVIEW.md も過去のレビューを削除せず残した。
 
 ### What was done well
 
@@ -264,7 +264,7 @@
 
 ### 成果物の継続性
 
-- `.division/specification.md` と `.division/paper.md` は既存の内容を引き継いでいる。`.division/REVIEW.md` も、前回の内容を削除せず残した。
+- `.division/specification.md` と `.division/market-research.md` は既存の内容を引き継いでいる。`.division/REVIEW.md` も、前回の内容を削除せず残した。
 
 ### What was done well
 
@@ -306,7 +306,7 @@
 |---|---|---|
 | `.division/goal.md` | 目的は「デザインを改善して」の 1 行のみ（範囲の指定なし） | 仕様・実装とも目的から逸脱していない（下記「目的との整合」） |
 | `.division/specification.md` | FR-001〜021、NFR-001〜005、受け入れ条件を通読 | 照合の基準にした |
-| `.division/paper.md` | 優先順位 P0〜P3、未検証事項を確認 | 仕様・実装が P0（状態・操作領域）→P1（階層）の順で対応していることを確認 |
+| `.division/market-research.md` | 優先順位 P0〜P3、未検証事項を確認 | 仕様・実装が P0（状態・操作領域）→P1（階層）の順で対応していることを確認 |
 | `git diff`（App.tsx / HomeScreen.tsx / CloudAgentsScreen.tsx） | 変更はこの 3 ファイルのみ。`git diff --stat` ではテストファイルの変更なし、新規依存なし | NFR-005 の範囲内 |
 | `npm run typecheck` | 自分で再実行 | 終了コード 0 |
 | `npx jest --runInBand` | 自分で再実行 | 49 suites 合格、486 tests 合格、1 skipped（コーダーの報告と一致） |
@@ -402,7 +402,7 @@
 
 ### 成果物の継続性
 
-- `.division/specification.md` と `.division/paper.md` は末尾に変更履歴があり、既存内容を引き継いでいる。
+- `.division/specification.md` と `.division/market-research.md` は末尾に変更履歴があり、既存内容を引き継いでいる。
 - 既存の REVIEW.md（デザイン成果物のレビュー）は、削除せず末尾に残した。
 
 ### What was done well

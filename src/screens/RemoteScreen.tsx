@@ -379,7 +379,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 						</View>
 					) : null}
 					{headerTitle !== undefined ? <IconButton icon='clock' accessibilityLabel='最近のチャット' onPress={() => setSheet('menu')} /> : null}
-					<IconButton icon='file-text' accessibilityLabel='論文・仕様書・デザイン' disabled={lost} onPress={() => setSheet('documents')} />
+					<IconButton icon='file-text' accessibilityLabel='マーケットリサーチ・仕様書・デザイン' disabled={lost} onPress={() => setSheet('documents')} />
 					<IconButton icon='edit' accessibilityLabel='新しいチャット' disabled={lost} onPress={() => void act(() => client.newThread(), '新しいチャットを開きました')} />
 				</View>
 
@@ -602,7 +602,7 @@ export const RemoteScreen = ({ onOpenPage, headerTitle }: {
 				) : null}
 
 				{sheet === 'documents' ? (
-					<Sheet title='論文・仕様書・デザイン' eyebrow={ide?.workspaceName ? `${ide.workspaceName} の .division` : '.division'} onClose={() => setSheet(null)}>
+					<Sheet title='マーケットリサーチ・仕様書・デザイン' eyebrow={ide?.workspaceName ? `${ide.workspaceName} の .division` : '.division'} onClose={() => setSheet(null)}>
 						<ScrollView contentContainerStyle={styles.sheetContent}>
 							<DocumentList />
 						</ScrollView>

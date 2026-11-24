@@ -1628,7 +1628,7 @@ const ApprovalCard = ({ auth, sessionId, lastSeq, onResolved }: {
 						</Muted>
 					) : (
 						<>
-							{/* 論文・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直し、選んだ部分はロールの AI にも頼める */}
+							{/* マーケットリサーチ・仕様書は Markdown で、デザインは画面のまま見られる。「編集」で全文を直し、選んだ部分はロールの AI にも頼める */}
 							<DocumentView
 								name={approval.file}
 								value={content}
@@ -1911,7 +1911,7 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, onOpenD
 	subtitle: string;
 	showChanges: boolean;
 	onToggleChanges: () => void;
-	/** サンドボックスの .division の文書 (ワークフロー・論文・仕様書・デザイン) を開く。サンドボックスが無ければ undefined */
+	/** サンドボックスの .division の文書 (ワークフロー・マーケットリサーチ・仕様書・デザイン) を開く。サンドボックスが無ければ undefined */
 	onOpenDocuments?: () => void;
 	archiving: boolean;
 	onArchive: () => void;
@@ -1937,7 +1937,7 @@ const DetailHeader = ({ session, subtitle, showChanges, onToggleChanges, onOpenD
 					{showChanges ? 'ログ' : session.changedFiles > 0 ? `${session.changedFiles}` : '差分'}
 				</Text>
 			</Pressable>
-			{onOpenDocuments ? <IconButton icon='book-open' accessibilityLabel='文書 (ワークフロー・論文・仕様書・デザイン)' onPress={onOpenDocuments} /> : null}
+			{onOpenDocuments ? <IconButton icon='book-open' accessibilityLabel='文書 (ワークフロー・マーケットリサーチ・仕様書・デザイン)' onPress={onOpenDocuments} /> : null}
 			{archiving
 				? <View style={styles.headerSpinner}><ActivityIndicator size='small' color={colors.fgMuted} /></View>
 				: <IconButton icon='archive' accessibilityLabel='アーカイブ' onPress={onArchive} />}

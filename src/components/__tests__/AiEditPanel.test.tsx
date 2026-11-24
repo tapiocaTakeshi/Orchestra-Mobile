@@ -22,7 +22,7 @@ import { AiEditPanel } from '../AiEditPanel';
 import { DocumentView } from '../DocumentView';
 import { applyAiEditProposal, toDocumentAiEditProposal } from '../../lib/divisionCloud';
 
-const DOC = '# 論文\n\n古い段落。\n\n## 結論\n';
+const DOC = '# マーケットリサーチ\n\n古い段落。\n\n## 結論\n';
 const START = DOC.indexOf('古い段落。');
 const press = (root: ReactTestInstance, title: string) => root.findAll(n => n.props.title === title && typeof n.props.onPress === 'function')[0].props.onPress();
 const input = (root: ReactTestInstance, label: string) => root.findAll(n => n.props.accessibilityLabel === label && typeof n.props.onChangeText === 'function')[0];
@@ -30,7 +30,7 @@ const input = (root: ReactTestInstance, label: string) => root.findAll(n => n.pr
 describe('applyAiEditProposal', () => {
 	it('puts the replacement in, unless that part changed since', () => {
 		const p = { start: START, end: START + 5, original: '古い段落。', replacement: '新しい段落。' };
-		expect(applyAiEditProposal(DOC, p)).toBe('# 論文\n\n新しい段落。\n\n## 結論\n');
+		expect(applyAiEditProposal(DOC, p)).toBe('# マーケットリサーチ\n\n新しい段落。\n\n## 結論\n');
 		expect(applyAiEditProposal(DOC.replace('古い', '別の'), p)).toBeNull();
 		expect(toDocumentAiEditProposal({ start: 1, end: 0, original: '', replacement: '' })).toBeNull();
 		expect(toDocumentAiEditProposal({ start: 0, end: 1, original: 'a', replacement: 'b', roleName: '調査' })).toMatchObject({ roleName: '調査', role: '' });
@@ -38,7 +38,7 @@ describe('applyAiEditProposal', () => {
 });
 
 describe('AiEditPanel', () => {
-	const proposal = { path: '.division/paper.md', start: START, end: START + 5, original: '古い段落。', replacement: '新しい段落。', role: 'researcher', roleName: '調査', model: 'X · m' };
+	const proposal = { path: '.division/market-research.md', start: START, end: START + 5, original: '古い段落。', replacement: '新しい段落。', role: 'researcher', roleName: '調査', model: 'X · m' };
 
 	it('asks the role\'s AI about the selection and applies only when approved', async () => {
 		const aiEdit = jest.fn(async () => proposal);
@@ -53,7 +53,7 @@ describe('AiEditPanel', () => {
 		expect(texts).toEqual(expect.arrayContaining(['古い段落。', '新しい段落。']));
 
 		await act(async () => { press(r.root, '適用'); });
-		expect(onApply).toHaveBeenCalledWith('# 論文\n\n新しい段落。\n\n## 結論\n');
+		expect(onApply).toHaveBeenCalledWith('# マーケットリサーチ\n\n新しい段落。\n\n## 結論\n');
 	});
 
 	it('discards the proposal without touching the document, and shows the error when the AI fails', async () => {
@@ -82,11 +82,11 @@ describe('DocumentView with aiEdit', () => {
 		const aiEdit = jest.fn(async () => ({ path: 'p', start: START, end: START + 5, original: '古い段落。', replacement: '新しい。', role: '', roleName: 'エージェント', model: '' }));
 		const onChange = jest.fn();
 		let r!: ReactTestRenderer;
-		await act(async () => { r = create(<DocumentView name='.division/paper.md' value={DOC} onChangeText={onChange} mode='edit' aiEdit={aiEdit} />); });
-		await act(async () => { input(r.root, '.division/paper.md を編集').props.onSelectionChange({ nativeEvent: { selection: { start: START, end: START + 5 } } }); });
+		await act(async () => { r = create(<DocumentView name='.division/market-research.md' value={DOC} onChangeText={onChange} mode='edit' aiEdit={aiEdit} />); });
+		await act(async () => { input(r.root, '.division/market-research.md を編集').props.onSelectionChange({ nativeEvent: { selection: { start: START, end: START + 5 } } }); });
 		await act(async () => { input(r.root, 'AI への指示').props.onChangeText('短く'); });
 		await act(async () => { press(r.root, 'AI に頼む'); });
 		await act(async () => { press(r.root, '適用'); });
-		expect(onChange).toHaveBeenCalledWith('# 論文\n\n新しい。\n\n## 結論\n');
+		expect(onChange).toHaveBeenCalledWith('# マーケットリサーチ\n\n新しい。\n\n## 結論\n');
 	});
 });

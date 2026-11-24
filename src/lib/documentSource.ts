@@ -1,7 +1,7 @@
 /**
  * Where the .division documents come from: the PC's Orchestra (remote control, GET /api/documents) or a cloud
  * session's sandbox (Division API, GET /api/cloud-sessions/:id/documents). Both answer in the same shape, so
- * DocumentList / DocumentSheet show and edit either with the same screens — the cloud agent's paper,
+ * DocumentList / DocumentSheet show and edit either with the same screens — the cloud agent's market research,
  * specification, design and workflow are opened and edited just like the ones the PC's agent writes.
  */
 
